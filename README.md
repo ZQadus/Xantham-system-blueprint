@@ -46,7 +46,7 @@ Every install command in the blueprint has both Mac and Windows versions side by
 
 ## Versioning
 
-The repo name doesn't include a version. The file inside does. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-cortana.sh` from your repo and the customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
+The repo name doesn't include a version. The file inside does. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-xantham.sh` from your repo and the customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
 
 ## Sharing
 
@@ -54,9 +54,9 @@ This repo is public. Fork it, share the URL, hand the blueprint file to anyone w
 
 The personal-state version (with bot tokens, project names, agent personalities, etc.) lives in your private repo. This public file is the universal template.
 
-## Cortana
+## A note on the maintainer
 
-If you see references to "Cortana" inside the blueprint or in commits — that's the maintainer's personal AI agent built from this same blueprint. Yours will have whatever name you pick during the install wizard. The blueprint is system-agnostic.
+If you see references to "your orchestrator" inside the blueprint or in commits — that's the maintainer's personal AI agent built from this same blueprint. Yours will have whatever name you pick during the install wizard. The blueprint is system-agnostic.
 
 ## Contributing
 

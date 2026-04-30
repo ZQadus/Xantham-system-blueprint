@@ -2,7 +2,7 @@
 
 Self-installing orchestrator + specialist-agent system for one person managing dozens of projects from a phone. Runs on top of Claude Code (CLI) with a Telegram interface, a memory system, and four optional power-user extensions.
 
-**One file. Hand to a fresh Claude Code session. It walks you through picking a mode, installing your pieces, and ends with a working Cortana.**
+**One file. Hand to a fresh Claude Code session. It walks you through picking a mode, installing your pieces, and ends with a working orchestrator.**
 
 **v30 release note (vs v29):** Extension E2 (Graphiti temporal knowledge graph) ruled out and removed. Production audit at single-user scale found zero queries that changed an answer in 3 weeks of operation, while ingest cost ran ~£5/run. Recommended memory layer is now flat-markdown + E1 sqlite-vec + Anthropic's native client-side memory tool (`memory_20250818`) operating on the `memory/` directory directly. The four extensions are E1 (semantic memory), E3 (Agent Teams), E4 (Observability), E5 (Hardened safety). Numbering preserved for compatibility with v29-installed deployments — there is no E2 going forward.
 
@@ -19,7 +19,7 @@ You want a personal AI orchestrator that:
 
 **Scheduled-work caveat (learned 22 Apr 2026):** Anthropic's Claude Code Routines run in a cloud sandbox that blocks outbound HTTP to non-allowlisted hosts. That includes `api.telegram.org` by default — the routine completes "successfully" but the curl that ships the message to you never leaves. Diagnosis: click into any routine run at claude.ai/code/scheduled and look for "Host not in allowlist" in the output log. Workarounds: (1) webhook relay you host that Anthropic CAN reach, (2) local macOS launchd + `scripts/canaries-daemon.sh` pattern — runs whenever your Mac is awake, zero cloud dependency.
 
-**TCC caveat (learned 2026-04-25):** macOS Transparency/Consent/Control blocks launchd-spawned processes (like local cron replacements) from executing OR reading/writing files under `~/Documents/` without Full Disk Access granted to the spawning binary. The "escape-shim to ~/bin/" pattern stops working once the shim tries to cd back into Documents. Scoped-plist FDA grants are not possible via the macOS GUI (only .app bundles and executable binaries are selectable). Practical paths: (A) grant FDA to `/bin/bash` — works but broadens surface, (B) accept session-only observability via CronCreate inside Cortana sessions — no background fires between sessions, (C) full relocation of scripts + every data path they read/write into a non-Documents location like `~/.cortana/` — 3-4h refactor, strictly safe. Zaki chose B on 2026-04-25 — background canaries and proactive-trigger daemon disabled.
+**TCC caveat (learned 2026-04-25):** macOS Transparency/Consent/Control blocks launchd-spawned processes (like local cron replacements) from executing OR reading/writing files under `~/Documents/` without Full Disk Access granted to the spawning binary. The "escape-shim to ~/bin/" pattern stops working once the shim tries to cd back into Documents. Scoped-plist FDA grants are not possible via the macOS GUI (only .app bundles and executable binaries are selectable). Practical paths: (A) grant FDA to `/bin/bash` — works but broadens surface, (B) accept session-only observability via CronCreate inside Xantham sessions — no background fires between sessions, (C) full relocation of scripts + every data path they read/write into a non-Documents location like `~/.xantham/` — 3-4h refactor, strictly safe. Zaki chose B on 2026-04-25 — background canaries and proactive-trigger daemon disabled.
 
 If that sounds right — keep reading. The next step is picking a mode.
 
@@ -49,16 +49,16 @@ Before install, pick one. You can upgrade later, but the fresh-install path diff
 **Advanced mode includes everything in Simple, plus:**
 - **E1 Semantic memory** (sqlite-vec + Ollama Nomic-embed) — semantic search across your memory files. "Find the rule about timezones" works even when you don't remember the file name.
 - **E3 Agent Teams** — multiple agents share a live whiteboard so they don't duplicate work or step on each other.
-- **E4 Observability** — every tool call gets logged to a JSONL audit, surfaced via `cortana-live.sh`. Catches silent failures and "what did the background agent actually do?"
+- **E4 Observability** — every tool call gets logged to a JSONL audit, surfaced via `xantham-live.sh`. Catches silent failures and "what did the background agent actually do?"
 - **E5 Hardened safety** — strict replacement for the basic gate. Force-push to protected branches becomes physically impossible (no approval can unlock it). Fixes false-positives on `format` / `arm` words that contain `rm`.
 
 **Recommendation:** install Simple first. Add extensions one by one as you feel the pain points they solve. Don't run the full Advanced stack until you've used Simple for a week and know what's missing.
 
-Every extension is independently installable and removable. `.cortana-blueprint-version` tracks which are on.
+Every extension is independently installable and removable. `.xantham-blueprint-version` tracks which are on.
 
 ### Upgrades library
 
-After installing Cortana, the living docs for "what's been built" + "where we're going" live at:
+After installing your orchestrator, the living docs for "what's been built" + "where we're going" live at:
 
 ```
 docs/upgrades/
@@ -67,7 +67,7 @@ docs/upgrades/
 └── memo_*.md      — specific architectural memos
 ```
 
-Read CATALOGUE before proposing new upgrades (you might find it's already been considered or explicitly rejected). Read ROADMAP before starting Phase N+1 work (aligns with the north-star). Cortana's `cortana-maintenance` skill reads both on every Monday / greeting digest.
+Read CATALOGUE before proposing new upgrades (you might find it's already been considered or explicitly rejected). Read ROADMAP before starting Phase N+1 work (aligns with the north-star). Xantham's `xantham-maintenance` skill reads both on every Monday / greeting digest.
 
 ---
 
@@ -75,7 +75,7 @@ Read CATALOGUE before proposing new upgrades (you might find it's already been c
 
 Both modes get:
 
-### Orchestrator (Cortana itself)
+### Orchestrator (the AI you just named)
 Claude Code CLI running Opus 4.7. Receives Telegram messages, routes to specialist sub-agents, replies. Lives in `CLAUDE.md` in your project root.
 
 ### Specialist crew (9 agents)
@@ -88,7 +88,7 @@ Default names — rename to taste:
 - **Warren** — trading (strategies, backtests, portfolio, markets)
 - **Elena** — business (revenue, pricing, partnerships, contracts)
 - **Chase** — human dynamics (persuasion, negotiation, networking)
-- **Cortana** — the orchestrator (you)
+- **Xantham** — the orchestrator (you)
 
 Each lives at `.claude/agents/<name>.md`. Each has its own persistent memory at `agent-memory/<name>/`.
 
@@ -129,7 +129,7 @@ All markdown. All in the repo. All auto-loaded by Claude Code at session start.
 - `sudo` (any command)
 - Edits to `.env`, SSH/GPG keys
 
-Approval flow: blocked command → Claude asks you on Telegram → you say yes → Claude writes the exact command to `~/Documents/cortana/data/approved.txt` → retries → one-time use.
+Approval flow: blocked command → Claude asks you on Telegram → you say yes → Claude writes the exact command to `~/Documents/xantham/data/approved.txt` → retries → one-time use.
 
 ---
 
@@ -145,7 +145,7 @@ Each extension is self-contained. Install only the ones you want. Uninstall by r
 Fast local semantic search over every markdown memory file. Answers "have we hit this before?" and "what did we decide about X?" without going to the NotebookLM Brain. 95 ms median latency.
 
 **How it works**
-- `scripts/embed-memories.sh` reads every `.md` in `memory/`, `agent-memory/`, `docs/`, chunks by paragraph, embeds each chunk via Ollama's Nomic-embed-text (137M params, local), stores in `data/cortana-vec.db` (sqlite-vec virtual table)
+- `scripts/embed-memories.sh` reads every `.md` in `memory/`, `agent-memory/`, `docs/`, chunks by paragraph, embeds each chunk via Ollama's Nomic-embed-text (137M params, local), stores in `data/xantham-vec.db` (sqlite-vec virtual table)
 - Incremental: on re-run, only re-embeds chunks whose content hash changed
 - `scripts/memory-search.sh "<query>"` embeds the query, returns top-5 matches with file path + line range + score
 - Post-commit git hook re-embeds any changed memory files automatically
@@ -202,7 +202,7 @@ bash scripts/embed-memories.sh
 ```
 
 **Uninstall**
-- Delete `data/cortana-vec.db`
+- Delete `data/xantham-vec.db`
 - Remove the post-commit hook: `rm .git/hooks/post-commit` (Mac/Linux) or `Remove-Item .git\hooks\post-commit` (Windows)
 - Uninstall Ollama if you don't use it elsewhere: `brew uninstall ollama` (Mac) or `winget uninstall Ollama.Ollama` (Windows)
 
@@ -222,14 +222,14 @@ Live shared context between sub-agents working in parallel on the same task. Wit
 **How it works**
 - Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `.claude/settings.json`. Unlocks `TeamCreate`, `SendMessage`, and `TeamDelete` tools for live peer-to-peer messaging (Claude Code 2.1.32+).
 - Create a markdown channel file at `data/agent-channels/<slug>.md` when spawning multiple agents on the same project. Include the path in every agent's brief.
-- Agents `Edit`-append their progress/decisions/blockers to the channel as they work. Cortana re-reads between its own tool calls to converge state across agents.
+- Agents `Edit`-append their progress/decisions/blockers to the channel as they work. The orchestrator re-reads between its own tool calls to converge state across agents.
 - When the task ships, archive to `data/agent-channels/archive/YYYY-MM/<slug>.md`.
 
 **Cost**
 $0. Just a feature flag + a markdown file.
 
 **Token usage**
-Marginal — agents spend a few extra tokens reading the channel file before deciding their next step. Saves tokens overall because they don't re-ask Cortana "what is the other agent doing?"
+Marginal — agents spend a few extra tokens reading the channel file before deciding their next step. Saves tokens overall because they don't re-ask the orchestrator "what is the other agent doing?"
 
 **Dependencies**
 Claude Code 2.1.32 or newer.
@@ -249,21 +249,21 @@ mkdir -p data/agent-channels/archive
 Flip the flag to "0" and remove `data/agent-channels/`.
 
 **Usage**
-Included in Cortana's orchestration habits (see CLAUDE.md). Multi-agent tasks on the same project automatically get a channel file.
+Included in Xantham's orchestration habits (see CLAUDE.md). Multi-agent tasks on the same project automatically get a channel file.
 
 ---
 
 ### E4 — Observability audit layer
 
 **Purpose**
-Live visibility into every tool call Cortana (and its sub-agents) make during a session. Solves "I know the background agent finished, but I can't easily see what it did." Paid for itself within hours of installation on our first run.
+Live visibility into every tool call The orchestrator (and its sub-agents) make during a session. Solves "I know the background agent finished, but I can't easily see what it did." Paid for itself within hours of installation on our first run.
 
 **How it works**
 - `.claude/hooks/audit-log-hook.sh` is a PostToolUse hook with matcher `.*`. Fires async after every tool call.
 - Writes one JSON line per event to `data/audit/YYYY-MM-DD.jsonl` with: tool name, tool_use_id, input summary (240 chars), output summary (240 chars), success/error, project
 - Secrets-stripped: regex scrubs `api_key`, `token`, `password`, `bearer`, `authorization` patterns before write
 - Gitignored — audit logs never leave your machine
-- `scripts/cortana-live.sh` pretty-prints with filters (--tool, --project, --day, --failed, --follow)
+- `scripts/xantham-live.sh` pretty-prints with filters (--tool, --project, --day, --failed, --follow)
 - `scripts/audit-archive.sh` compresses files older than 30 days (default) into `data/audit/archive/YYYY/MM.jsonl.gz` (committed to git, never deleted). Replaces the old `audit-prune.sh` delete-based approach (April 2026).
 
 **Cost**
@@ -281,8 +281,8 @@ Zero. The hook runs in Bash, not Claude.
 # 1. Copy .claude/hooks/audit-log-hook.sh
 chmod +x .claude/hooks/audit-log-hook.sh
 
-# 2. Copy scripts/cortana-live.sh, scripts/audit-archive.sh, scripts/history.sh, scripts/verify-sync.sh
-chmod +x scripts/cortana-live.sh scripts/audit-archive.sh scripts/history.sh scripts/verify-sync.sh
+# 2. Copy scripts/xantham-live.sh, scripts/audit-archive.sh, scripts/history.sh, scripts/verify-sync.sh
+chmod +x scripts/xantham-live.sh scripts/audit-archive.sh scripts/history.sh scripts/verify-sync.sh
 
 # 2b. Copy .claude/hooks/session-end-verify.sh and wire it as the Stop hook
 chmod +x .claude/hooks/session-end-verify.sh
@@ -293,17 +293,17 @@ chmod +x .claude/hooks/session-end-verify.sh
 # 4. Add data/audit/ to .gitignore
 ```
 
-Note: Windows users running outside Git Bash will need WSL2 for the chmod / bash / jq pipeline. The cortana-live.sh script is bash-only; PowerShell native ports of these scripts are not maintained. See the "Windows shell choice" callout under "Quick start" earlier in the blueprint.
+Note: Windows users running outside Git Bash will need WSL2 for the chmod / bash / jq pipeline. The xantham-live.sh script is bash-only; PowerShell native ports of these scripts are not maintained. See the "Windows shell choice" callout under "Quick start" earlier in the blueprint.
 
 **Uninstall**
 Remove the PostToolUse entry from `.claude/settings.json` and delete `data/audit/`.
 
 **Usage**
 ```bash
-bash scripts/cortana-live.sh             # last 20 events today
-bash scripts/cortana-live.sh --follow    # stream live
-bash scripts/cortana-live.sh --failed    # only errored tool calls
-bash scripts/cortana-live.sh --project PokeInvest --tool Agent
+bash scripts/xantham-live.sh             # last 20 events today
+bash scripts/xantham-live.sh --follow    # stream live
+bash scripts/xantham-live.sh --failed    # only errored tool calls
+bash scripts/xantham-live.sh --project PokeInvest --tool Agent
 bash scripts/audit-archive.sh 30         # gzip JSONL >=30d old into data/audit/archive/YYYY/MM.jsonl.gz
 bash scripts/history.sh <query>          # unified search across telegram + audit (live + archived) + git log + memory
 ```
@@ -316,7 +316,7 @@ bash scripts/history.sh <query>          # unified search across telegram + audi
 Stricter replacement for the Core safety gate. Adds protected-branch force-push hard-blocks (cannot be approved through the hook — requires manual Terminal) and fixes word-boundary false positives on `rm` that match innocent words like "format" or "arm".
 
 **How it works**
-Drop-in replacement for `.claude/hooks/safety-gate.sh`. Same approval-file mechanism (`~/Documents/cortana/data/approved.txt`), same log, same exit codes. Rules:
+Drop-in replacement for `.claude/hooks/safety-gate.sh`. Same approval-file mechanism (`~/Documents/xantham/data/approved.txt`), same log, same exit codes. Rules:
 
 Hard-blocked (no approval possible):
 - Force push to `main` / `master` / `production` / `prod` / `release` / `develop` (any variant: `--force`, `-f`, `--force-with-lease`)
@@ -406,7 +406,7 @@ Four triggers were live at https://claude.ai/code/scheduled. Disabled on 22 Apr 
 
 **Version string + path cleanup:**
 - `scripts/check-blueprint-drift.sh` now reads v29 files in `blueprints/` (was v28 at repo root — silently always-passing).
-- `scripts/verify-sync.sh` — belt-and-braces drift catcher added 22 Apr 2026. The keyword-scan drift script can miss renamed / added / deleted files that fall outside its hard-coded keyword list. `verify-sync.sh` runs `git diff --name-status` over `scripts/`, `.claude/hooks/`, and `.claude/skills/` since the last blueprint commit, and exits non-zero if any newly-landed basename is absent from either blueprint. Use it as the last step of any `cortana-sync` turn.
+- `scripts/verify-sync.sh` — belt-and-braces drift catcher added 22 Apr 2026. The keyword-scan drift script can miss renamed / added / deleted files that fall outside its hard-coded keyword list. `verify-sync.sh` runs `git diff --name-status` over `scripts/`, `.claude/hooks/`, and `.claude/skills/` since the last blueprint commit, and exits non-zero if any newly-landed basename is absent from either blueprint. Use it as the last step of any `xantham-sync` turn.
 - `.claude/hooks/session-end-verify.sh` — Stop-hook swap (22 Apr 2026). Previous Stop hook was a fixed `echo 'Reminder: verify build...'` string. Replaced with a real three-check script that runs at every session stop: unpushed commits count, uncommitted files count, `verify-sync.sh` drift check. Writes warnings to stderr, exits 0 so it can't block shutdown. Wire via `.claude/settings.json` Stop hook array.
 - `.claude/hooks/telegram-reply-reminder.sh` — UserPromptSubmit hook (22 Apr 2026). Triggers on every inbound prompt. If the prompt starts with a genuine Telegram channel tag (anchored regex requiring source + chat_id + message_id at line start — the earlier substring-match false-positived on any quoted telegram transcript), the hook emits a JSON `additionalContext` reminder forcing the agent to use the `mcp__plugin_telegram_telegram__reply` tool. Also writes `data/runtime/turn-contract.json` (0600 perms) with per-turn guarantees that `stop-verify-contract.sh` checks at turn end. Fires BEFORE any skill loads. Wire via `.claude/settings.json` UserPromptSubmit hook array.
 
@@ -416,7 +416,7 @@ macOS Transparency/Consent/Control began blocking launchd-spawned bash from exec
 
 - `scripts/install-launchd-wrappers.sh` builds 4 `.app` bundles via `osacompile` + ad-hoc codesign into `~/Applications/`
 - AppleScript sources at `scripts/launchd-wrappers/`: `canaries-wrapper.applescript`, `proactive-trigger-wrapper.applescript`, `morning-digest-wrapper.applescript`, `corrections-review-wrapper.applescript`, `signal-fire-wrapper.applescript`. Each guards on `RUN_FROM_LAUNCHD=true` env var, execs the matching bash daemon via `do shell script`, error-traps with logging.
-- Drop-in plists at `scripts/launchd-wrappers/`: `new-com.cortana.canaries.plist`, `new-com.cortana.proactive-trigger.plist`, `new-com.cortana.morning-digest.plist`, `new-com.cortana.corrections-review.plist`, `new-com.cortana.signal-fire.plist`. Each points `Program` at `.app/Contents/MacOS/applet`, sets the env var, preserves schedule (signal-fire's plist is generated dynamically by `signal-schedule.sh apply` from a JSON time table). Manual one-time copy into `~/Library/LaunchAgents/` after FDA grant.
+- Drop-in plists at `scripts/launchd-wrappers/`: `new-com.xantham.canaries.plist`, `new-com.xantham.proactive-trigger.plist`, `new-com.xantham.morning-digest.plist`, `new-com.xantham.corrections-review.plist`, `new-com.xantham.signal-fire.plist`. Each points `Program` at `.app/Contents/MacOS/applet`, sets the env var, preserves schedule (signal-fire's plist is generated dynamically by `signal-schedule.sh apply` from a JSON time table). Manual one-time copy into `~/Library/LaunchAgents/` after FDA grant.
 - Operator must grant FDA to each `.app` in System Settings > Privacy & Security > Full Disk Access. `.plist` files are NOT valid FDA targets in the macOS GUI picker; the `.app` is.
 - Full runbook + DST decision (StartCalendarInterval uses LOCAL time; ±1h seasonal drift accepted) in `memory/reference_launchd_tcc_architecture.md` + `docs/launchd-wrapper-setup.md`.
 
@@ -427,17 +427,17 @@ macOS Transparency/Consent/Control began blocking launchd-spawned bash from exec
 
 ### Cross-session persistence (25 Apr 2026)
 
-- `data/runtime/cortana-state.json` (committed) — work arcs, in-flight tasks, validated patterns
+- `data/runtime/xantham-state.json` (committed) — work arcs, in-flight tasks, validated patterns
 - `scripts/state.sh` — single CLI with 11 subcommands: `tax / close / promise / flip / outfit / in-flight-add / in-flight-resolve / arc-add / arc-resolve / validate / read`
 - `scripts/session-start-persistence-inject.sh` — produces a "🧠 PERSISTENT STATE" block at session start including recent telegram (last 4h), recent corrections (last 7d), state summary. Wired into `session-start-hook.sh`.
 
 ### Outbound reply lint hook (25 Apr 2026, hardened 30 Apr 2026)
 
 - `.claude/hooks/voice-lint.sh` + `scripts/test-voice-lint.sh` — PreToolUse hook on the Telegram reply tool. Blocks send if reply contains em dashes, signoffs, banned terms-of-address, banned self-descriptors, or persona-specific voice violations. Persona-aware via `data/runtime/active-voice.json`.
-- **Cortana-mode hardening (30 Apr 2026):** added 3 rules that block the alternate-persona's voice tells when active-voice is `cortana`. Triggered after a live in-session voice carry-over: pointer flipped at session midpoint but the in-flight register kept the alternate persona's lowercase + signature emoji from earlier, so 3 replies went out in wrong voice before the user caught it. New rules:
-  - `cortana-<alt>-signature-leak` — blocks the alt persona's signature emoji anywhere in text.
-  - `cortana-lowercase-opening` — blocks when first ASCII letter is lowercase. Skips emoji, bullets, digits, markdown markers so structured outputs still pass.
-  - `cortana-<alt>-pet-name` — blocks alt-persona pet-name vocabulary as direct address. Verb usage (`I/we/you love X`) explicitly allowed via lookbehind.
+- **Xantham-mode hardening (30 Apr 2026):** added 3 rules that block the alternate-persona's voice tells when active-voice is `<orchestrator>`. Triggered after a live in-session voice carry-over: pointer flipped at session midpoint but the in-flight register kept the alternate persona's lowercase + signature emoji from earlier, so 3 replies went out in wrong voice before the user caught it. New rules:
+  - `xantham-<alt>-signature-leak` — blocks the alt persona's signature emoji anywhere in text.
+  - `xantham-lowercase-opening` — blocks when first ASCII letter is lowercase. Skips emoji, bullets, digits, markdown markers so structured outputs still pass.
+  - `xantham-<alt>-pet-name` — blocks alt-persona pet-name vocabulary as direct address. Verb usage (`I/we/you love X`) explicitly allowed via lookbehind.
 - The lint runs at the door (PreToolUse), so even if the model's voice drifts mid-session due to context carry-over, the gate forces a rewrite before the message reaches the user. Bidirectional: rules gated on the persona file value, alt-persona rules fire only when active, universal rules (em-dash, ascii-signoff, etc.) fire in both. Validated with a 14-case bidirectional matrix test (legitimate + violating inputs for each persona).
 
 ### Phase 3B — Sleep-time reflection (22 Apr 2026)
@@ -454,7 +454,7 @@ Full 20-task implementation plan at `docs/plans/2026-04-22-hardening-implementat
 **New scripts (7):**
 - `scripts/recent-telegram.sh [N]` — last N telegram exchanges pretty-printed. Canonical truth-source for greeting digest step 6.5.
 - `scripts/check-pending-claim.sh <pattern> [days]` — grep helper for pending-claim evidence.
-- `scripts/update-handoff.sh [hours]` — event-sourced HANDOFF.md regen (telegram + git). Replaces the `/tmp/cortana-working-context.md` pattern.
+- `scripts/update-handoff.sh [hours]` — event-sourced HANDOFF.md regen (telegram + git). Replaces the `/tmp/xantham-working-context.md` pattern.
 - `scripts/log-routine-fire.sh <name> <outcome> <ms> [notes]` — optional JSONL writer for routine self-reporting.
 - `scripts/promote-correction.sh <category> [--auto|--review]` — draft + append correction-derived rule to CLAUDE.md.
 - `scripts/apply-dream-proposal.sh [date]` + `scripts/reject-dream-proposal.sh [date] [reason]` — Sunday dream-proposal lifecycle.
@@ -488,15 +488,15 @@ The `scripts/verify-sync.sh` was also hardened with 6 check classes (was keyword
 
 ### Phase 2 S4 — SLO canaries (22 Apr 2026)
 
-Synthetic canaries probe Cortana's critical paths every 5 min. This is observability-as-control-plane — top-tier 2026 agent-system pattern per external research. Convention + thresholds in `memory/feedback_slo_canaries_convention.md`.
+Synthetic canaries probe Xantham's critical paths every 5 min. This is observability-as-control-plane — top-tier 2026 agent-system pattern per external research. Convention + thresholds in `memory/feedback_slo_canaries_convention.md`.
 
 **New scripts (4):**
-- `scripts/canaries/greeting-accuracy.sh` — fixture probe. Builds a synthetic telegram tail + memory pair where they disagree; asserts `check-pending-claim.sh` recipe produces the correct answer so Cortana's greeting digest reconciliation can't surface shipped items as pending.
-- `scripts/canaries/reply-tool-compliance.sh` — last 50 Zaki inbound messages cross-referenced with Cortana outbound + `mcp__plugin_telegram_telegram__reply` audit entries in a 10-min window. Catches terminal-text-as-reply.
+- `scripts/canaries/greeting-accuracy.sh` — fixture probe. Builds a synthetic telegram tail + memory pair where they disagree; asserts `check-pending-claim.sh` recipe produces the correct answer so Xantham's greeting digest reconciliation can't surface shipped items as pending.
+- `scripts/canaries/reply-tool-compliance.sh` — last 50 Zaki inbound messages cross-referenced with Xantham outbound + `mcp__plugin_telegram_telegram__reply` audit entries in a 10-min window. Catches terminal-text-as-reply.
 - `scripts/canaries/handoff-freshness.sh` — per-project `HANDOFF.md` mtime vs latest commit mtime. >72h = stale.
 - `scripts/run-canaries.sh` — orchestrator. Appends to `data/slo-canaries.jsonl`, maintains rolling-window state in `data/slo-state.json`, emits alerts to `data/slo-alerts.jsonl`. All three data files gitignored (local-only observability). 0.5% non-bootstrap violation rate or 5-consecutive-fail streak triggers alerts. `--alert-telegram` flag is scaffolding — Zaki enables after bootstrap clean.
 
-Healthcheck renders a `▸ SLO Canaries` section; `cortana-maintenance` skill step 12.5 surfaces non-bootstrap breaches in the greeting digest.
+Healthcheck renders a `▸ SLO Canaries` section; `xantham-maintenance` skill step 12.5 surfaces non-bootstrap breaches in the greeting digest.
 
 ### Audit hardening — 22 Apr 2026 evening (5-batch close of 4-agent full-day audit)
 
@@ -514,13 +514,13 @@ After the morning's work shipped (Phase 1 + Phase 2 + Phase 3B + launchd schedul
 - `.claude/hooks/telegram-reply-reminder.sh` — anchored regex now accepts channel tag at position 0 OR after a newline, tolerating any future harness that prepends system-reminder blocks to prompts (K10).
 - `.claude/hooks/stop-verify-contract.sh` — reads BOTH turn-day AND today audit files so a turn spanning UTC midnight can't false-trigger a violation (A16). `/tmp` fallback is age-gated at 6h to drop stale leftovers (A18).
 - `.gitignore` — `data/graphiti-ingest-log.jsonl` added (local-only cost telemetry, K7). `.tmp-canary-fixtures/` added (in-repo canary scratch, never noexec — alternative to `/tmp` for hardened macs, #15).
-- `scripts/healthcheck.sh` — `.cortana-ignore` loader strips trailing `/` so `Documents/Foo/` behaves like `Documents/Foo` (#9); warns if the ignore file grew by >20 lines since last commit (S6).
+- `scripts/healthcheck.sh` — `.xantham-ignore` loader strips trailing `/` so `Documents/Foo/` behaves like `Documents/Foo` (#9); warns if the ignore file grew by >20 lines since last commit (S6).
 - `scripts/promote-correction.sh` — UTF-8 char-safe truncation via python slicing so multibyte codepoints don't corrupt CLAUDE.md appends (K5).
 - `scripts/update-handoff.sh` — `awk 'NF{p=1} p'` squeezes the leading-blank-per-regen drift (K6); sentinel fallback finds the real `^---$` boundary after the sentinel instead of assuming +3 offset (#12).
 - `scripts/canaries/handoff-freshness.sh` — uses full folder path instead of basename so same-named subfolders (e.g. `Voyager/marketing-ai` + `MDX Technology/marketing-ai`) don't collide in the stale list (#11).
 - `scripts/canaries/reply-tool-compliance.sh` — no longer claims `pass:true` when status is bootstrap or no-data (#A8).
 
-**New memory:** `memory/project_cortana_dashboard_scope.md` — Zaki's 22 Apr request for a Vercel-hosted projects dashboard styled like TixPredict, to be built next session as the first post-Cortana-perfect project.
+**New memory:** `memory/project_xantham_dashboard_scope.md` — Zaki's 22 Apr request for a Vercel-hosted projects dashboard styled like TixPredict, to be built next session as the first post-Xantham-perfect project.
 
 ### Phase 4 Z1 — proactive-trigger daemon (23 Apr 2026 evening, rewritten 25 Apr 2026 signal-fire mode)
 
@@ -528,7 +528,7 @@ Scheduled launchd daemon that fires a neutral disguised-phrase Telegram nudge. S
 
 - `scripts/proactive-trigger-daemon.sh` — the daemon. 357 lines (down from 472). Fires every 4h via launchd, rolls dice, checks gates (kill-switch / daytime window / rate cap 3-per-day / quiet window 45-min / dice), picks one of 11 phrases (`check in / status sync / queue updated / still here / ping / hey there / thinking / queue ready / yo / ready / wave`) via round-robin, sends via `telegram-signal.sh`. Logs every attempt to `data/proactive-triggers.jsonl`. Supports `--dry-run`, `--force`, `--persona=<name>` (read-only audit override).
 - `scripts/telegram-signal.sh` — pure-bash curl POST to Telegram Bot API. Zero Claude in loop. Used by both this daemon and the signal-fire system.
-- `scripts/proactive-daemon.sh` — control script: `{load|unload|status|pause|resume|tail}`. Wraps `launchctl` on `~/Library/LaunchAgents/com.cortana.proactive-trigger.plist`.
+- `scripts/proactive-daemon.sh` — control script: `{load|unload|status|pause|resume|tail}`. Wraps `launchctl` on `~/Library/LaunchAgents/com.xantham.proactive-trigger.plist`.
 - `scripts/update-active-voice.sh` — persona state-file read/write at `data/runtime/active-voice.json` (0600 perms). Commands: `init / get / set <name> / reset-rate / record-fire`. Daily rate-counter rotation at UTC midnight.
 - `scripts/install-persona-switch-hook.sh` — idempotent patcher injecting persona-switch detection into `.claude/hooks/telegram-reply-reminder.sh`. When inbound Telegram text is exactly a known persona trigger (case-insensitive, trimmed), calls `update-active-voice.sh set ...`.
 - `scripts/canaries/proactive-audit.sh` — daily-audit canary wired into `run-canaries.sh`. Scans last-24h of `data/proactive-triggers.jsonl` for over-cap fires, moderation auto-pauses, deny-word hits, failure-rate spikes. Writes results to `data/slo-canaries.jsonl`.
@@ -541,13 +541,13 @@ Pure-launchd disguised-phrase queue, sibling to the proactive-trigger daemon. Re
 
 - `scripts/signal-schedule.sh` — CLI: `add HH:MM "text"` / `remove HH:MM` / `list` / `apply [--force-load]`. Manages `data/runtime/signal-schedule.json` (HH:MM → text map, 0600 perms, gitignored). Sorts on insert. Validates JSON. Runs `plutil -lint` on temp plist before atomic move into `~/Library/LaunchAgents/`.
 - `scripts/signal-fire-from-schedule.sh` — pure-bash firer, exec'd by the AppleScript .app wrapper. Reads schedule.json, finds ±2-min match against current time, idempotency-guards via `data/runtime/signal-fire-state.json` (5-min dedup window — twice the tolerance), then dispatches `scripts/telegram-signal.sh`. Exit codes: 0 fired-or-no-match, 2 schedule-invalid, 3 telegram-failed, 126 FDA-not-granted. `SIGNAL_FIRE_DRY_RUN=1` env hatch for testing — never set by launchd.
-- `scripts/launchd-wrappers/signal-fire-wrapper.applescript` — AppleScript .app source. Compiles to `~/Applications/Cortana-SignalFire.app` (5th wrapper alongside canaries / proactive-trigger / morning-digest / corrections-review). Codesigned ad-hoc.
-- `scripts/launchd-wrappers/new-com.cortana.signal-fire.plist` — generated dynamically by `signal-schedule.sh apply`. Single plist with one `StartCalendarInterval` entry per scheduled fire (macOS launchd does NOT support per-entry env vars, so Pattern C — single plist + lookup-at-fire-time — is the canonical answer). `RunAtLoad=false` so it doesn't fire at install time.
+- `scripts/launchd-wrappers/signal-fire-wrapper.applescript` — AppleScript .app source. Compiles to `~/Applications/Xantham-SignalFire.app` (5th wrapper alongside canaries / proactive-trigger / morning-digest / corrections-review). Codesigned ad-hoc.
+- `scripts/launchd-wrappers/new-com.xantham.signal-fire.plist` — generated dynamically by `signal-schedule.sh apply`. Single plist with one `StartCalendarInterval` entry per scheduled fire (macOS launchd does NOT support per-entry env vars, so Pattern C — single plist + lookup-at-fire-time — is the canonical answer). `RunAtLoad=false` so it doesn't fire at install time.
 
-Bootstrap (one-time per machine): grant FDA on `Cortana-SignalFire.app`, then `bash scripts/signal-schedule.sh apply --force-load`. Verify with `tail -f logs/signal-fire.log`. Full reference and design rationale in `memory/reference_signal_fire_system.md`.
+Bootstrap (one-time per machine): grant FDA on `Xantham-SignalFire.app`, then `bash scripts/signal-schedule.sh apply --force-load`. Verify with `tail -f logs/signal-fire.log`. Full reference and design rationale in `memory/reference_signal_fire_system.md`.
 
-- `scripts/upgrade.sh` + `scripts/upgrades/lib.sh` use `.cortana-blueprint-version` yaml as canonical version source. `CORTANA_VERSION` plaintext deleted.
-- Hardcoded lowercase `~/Documents/cortana/` paths in scripts + hooks corrected to capital-C so they don't break on case-sensitive filesystems.
+- `scripts/upgrade.sh` + `scripts/upgrades/lib.sh` use `.xantham-blueprint-version` yaml as canonical version source. `<OLD>_VERSION` plaintext deleted.
+- Hardcoded lowercase `~/Documents/xantham/` paths in scripts + hooks corrected to capital-C so they don't break on case-sensitive filesystems.
 - `memory-query.sh` deleted — SQL-injection-prone, DB frozen, agents (kai.md + nadia.md) updated to use markdown + post-commit re-embed.
 - `catboost_info/` (leaked TCGPredict training artifact) removed + gitignored.
 
@@ -555,11 +555,11 @@ Bootstrap (one-time per machine): grant FDA on `Cortana-SignalFire.app`, then `b
 
 Three loosely-coupled improvements landed in one session, all driven by gaps surfaced during real usage rather than a planned phase.
 
-**1. Persona auto-switch fix.** The PreToolUse `voice-lint.sh` hook reads `data/runtime/active-voice.json` to enforce per-persona reply rules (missing-signature in voice mode, style-leak in cortana mode). The state file is updated by a code path inside `.claude/hooks/telegram-reply-reminder.sh` that detects when an inbound Telegram message is the bare word "voice" or "cortana" (or that name followed by `mode...` / `, ...` / etc.). The detection had a silent bug since 23 Apr 2026: the `awk` extraction printed the user-text BEFORE stripping the closing `</channel>` tag, so `USER_TEXT` was always `cortana</channel>` and the case-statement match silently failed. Persona had been stuck on the value last set explicitly. Patched in commit `04baa2f` — strip both opening and closing tags before printing, widen matcher to include name-followed-by-punctuation. 10-case smoke test verified.
+**1. Persona auto-switch fix.** The PreToolUse `voice-lint.sh` hook reads `data/runtime/active-voice.json` to enforce per-persona reply rules (missing-signature in voice mode, style-leak in <orchestrator> mode). The state file is updated by a code path inside `.claude/hooks/telegram-reply-reminder.sh` that detects when an inbound Telegram message is the bare word "voice" or "<orchestrator>" (or that name followed by `mode...` / `, ...` / etc.). The detection had a silent bug since 23 Apr 2026: the `awk` extraction printed the user-text BEFORE stripping the closing `</channel>` tag, so `USER_TEXT` was always `<orchestrator></channel>` and the case-statement match silently failed. Persona had been stuck on the value last set explicitly. Patched in commit `04baa2f` — strip both opening and closing tags before printing, widen matcher to include name-followed-by-punctuation. 10-case smoke test verified.
 
 **2. Disaster-recovery runbook.** New doc at `docs/disaster-recovery.md` mapping every Anthropic-dependent component to recovery paths in case Anthropic terminates the consumer subscription, revokes the API key, or has a multi-day outage. Three paths: (A) Claude Code CLI auth fails → swap to alternative consumer subscription (Cursor Pro, Codex CLI under ChatGPT Pro, GitHub Copilot Pro+); (B) `ANTHROPIC_API_KEY` revoked → rotate or swap Graphiti's LLM provider to OpenAI/Gemini via graphiti-core's pluggable backend; (C) total Anthropic blackout → pivot to AWS Bedrock or GCP Vertex AI, both of which sell Claude through separate billing pipelines that aren't tied to consumer subscriptions. Practical impact of an Anthropic ban turns out to be surprisingly contained: only Claude Code CLI orchestration + Graphiti ingest hard-fail; all consumer apps + scripts (bash) + hooks + memory (markdown + sqlite-vec) + telegram bot (BotFather token, separate auth) keep running untouched. Runbook also includes a bare-metal Mac restore checklist.
 
-**3. Skill-utilization-first behavioural rule.** New feedback memory at `memory/feedback_use_available_skills_first.md`. Before dispatching any agent or going freestyle, scan the available skill list (system-reminder skills section + plugins) and pick the matching skill. Design = `impeccable:*` / `frontend-design` / `taste-skill` / `redesign-skill` / `soft-skill` / `brutalist-skill` / `minimalist-skill`. Debugging = `superpowers:systematic-debugging`. Brainstorming = `superpowers:brainstorming`. Vercel work = `vercel:*`. Test-driven implementation = `superpowers:test-driven-development`. The agent brief explicitly references which skill the dispatched agent is expected to invoke. Reason: a curated skill arsenal exists (Anthropic + community + Cortana-native), bypassing it wastes leverage and re-derives what's already proven. Bar to skip a matching skill: the task must be so trivial that loading the skill costs more than it saves. Default to invoking.
+**3. Skill-utilization-first behavioural rule.** New feedback memory at `memory/feedback_use_available_skills_first.md`. Before dispatching any agent or going freestyle, scan the available skill list (system-reminder skills section + plugins) and pick the matching skill. Design = `impeccable:*` / `frontend-design` / `taste-skill` / `redesign-skill` / `soft-skill` / `brutalist-skill` / `minimalist-skill`. Debugging = `superpowers:systematic-debugging`. Brainstorming = `superpowers:brainstorming`. Vercel work = `vercel:*`. Test-driven implementation = `superpowers:test-driven-development`. The agent brief explicitly references which skill the dispatched agent is expected to invoke. Reason: a curated skill arsenal exists (Anthropic + community + Xantham-native), bypassing it wastes leverage and re-derives what's already proven. Bar to skip a matching skill: the task must be so trivial that loading the skill costs more than it saves. Default to invoking.
 
 **Recommended optional plugin: Impeccable** (Paul Bakaus, https://github.com/pbakaus/impeccable). Install via `claude plugin marketplace add pbakaus/impeccable && claude plugin install impeccable@pbakaus/impeccable` (CLI subcommands, user scope so it works in every project). Adds 23 design slash commands (`/impeccable polish`, `/impeccable audit`, `/impeccable critique`, `/impeccable distill`, etc.) plus 7 reference docs covering typography, color and contrast, spatial design, motion design, interaction design, responsive design, and UX writing. Sits on top of Anthropic's official `frontend-design` skill. Worth installing if you do any frontend design work and want explicit anti-pattern detection on top of the default LLM-tendency-toward-generic-Inter-purple-gradient design.
 
@@ -569,7 +569,7 @@ Five distinct architectural adds in a 24h window.
 
 **1. Watch plugin (bradautomates/claude-video) as a recommended optional install.** Install via `claude plugin marketplace add bradautomates/claude-video && claude plugin install watch@claude-video`. Adds the `/watch` skill that gives Claude video-watching (yt-dlp downloads, ffmpeg extracts frames + audio, captions or Whisper transcribe, frames Read'd as images). Free for any YouTube video with auto-captions. Whisper API fallback (Groq free tier covers 2hrs/hour) for non-YouTube sources like Loom and screen recordings. Use cases: hook analysis on viral videos, debugging screen recordings, summarising long lectures, feeding a knowledge base.
 
-**2. YouTube watch queue (Cortana add-on).** A new skill `cortana-youtube-queue` + `scripts/youtube-queue.sh` that wraps the `watch` plugin into a batch flow:
+**2. YouTube watch queue (Xantham add-on).** A new skill `xantham-youtube-queue` + `scripts/youtube-queue.sh` that wraps the `watch` plugin into a batch flow:
 - **Auto-add:** `.claude/hooks/telegram-reply-reminder.sh` scans inbound Telegram text for `youtu.be` / `youtube.com` URLs and appends to `data/youtube-watch-queue.jsonl` (gitignored, per-user-private). Idempotent on `video_id`.
 - **Manual command:** "watch queue" / "process videos" / "watch pending" triggers the skill, which loops pending entries, runs `watch.py`, synthesises per-video summaries (hook + key points + visuals + TLDR + "Use to your system"), pushes summaries to your AI Brain notebook, marks watched, replies on Telegram with a digest.
 - **Storage:** queue file gitignored at `data/youtube-watch-queue.jsonl`, summaries committed at `data/youtube-summaries/<video_id>.md` for archive.
@@ -588,19 +588,19 @@ Five distinct architectural adds in a 24h window.
 
 ### v29.1 (2026-04-21, late) — CLAUDE.md skill-offload
 
-Anthropic's memory docs specify CLAUDE.md should stay under 200 lines — larger files "consume more context and reduce adherence." Cortana's CLAUDE.md had grown to 583 lines / ~11K tokens per turn. Offloaded procedural and reference detail into seven project-level skills at `.claude/skills/cortana-*/SKILL.md`, each with a specific `description` field so Claude Code auto-loads them only when the situation matches:
+Anthropic's memory docs specify CLAUDE.md should stay under 200 lines — larger files "consume more context and reduce adherence." Xantham's CLAUDE.md had grown to 583 lines / ~11K tokens per turn. Offloaded procedural and reference detail into seven project-level skills at `.claude/skills/xantham-*/SKILL.md`, each with a specific `description` field so Claude Code auto-loads them only when the situation matches:
 
-- `cortana-sync` — full sync/wrapup cycle + batch sync + auto-sync triggers
-- `cortana-maintenance` — Monday protocol + greeting digest + self-improvement
-- `cortana-orchestration` — 13 habits for multi-agent dispatch (+ habit #14 added in v29.2: effort tiers + ultrathink)
-- `cortana-brain` — NotebookLM routing + smart memory routing + storage layout
-- `cortana-observability` — audit layer + compaction hooks + remote routines + Monitor vs GHA
-- `cortana-blueprint-updates` — architectural-change update cycle + placement rule
-- `cortana-safety` — full git + DB + deploy-verify rules
+- `xantham-sync` — full sync/wrapup cycle + batch sync + auto-sync triggers
+- `xantham-maintenance` — Monday protocol + greeting digest + self-improvement
+- `xantham-orchestration` — 13 habits for multi-agent dispatch (+ habit #14 added in v29.2: effort tiers + ultrathink)
+- `xantham-brain` — NotebookLM routing + smart memory routing + storage layout
+- `xantham-observability` — audit layer + compaction hooks + remote routines + Monitor vs GHA
+- `xantham-blueprint-updates` — architectural-change update cycle + placement rule
+- `xantham-safety` — full git + DB + deploy-verify rules
 
 CLAUDE.md retained the always-on layer (core loop, reply-first, agent spawning rules, routing table, commands reference, short safety summary, style) and shrank to 167 lines. Key insight: `@import` does NOT save tokens (imports inline at session start), so the only real token-saving offload mechanism is the on-demand skill-description loader.
 
-Placement rule now inlined: new rules are triaged by size + trigger before being added anywhere. Under 10 lines + always-on → inline. Has a trigger → skill. Over 30 lines + triggerable → MUST be a skill. This mirrors in `cortana-blueprint-updates` skill so it surfaces during architectural changes.
+Placement rule now inlined: new rules are triaged by size + trigger before being added anywhere. Under 10 lines + always-on → inline. Has a trigger → skill. Over 30 lines + triggerable → MUST be a skill. This mirrors in `xantham-blueprint-updates` skill so it surfaces during architectural changes.
 
 Principle for future growth: any section over ~30 lines that isn't always-on is a candidate for skill extraction. When Claude warns about CLAUDE.md size, extract sections with clear trigger conditions first — those have the cleanest skill descriptions.
 
@@ -624,7 +624,7 @@ Added five Advanced-mode extensions:
 
 Split the blueprint into Core + Extensions. Added Mode chooser (Simple vs Advanced).
 
-Lifetime commits: 11 on Cortana main during the v29 session.
+Lifetime commits: 11 on Xantham main during the v29 session.
 
 ### v28 (2026-04 early)
 - Added crew of 9 agents (was 6 in v27)
@@ -635,7 +635,7 @@ Lifetime commits: 11 on Cortana main during the v29 session.
 - Verification rule after every GitHub auto-deploy
 
 ### v27 (2026-03)
-- Renamed from `cortana-universal-v27.md` to split personal/public blueprints
+- Renamed from `xantham-universal-v27.md` to split personal/public blueprints
 - First fully self-installing version (hand to a fresh Claude Code session, it builds the system)
 - Memory system + Telegram + NotebookLM Brain integration
 
@@ -650,18 +650,18 @@ Not documented. Core loop + safety gate + routing table existed from v1 onwards.
 1. Hand this file to a Claude Code session. Tell it: "install v30 in Simple mode" OR "install v30 in Advanced mode, all extensions."
 2. The session reads the Core section and walks you through it.
 3. If Advanced, it offers each remaining extension (E1, E3, E4, E5) in sequence with the install steps above.
-4. When done, it writes `.cortana-blueprint-version` with the installed version + which extensions are on.
+4. When done, it writes `.xantham-blueprint-version` with the installed version + which extensions are on.
 
 ### v29 → v30
 1. Tell Claude Code: "I'm on v29, upgrade me to v30."
-2. It reads `.cortana-blueprint-version`. If `E2_graphiti: true`, it walks the Graphiti drop: stop containers, archive FalkorDB state to a recoverable Docker image, remove `infra/graphiti/`, remove `scripts/graphiti-*.sh`, remove the `graphiti` entry from `.mcp.json`, set `E2_graphiti: false`. If E2 wasn't installed, no-op.
+2. It reads `.xantham-blueprint-version`. If `E2_graphiti: true`, it walks the Graphiti drop: stop containers, archive FalkorDB state to a recoverable Docker image, remove `infra/graphiti/`, remove `scripts/graphiti-*.sh`, remove the `graphiti` entry from `.mcp.json`, set `E2_graphiti: false`. If E2 wasn't installed, no-op.
 3. Core is unchanged — no Core migration steps needed.
 
 ### v28 → v30
 1. Tell Claude Code: "I'm on v28, upgrade me to v30."
-2. It reads `.cortana-blueprint-version` (creates it if missing). Since v28 didn't stamp one, it'll assume no extensions installed.
+2. It reads `.xantham-blueprint-version` (creates it if missing). Since v28 didn't stamp one, it'll assume no extensions installed.
 3. For each remaining extension (E1, E3, E4, E5), it asks: "Install this? (y/n)" with a link to the extension section above. E2 is skipped (no longer offered).
-4. It installs picked ones, updates `.cortana-blueprint-version`.
+4. It installs picked ones, updates `.xantham-blueprint-version`.
 5. Core is unchanged — no Core migration steps needed.
 
 ### v27 → v30
@@ -674,7 +674,7 @@ Not documented. Core loop + safety gate + routing table existed from v1 onwards.
 `bash scripts/install-blueprint.sh --remove E3` — uninstall steps for E3, marks it off in the version file.
 
 ### Version file format
-`.cortana-blueprint-version` (YAML):
+`.xantham-blueprint-version` (YAML):
 ```yaml
 blueprint_version: v30
 installed: 2026-04-21T01:00:00Z
@@ -692,9 +692,9 @@ extensions:
 
 ## Sharing
 
-This file is the entire public blueprint. Hand it to anyone. They can install a clean Cortana from scratch.
+This file is the entire public blueprint. Hand it to anyone. They can install a clean Xantham from scratch.
 
-Your **personal** copy (if you have one) lives at `blueprints/cortana-system-v30.md`. That file contains your actual project list, agent names, bot token guidance, Telegram allowlist, NotebookLM notebook ID, and other personal state. DO NOT share that one.
+Your **personal** copy (if you have one) lives at `blueprints/xantham-system-v30.md`. That file contains your actual project list, agent names, bot token guidance, Telegram allowlist, NotebookLM notebook ID, and other personal state. DO NOT share that one.
 
 `scripts/export-blueprint.sh` strips the personal blueprint down to this public shape (replaces filled-in values with `{{template_vars}}`) if you ever update both and want to re-export.
 
@@ -702,7 +702,7 @@ Your **personal** copy (if you have one) lives at `blueprints/cortana-system-v30
 
 ## Install command
 
-Paste this into a fresh Claude Code session pointed at an empty directory you want to become your Cortana root:
+Paste this into a fresh Claude Code session pointed at an empty directory you want to become your Xantham root:
 
 ```
 Read the xantham-system-v30.md blueprint at <path/to/this/file>.
@@ -719,7 +719,7 @@ That's it. It'll do the rest.
 
 ## Post-install verification — required before first real session
 
-After the install wizard finishes, the user typically closes that session and starts a fresh terminal session named after their agent (e.g. `cortana<enter>` or `myagent<enter>`). The fresh session has zero context about which install steps actually completed. So things like terminal alias breakage (especially on Windows where the PowerShell profile setup often fails on first try) sit silently broken until the user notices and asks Claude to fix.
+After the install wizard finishes, the user typically closes that session and starts a fresh terminal session named after their agent (e.g. `<your-agent-name><enter>` or `myagent<enter>`). The fresh session has zero context about which install steps actually completed. So things like terminal alias breakage (especially on Windows where the PowerShell profile setup often fails on first try) sit silently broken until the user notices and asks Claude to fix.
 
 The wizard MUST close that gap. At the end of install, the wizard generates `SETUP-CHECKLIST.md` at the project root with one checklist item per setup step. The first new session reads this file and verifies each item before doing real work.
 
@@ -728,7 +728,7 @@ The wizard MUST close that gap. At the end of install, the wizard generates `SET
 `SETUP-CHECKLIST.md` template the wizard fills in with the user's actual values:
 
 ```markdown
-# Cortana setup checklist
+# Xantham setup checklist
 
 If you are reading this from a fresh `<agent-name>` session for the first time after install: walk through every item below. Run the verify command. If it does not return the expected output, follow the fix-if-broken instructions or ask Claude to fix it.
 
@@ -811,7 +811,7 @@ Mark each box as you confirm. Do not skip Windows-specific items if you are on W
 - [ ] **E1 sqlite-vec: Ollama running + index populated**
   Verify (Mac): `brew services list | grep ollama` shows started; `curl -s localhost:11434/api/tags` returns models.
   Verify (Windows): `Get-Service Ollama` returns Status `Running`; `curl -s localhost:11434/api/tags` returns models.
-  Index: `ls -la data/cortana-vec.db` (file exists, > 1MB after first embed).
+  Index: `ls -la data/xantham-vec.db` (file exists, > 1MB after first embed).
   Fix: restart Ollama (`brew services restart ollama` / `Restart-Service Ollama`). Re-run `bash scripts/embed-memories.sh`.
 
 - [ ] **E3 Agent Teams flag set**
@@ -838,7 +838,7 @@ If a future install adds new components (extension upgrade, new MCP server, new 
 
 The wizard's last action before saying "install complete" should be: write this file (with `<agent-name>` substituted), confirm the file exists, and tell the user explicitly:
 
-> Setup complete. I have written `SETUP-CHECKLIST.md` to your project root. Close this session, open a fresh terminal, run `<agent-name>` (or `<agent-name>-resume`), and the first thing your fresh Cortana session will do is walk through the checklist. Do not start real work until every box is ticked.
+> Setup complete. I have written `SETUP-CHECKLIST.md` to your project root. Close this session, open a fresh terminal, run `<agent-name>` (or `<agent-name>-resume`), and the first thing your fresh Xantham session will do is walk through the checklist. Do not start real work until every box is ticked.
 
 The CLAUDE.md template (later in this blueprint) includes a corresponding directive: any first-time session that finds `SETUP-CHECKLIST.md` at the project root must read it, run each verify command, and fix failures before any other work. After all boxes are ticked, rename the file to `data/SETUP-CHECKLIST.md.done` so the prompt does not re-fire next session.
 
@@ -1014,7 +1014,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 ## What is NOT in git (must be backed up separately)
 
 - `data/runtime/` (Telegram bot token, persona state, lock files) — gitignored, contains secrets
-- `data/cortana-vec.db` (sqlite-vec semantic index) — gitignored, regenerable but takes minutes
+- `data/xantham-vec.db` (sqlite-vec semantic index) — gitignored, regenerable but takes minutes
 - `~/.claude/` (Claude Code CLI auth, hook installs at user scope) — never in any repo
 - Shell profile (`~/.zshrc` / `~/.bashrc` / PowerShell `$PROFILE`) — terminal aliases live here
 - Any `.env` files inside `infra/`
@@ -1022,7 +1022,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 ## Recommended backup approach
 
 1. **Push the repo to GitHub on every meaningful change** (the post-commit hook + your sync rhythm handle this if you stay disciplined)
-2. **Once a week:** zip `data/runtime/` and copy it to a separate location (encrypted external drive, password manager, or `~/Documents/cortana-backups/`). Includes your Telegram bot token.
+2. **Once a week:** zip `data/runtime/` and copy it to a separate location (encrypted external drive, password manager, or `~/Documents/xantham-backups/`). Includes your Telegram bot token.
 3. **Document your shell aliases** in this file so you can recreate them on a fresh machine.
 
 ## Restoring on a new Mac
@@ -1151,13 +1151,13 @@ Restart Claude Code for it to pick up. From then on every session shows the cont
 
 **Windows note:** The script is bash, so on Windows it runs via Git Bash or WSL. The `~/.claude/` path resolves to `%USERPROFILE%\.claude\` under Git Bash. If `bash` is not in PATH from Claude Code's perspective on Windows, swap `bash ~/.claude/statusline-command.sh` for the WSL absolute path (`wsl bash /mnt/c/Users/<you>/.claude/statusline-command.sh`) or convert the script to PowerShell.
 
-### `scripts/upgrade-cortana.sh` — the update path with customisation preservation
+### `scripts/upgrade-xantham.sh` — the update path with customisation preservation
 
 When a user has been on an older blueprint (say v29) and the upstream version (v31) ships, they may have ALSO added their own hooks, skills, scripts, and CLAUDE.md sections in the meantime. A naive overwrite would blow those away. This script does the opposite: it diffs three ways and asks the user before touching anything customised.
 
 ```bash
 #!/usr/bin/env bash
-# upgrade-cortana.sh — bump from current blueprint version to latest, preserving
+# upgrade-xantham.sh — bump from current blueprint version to latest, preserving
 # user customisations. Three-way merge: user's files vs old-version baseline vs
 # new blueprint. Files are bucketed pristine / customised / user-added.
 #
@@ -1173,12 +1173,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [ ! -f .cortana-blueprint-version ]; then
-  echo "No .cortana-blueprint-version found. Are you in a Cortana repo?" >&2
+if [ ! -f .xantham-blueprint-version ]; then
+  echo "No .xantham-blueprint-version found. Are you in a Xantham repo?" >&2
   exit 1
 fi
 
-CURRENT=$(grep '^blueprint_version:' .cortana-blueprint-version | awk '{print $2}')
+CURRENT=$(grep '^blueprint_version:' .xantham-blueprint-version | awk '{print $2}')
 echo "Current blueprint version: $CURRENT"
 
 # Fetch latest from canonical source
@@ -1230,7 +1230,7 @@ echo "4. For pristine files, ask once: OK to bulk-upgrade all? yes/no."
 echo "5. For customised files, walk one at a time: keep mine, take new, or show diff first."
 echo "6. For user-added files, list them and confirm I know they will be preserved."
 echo "7. Apply only the changes I approved."
-echo "8. Update .cortana-blueprint-version to $LATEST."
+echo "8. Update .xantham-blueprint-version to $LATEST."
 echo "9. Regenerate SETUP-CHECKLIST.md so I can verify the upgrade landed."
 echo "10. Print a summary of what changed + what was preserved."
 echo "---"
@@ -1240,7 +1240,7 @@ The blueprint section that Claude Code reads when it executes the walkthrough is
 
 ### Upgrade walkthrough (customisation-preserving)
 
-When a user runs `bash scripts/upgrade-cortana.sh` and pastes the resulting prompt into a fresh Claude Code session, the agent walks this protocol:
+When a user runs `bash scripts/upgrade-xantham.sh` and pastes the resulting prompt into a fresh Claude Code session, the agent walks this protocol:
 
 **Phase 1 — Inventory.** Catalog every file the new blueprint defines. For each, record three checksums:
 - the user's current file (if it exists)
@@ -1260,7 +1260,7 @@ PRISTINE (15 files, safe to upgrade): scripts/healthcheck.sh, .claude/hooks/safe
 CUSTOMISED (3 files, will ask per file):
   - CLAUDE.md (you added a custom routing table)
   - scripts/log-telegram.sh (you added a redaction call)
-  - .claude/skills/cortana-sync/SKILL.md (you tweaked the sync cadence)
+  - .claude/skills/xantham-sync/SKILL.md (you tweaked the sync cadence)
 USER-ADDED (8 files, untouched): .claude/hooks/my-custom-hook.sh, .claude/skills/my-custom-skill/SKILL.md, ...
 
 OK to proceed? (yes / show me a customised file first / cancel)
@@ -1277,7 +1277,7 @@ OK to proceed? (yes / show me a customised file first / cancel)
 
 **Phase 7 — Apply + verify.** Once all approvals are in:
 - Apply the changes
-- Update `.cortana-blueprint-version` to the new version
+- Update `.xantham-blueprint-version` to the new version
 - Regenerate `SETUP-CHECKLIST.md` so the user verifies the upgrade landed
 - Run `bash scripts/healthcheck.sh` to confirm no breakage
 - If healthcheck fails, the agent investigates + offers a rollback (`git checkout` of the previous state)
@@ -1289,7 +1289,7 @@ Upgrade complete: v29 -> v31
 Upgraded (15 files): healthcheck.sh, safety-gate.sh, ... (full list)
 Took new (1 customised file): scripts/log-telegram.sh
 Kept yours (1 customised file): CLAUDE.md
-Merged (1 customised file): .claude/skills/cortana-sync/SKILL.md
+Merged (1 customised file): .claude/skills/xantham-sync/SKILL.md
 Preserved untouched (8 user-added files): my-custom-hook.sh, my-custom-skill/SKILL.md, ... (full list)
 New since v29: USER-GUIDE.md, SETUP-CHECKLIST.md, FIRST-WEEK.md, ... (full list of new components)
 
@@ -1363,13 +1363,13 @@ That directory has your Telegram bot token, persona state, and lock files. Losin
 
 The hardened safety gate (E5) blocks this hard, but if you somehow get past it: stop, pull, resolve, re-push. Force-push to main destroys shared history. Same on production / develop / release.
 
-## Do not reinstall Cortana over an existing install without backing up
+## Do not reinstall Xantham over an existing install without backing up
 
 Re-running the wizard on a populated repo can overwrite CLAUDE.md / settings / memory. Always backup the entire repo first: `git branch backup/$(date +%s) && git push origin backup/$(date +%s)`.
 
 ## Do not run multiple `<agent-name>` aliases pointing at different repos
 
-Confusion. Each agent name should map to one project. Use `<agent-name>` for Cortana, a different name for any other personal AI you build.
+Confusion. Each agent name should map to one project. Use `<agent-name>` for Xantham, a different name for any other personal AI you build.
 
 ## Do not assume the AI Brain is canonical
 
@@ -1390,11 +1390,11 @@ The agent saves memory automatically. You usually don't need to think about it. 
 - Anything the agent saves to `memory/<type>_<topic>.md` via its core loop step 6
 - Anything the agent saves to `agent-memory/<agent-name>/<file>.md`
 - The auto-regenerated `memory/MEMORY.md` index (post-commit hook)
-- `data/cortana-vec.db` SHA / chunk count tracking (NOT the .db itself; that's gitignored)
+- `data/xantham-vec.db` SHA / chunk count tracking (NOT the .db itself; that's gitignored)
 
 ## What is gitignored (locally only)
 
-- `data/cortana-vec.db` (regenerable from `bash scripts/embed-memories.sh`)
+- `data/xantham-vec.db` (regenerable from `bash scripts/embed-memories.sh`)
 - `data/runtime/*` (secrets, persona state, lock files)
 - `data/audit/*.jsonl` (you can archive these via `bash scripts/audit-archive.sh 30` to push older ones into git)
 - `data/youtube-watch-queue.jsonl` and `data/youtube-playlists.jsonl` (local ops state)
@@ -1419,7 +1419,7 @@ The wizard writes a stub:
 ```bash
 #!/usr/bin/env bash
 # regenerate-setup-checklist.sh — re-write SETUP-CHECKLIST.md based on
-# the current state of .cortana-blueprint-version. Used when a new
+# the current state of .xantham-blueprint-version. Used when a new
 # extension is installed or a component is upgraded that needs verification.
 
 set -euo pipefail
@@ -1427,7 +1427,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "Regenerating SETUP-CHECKLIST.md based on installed components..."
 echo "Open a fresh Claude Code session at $REPO_ROOT and run:"
 echo ""
-echo "  Read .cortana-blueprint-version. Regenerate SETUP-CHECKLIST.md per"
+echo "  Read .xantham-blueprint-version. Regenerate SETUP-CHECKLIST.md per"
 echo "  the Post-install verification section of the public blueprint,"
 echo "  including a checklist item for every component currently installed."
 ```
@@ -1443,7 +1443,7 @@ After install, the wizard's last step is to write all of these files:
 4. `FIRST-WEEK.md` (daily-ops guide)
 5. `PITFALLS.md` (anti-patterns)
 6. `MEMORY-HYGIENE.md` (memory rules)
-7. `scripts/upgrade-cortana.sh` (future bump path)
+7. `scripts/upgrade-xantham.sh` (future bump path)
 8. `scripts/regenerate-setup-checklist.sh` (regen helper)
 
 **User scope (one-time, applies to every Claude Code session on this machine):**
@@ -1551,7 +1551,7 @@ After collecting answers, compute these before generating files:
 Ask:
 > What would you like to name your orchestrator? This is your AI assistant's identity -- the name it uses when talking to you, the name in the database, the name in every config file. Pick something you want to see every day.
 >
-> Examples: Cortana, Jarvis, Friday, Atlas, Nova, Sage, or anything you like.
+> Examples: Xantham, Jarvis, Friday, Atlas, Nova, Sage, or anything you like.
 
 **Valid answers:** Any string. No restrictions.
 **Default:** None -- this must be chosen.
@@ -1870,10 +1870,10 @@ Ask:
 >
 > If Telegram is disabled, the first two are identical and the `-terminal` variants are omitted.
 >
-> Examples: `cortana`, `jarvis`, `ai`, `cmd`, `assistant`, or whatever you want to type.
+> Examples: `jarvis`, `friday`, `vex`, `ai`, `cmd`, `assistant`, or whatever you want to type.
 
 **Valid answers:** Any string (no spaces, lowercase recommended).
-**Default:** Lowercase version of orchestrator name (e.g., "Cortana" -> "cortana").
+**Default:** Lowercase version of orchestrator name (e.g., "Xantham" -> "xantham" or whatever the user picks).
 **Affects:** Shell profile functions that get added to your shell config.
 
 ---
@@ -1991,7 +1991,7 @@ Ask:
 
 **Valid answers:** Install, Skip (or 1, 2)
 **Default:** Install (if Advanced mode — sqlite-vec is the single biggest daily-use improvement over base Core).
-**Affects:** Whether Ollama is installed, whether `data/cortana-vec.db` exists, whether the post-commit embed hook is live, whether `bash scripts/memory-search.sh` is usable.
+**Affects:** Whether Ollama is installed, whether `data/xantham-vec.db` exists, whether the post-commit embed hook is live, whether `bash scripts/memory-search.sh` is usable.
 
 ---
 
@@ -2036,7 +2036,7 @@ Ask:
 >
 > **What you get:**
 > - A PostToolUse hook that writes one JSON line per tool call to `data/audit/YYYY-MM-DD.jsonl` (async, non-blocking)
-> - `bash scripts/cortana-live.sh --follow` — a pretty-printed live viewer with filters (by tool, project, day, failed-only)
+> - `bash scripts/xantham-live.sh --follow` — a pretty-printed live viewer with filters (by tool, project, day, failed-only)
 > - `bash scripts/audit-archive.sh` — retention (gzip-archives logs >=30 days old into `data/audit/archive/YYYY/MM.jsonl.gz`, committed to git so the forensic trail is permanent)
 > - `bash scripts/history.sh <query>` — unified search across Telegram conversation history, audit log (live + archived), git commit log, and memory markdown
 >
@@ -2069,7 +2069,7 @@ Ask:
 > - **Word-boundary regex on `rm`** — fixes false-positives where the Core gate blocks harmless commands like `echo "format..."` because "format" contains "rm" substring.
 > - **More comprehensive git coverage:** blocks `rebase -i`, `--onto`, `commit --amend`, `checkout -- .`, `restore .`, `stash drop`, `stash clear`, `worktree remove --force`, `branch -D`.
 >
-> **What you get:** protection against the force-push-instead-of-commit class of incident that destroys shared git history. Specifically this blueprint was hardened after Cortana once force-pushed by mistake and overwrote commits.
+> **What you get:** protection against the force-push-instead-of-commit class of incident that destroys shared git history. Specifically this blueprint was hardened after Xantham once force-pushed by mistake and overwrote commits.
 >
 > **What it costs:** £0. Same Bash hook, tighter rules. Zero token usage.
 >
@@ -2086,7 +2086,7 @@ Ask:
 
 ---
 
-After Q16-Q20, echo back the extension choices and update `.cortana-blueprint-version` accordingly:
+After Q16-Q20, echo back the extension choices and update `.xantham-blueprint-version` accordingly:
 
 ```yaml
 blueprint_version: v30
@@ -5188,14 +5188,14 @@ Every code block below has its destination path in the first line. Save each to 
 
 ```bash
 #!/usr/bin/env bash
-# Thin wrapper over scripts/embed-memories.py so the rest of Cortana can call it
+# Thin wrapper over scripts/embed-memories.py so the rest of Xantham can call it
 # like any other shell script. Forwards args, picks the working Python 3.13.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Order matters: we need a Python whose sqlite3 was built with loadable extensions.
 # uv's distribution (~/.local/bin/python3.13) ticks that box; the python.org one
 # at /usr/local/bin/python3 does NOT.
-for cand in "${CORTANA_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
+for cand in "${BLUEPRINT_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
   if [[ -x "$cand" ]] && "$cand" -c 'import sqlite3,sys; c=sqlite3.connect(":memory:"); c.enable_load_extension(True)' 2>/dev/null; then
     PY="$cand"
     break
@@ -5217,7 +5217,7 @@ exec "$PY" "$SCRIPT_DIR/embed-memories.py" "$@"
 # as JSON. Forwards args, picks the working Python 3.13.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-for cand in "${CORTANA_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
+for cand in "${BLUEPRINT_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
   if [[ -x "$cand" ]] && "$cand" -c 'import sqlite3; c=sqlite3.connect(":memory:"); c.enable_load_extension(True)' 2>/dev/null; then
     PY="$cand"
     break
@@ -5397,20 +5397,20 @@ jq -nc \
 echo '{"suppressOutput": true}'
 ```
 
-### `scripts/cortana-live.sh`
+### `scripts/xantham-live.sh`
 
 ```bash
 #!/bin/bash
-# cortana-live — pretty-print the Cortana audit JSONL
+# xantham-live — pretty-print the Xantham audit JSONL
 #
 # Usage:
-#   cortana-live                       # last 20 events from today
-#   cortana-live --follow              # tail -F today, stream live
-#   cortana-live --last 50             # last 50 events
-#   cortana-live --tool Bash           # only Bash events
-#   cortana-live --project PokeInvest  # only events in a project
-#   cortana-live --day 2026-04-20      # events from a specific day
-#   cortana-live --failed              # only errored tool calls
+#   xantham-live                       # last 20 events from today
+#   xantham-live --follow              # tail -F today, stream live
+#   xantham-live --last 50             # last 50 events
+#   xantham-live --tool Bash           # only Bash events
+#   xantham-live --project PokeInvest  # only events in a project
+#   xantham-live --day 2026-04-20      # events from a specific day
+#   xantham-live --failed              # only errored tool calls
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -5558,7 +5558,7 @@ echo "audit-archive: archived=$archived skipped=$skipped (threshold: $DAYS days)
 
 ```bash
 #!/bin/bash
-# CORTANA SAFETY GATE
+# XANTHAM SAFETY GATE
 # Blocks destructive commands and prompts Zaki for approval via Telegram.
 # Exit 0 = allow. Exit 2 = block (message sent to Claude via stderr).
 #
@@ -5566,7 +5566,7 @@ echo "audit-archive: archived=$archived skipped=$skipped (threshold: $DAYS days)
 # 1. Hook blocks a dangerous command
 # 2. Claude sees the block reason and asks Zaki on Telegram
 # 3. Zaki says "yes" / "approved"
-# 4. Claude writes the command to ~/Documents/cortana/data/approved.txt
+# 4. Claude writes the command to ~/Documents/xantham/data/approved.txt
 # 5. Claude retries the command
 # 6. Hook sees it's pre-approved, allows it, removes the approval
 
@@ -5580,8 +5580,8 @@ if [ -z "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
 fi
 
 TIMESTAMP=$(date -Iseconds)
-LOG_FILE="$HOME/Documents/cortana/logs/safety-gate.log"
-APPROVAL_FILE="$HOME/Documents/cortana/data/approved.txt"
+LOG_FILE="$HOME/Documents/xantham/logs/safety-gate.log"
+APPROVAL_FILE="$HOME/Documents/xantham/data/approved.txt"
 
 # Ensure approval file exists
 touch "$APPROVAL_FILE"
@@ -5600,7 +5600,7 @@ fi
 block() {
   local REASON="$1"
   local CATEGORY="$2"
-  echo "BLOCKED: $REASON. Ask Zaki for approval on Telegram. If he approves, write the exact command to ~/Documents/cortana/data/approved.txt (one command per line) then retry." >&2
+  echo "BLOCKED: $REASON. Ask Zaki for approval on Telegram. If he approves, write the exact command to ~/Documents/xantham/data/approved.txt (one command per line) then retry." >&2
   echo "[$TIMESTAMP] BLOCKED ($CATEGORY): ${COMMAND}${FILE_PATH}" >> "$LOG_FILE"
   exit 2
 }
