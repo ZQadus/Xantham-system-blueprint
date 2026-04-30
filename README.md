@@ -1,6 +1,6 @@
 # Xantham System
 
-> Self-installing personal AI orchestrator. Hand the blueprint to a fresh Claude Code session and it builds you a full multi-agent system.
+> Self-installing personal AI orchestrator. Hand the blueprint to a fresh Claude Code session and it builds you a full multi-agent system. Built for someone managing multiple projects who wants to drive everything (research, code, deploys, writing, planning) from their phone via Telegram, with a team of AI specialists handling the actual work.
 
 ## What you get
 
@@ -11,14 +11,46 @@
 - Per-tool-call audit log + safety gate that prevents destructive accidents
 - A self-installing wizard that walks you through setup in 20-60 minutes
 
+## Before you start
+
+You'll need:
+- **Mac or Windows** (Linux works too, treated like Mac)
+- **Claude Code** installed (claude.com/claude-code)
+- **An active Claude.ai paid plan**: Pro ($20/mo), Max 5x ($100/mo), or Max 20x ($200/mo). The system uses your existing subscription - no additional API charges. Pro works; Max is recommended for parallel agent work.
+- **About 90 minutes** of your time (60 min if you have Node/Git/Homebrew already installed; 30 min more if starting from a fresh laptop)
+
+The wizard will check for Node 18, Git, jq, sqlite3, and bun on first run, and tell you exactly how to install any that are missing.
+
+**Accounts you'll need:**
+- Claude.ai paid plan (required, see above)
+- Telegram (free, ~2 min to create the bot via @BotFather)
+- Google (free, optional - for the NotebookLM AI Brain. Skip if uncomfortable)
+- GitHub (free, optional - for auto-creating private repos for your projects)
+
+**Cost summary:** £0/month for the system itself. Just your Claude.ai subscription.
+
+## Data and privacy
+
+- Your conversations + memory files live on your laptop only. Not synced anywhere.
+- Telegram traffic flows: phone → Telegram servers → your bot → your laptop. Same posture as any Telegram bot.
+- NotebookLM session summaries push to Google's servers IF you enable the Brain. Skip the Brain if uncomfortable.
+- Claude API traffic flows to Anthropic via your existing Claude Code subscription. No new keys.
+- Audit logs are local-only and gitignored. Zero analytics or telemetry to the maintainer.
+
+## A note on the maintainer
+
+If you see references to `your orchestrator` or `cortana` inside the blueprint - that's the maintainer's literal name. Yours will be whatever you pick during the install wizard. The blueprint is system-agnostic.
+
 ## How to install
 
 1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre.
 
    **If you've never run Claude Code from a terminal before:**
-   - **Mac:** Open Terminal (⌘+space, type Terminal). Type `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent && claude`. Press enter. You'll see a Claude prompt.
+   - **Mac:** Open Terminal (⌘+space, type Terminal). Type `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent && claude`. Press enter.
    - **Windows:** Open PowerShell. Type `mkdir $env:USERPROFILE\Documents\MyAgent ; cd $env:USERPROFILE\Documents\MyAgent ; claude`. Press enter.
    - **Linux:** Same as Mac.
+
+   You'll see a screen that says **"Welcome to Claude Code"** with a `>` prompt. NOT the regular terminal prompt (`$` or `%`). If you see `$` or `%` after running `claude`, the command didn't launch the TUI - check that Claude Code is installed (claude.com/claude-code).
 
 2. Paste this single line into the Claude prompt:
 
@@ -29,7 +61,7 @@
 3. The wizard handles everything interactively from there. It will:
    - Detect your OS automatically (with confirmation).
    - Ask you to pick Simple or Advanced mode AFTER showing what each one includes.
-   - Walk you through creating a Telegram bot via @BotFather (step-by-step) when it gets to the messaging step.
+   - Walk you through creating a Telegram bot via @BotFather (step-by-step) when it gets to the messaging step. (Telegram bot setup takes ~2 minutes - you message a bot called @BotFather, type `/newbot`, pick a name, paste the token back into the wizard. The wizard walks you through every tap.)
    - Walk you through creating a NotebookLM notebook (or skipping the AI Brain for now) when it gets to the memory step.
    - Ask you to name your orchestrator at the right point in the flow.
    - Pick sensible defaults for everything else and confirm before applying.
@@ -65,9 +97,14 @@ This repo is public. Fork it, share the URL, hand the blueprint file to anyone w
 
 The personal-state version (with bot tokens, project names, agent personalities, etc.) lives in your private repo. This public file is the universal template.
 
-## A note on the maintainer
+## Don't like it? Uninstall in 2 minutes
 
-If you see references to "your orchestrator" inside the blueprint or in commits — that's the maintainer's personal AI agent built from this same blueprint. Yours will have whatever name you pick during the install wizard. The blueprint is system-agnostic.
+```bash
+rm -rf ~/Documents/MyAgent
+claude plugin uninstall telegram@claude-plugins-official
+```
+
+That removes everything. Your Claude.ai subscription, Telegram bot, and NotebookLM notebook stay where they are - delete those manually if desired.
 
 ## Contributing
 
