@@ -13,21 +13,32 @@
 
 ## How to install
 
-1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre
-2. Paste this prompt:
+1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre.
+
+   **If you've never run Claude Code from a terminal before:**
+   - **Mac:** Open Terminal (⌘+space, type Terminal). Type `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent && claude`. Press enter. You'll see a Claude prompt.
+   - **Windows:** Open PowerShell. Type `mkdir $env:USERPROFILE\Documents\MyAgent ; cd $env:USERPROFILE\Documents\MyAgent ; claude`. Press enter.
+   - **Linux:** Same as Mac.
+
+2. Paste this single line into the Claude prompt:
 
    ```
-   Read the xantham-system-v30.md blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v30.md
-   Install it in <simple|advanced> mode.
-   My OS is <mac|windows|linux>.
-   My name is <your name>. My Telegram bot token is <token>. My NotebookLM Brain notebook ID is <id> (or "create a new one").
-   Walk me through it.
-   At the end, generate SETUP-CHECKLIST.md per the "Post-install verification" section.
+   Read the Xantham System v30 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v30.md and run the full setup wizard. Walk me through every step, ask me one question at a time, and don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
    ```
 
-3. Walk through the questions
-4. When done, the wizard generates eight files at the project root: `SETUP-CHECKLIST.md`, `USER-GUIDE.md`, `BACKUP-AND-RECOVERY.md`, `FIRST-WEEK.md`, `PITFALLS.md`, `MEMORY-HYGIENE.md`, plus two helper scripts in `scripts/`
-5. Close the session, run your new agent's terminal alias (e.g. `myagent`), and the first session walks you through `SETUP-CHECKLIST.md` before any real work
+3. The wizard handles everything interactively from there. It will:
+   - Detect your OS automatically (with confirmation).
+   - Ask you to pick Simple or Advanced mode AFTER showing what each one includes.
+   - Walk you through creating a Telegram bot via @BotFather (step-by-step) when it gets to the messaging step.
+   - Walk you through creating a NotebookLM notebook (or skipping the AI Brain for now) when it gets to the memory step.
+   - Ask you to name your orchestrator at the right point in the flow.
+   - Pick sensible defaults for everything else and confirm before applying.
+
+   You don't need ANY values up front. The wizard asks one question at a time, in plain English, and tells you exactly how to get any external value (bot token, notebook ID) as it reaches that step. Total time: 20-45 minutes including bot setup.
+
+4. When done, the wizard generates eight files at the project root: `SETUP-CHECKLIST.md` (verify install), `USER-GUIDE.md` (your day-one cheat sheet), `BACKUP-AND-RECOVERY.md`, `FIRST-WEEK.md`, `PITFALLS.md`, `MEMORY-HYGIENE.md`, plus two helper scripts in `scripts/`.
+
+5. Close the session, run your new agent's terminal alias (e.g. `myagent` if you named it MyAgent), and the first fresh session walks you through `SETUP-CHECKLIST.md` before any real work.
 
 ## Files in this repo
 
