@@ -1,10 +1,10 @@
-# Xantham System — Blueprint v30
+# Xantham System - Blueprint v30
 
-Self-installing orchestrator + specialist-agent system for one person managing dozens of projects from a phone. Runs on top of Claude Code (CLI) with a Telegram interface, a memory system, and four optional power-user extensions.
+This is your personal AI assistant that lives on your laptop and answers Telegram. It can do real work for you (research, code, deployments) by passing tasks to a team of specialist sub-assistants.
 
-**One file. Hand to a fresh Claude Code session. It walks you through picking a mode, installing your pieces, and ends with a working Cortana.**
+Self-installing orchestrator + specialist-agent system for one person managing dozens of projects from a phone. Runs on top of Claude Code (the developer-mode app from Anthropic, installed from claude.com/claude-code; uses your existing Claude.ai subscription) with a Telegram interface, a memory system, and four optional power-user extensions (an extension is an opt-in add-on installed separately, like the semantic memory layer or hardened safety gate).
 
-**v30 release note (vs v29):** Extension E2 (Graphiti temporal knowledge graph) ruled out and removed. Production audit at single-user scale found zero queries that changed an answer in 3 weeks of operation, while ingest cost ran ~£5/run. Recommended memory layer is now flat-markdown + E1 sqlite-vec + Anthropic's native client-side memory tool (`memory_20250818`) operating on the `memory/` directory directly. The four extensions are E1 (semantic memory), E3 (Agent Teams), E4 (Observability), E5 (Hardened safety). Numbering preserved for compatibility with v29-installed deployments — there is no E2 going forward.
+**One file. Hand to a fresh Claude Code session. It walks you through picking a mode, installing your pieces, and ends with a working orchestrator.**
 
 ---
 
@@ -14,14 +14,12 @@ You want a personal AI orchestrator that:
 - Takes Telegram messages from your phone
 - Routes tasks to specialist sub-agents (engineering, research, deploy, writing, growth, trading, business, human-interaction)
 - Keeps memory across sessions (what you told it, decisions made, corrections given)
-- Runs background work on a schedule (via local macOS launchd OR Anthropic cloud routines — see caveats below)
+- Runs background work on a schedule (via local macOS launchd OR Anthropic cloud routines, with caveats documented in Troubleshooting)
 - Shares progress back to Telegram so you can be anywhere
 
-**Scheduled-work caveat (learned 22 Apr 2026):** Anthropic's Claude Code Routines run in a cloud sandbox that blocks outbound HTTP to non-allowlisted hosts. That includes `api.telegram.org` by default — the routine completes "successfully" but the curl that ships the message to you never leaves. Diagnosis: click into any routine run at claude.ai/code/scheduled and look for "Host not in allowlist" in the output log. Workarounds: (1) webhook relay you host that Anthropic CAN reach, (2) local macOS launchd + `scripts/canaries-daemon.sh` pattern — runs whenever your Mac is awake, zero cloud dependency.
+Background scheduled tasks have some Mac-specific quirks documented in the Troubleshooting section; they don't block daily use.
 
-**TCC caveat (Mac only):** macOS Transparency/Consent/Control blocks launchd-spawned processes (like local cron replacements) from executing OR reading/writing files under `~/Documents/` without Full Disk Access granted to the spawning binary. The "escape-shim to ~/bin/" pattern stops working once the shim tries to cd back into Documents. Scoped-plist FDA grants are not possible via the macOS GUI (only .app bundles and executable binaries are selectable). Practical paths: (A) grant FDA to `/bin/bash` (works but broadens surface), (B) accept session-only observability via CronCreate inside live Xantham sessions (no background fires between sessions), (C) full relocation of scripts + every data path they read/write into a non-Documents location like `~/.<your-orchestrator>/` (3-4h refactor, strictly safe). Default recommendation is (B): the simplest, no-FDA-grant path.
-
-If that sounds right — keep reading. The next step is picking a mode.
+If that sounds right, keep reading. The next step is picking a mode.
 
 ---
 
@@ -34,7 +32,7 @@ Before install, pick one. You can upgrade later, but the fresh-install path diff
 | Setup time | ~20 minutes | ~45-60 minutes |
 | RAM while idle | ~500 MB | ~1.5 GB |
 | Disk | ~200 MB | ~2-3 GB |
-| Monthly cost | $0 (plus your Claude Max sub) | $0 (all extensions are local + free) |
+| Monthly cost | $0 (plus your Claude Max sub, the higher-tier Claude.ai subscription you'll need for daily intensive use) | $0 (all extensions are local + free) |
 | Memory retrieval | Markdown files + grep + NotebookLM Brain | Same + sqlite-vec semantic search via local Ollama |
 | Multi-agent coordination | Sequential via the Task tool | Live shared context via Agent Teams + whiteboard |
 | Observability | Telegram history log | Everything above + per-tool-call audit JSONL + live viewer |
@@ -47,27 +45,27 @@ Before install, pick one. You can upgrade later, but the fresh-install path diff
 **Simple mode includes:** Orchestrator (your AI), Specialist crew (9 agents), Markdown memory, Telegram channel, NotebookLM Brain integration, Session cron, Compaction defence, Basic safety gate.
 
 **Advanced mode includes everything in Simple, plus:**
-- **E1 Semantic memory** (sqlite-vec + Ollama Nomic-embed) — semantic search across your memory files. "Find the rule about timezones" works even when you don't remember the file name.
-- **E3 Agent Teams** — multiple agents share a live whiteboard so they don't duplicate work or step on each other.
-- **E4 Observability** — every tool call gets logged to a JSONL audit, surfaced via `cortana-live.sh`. Catches silent failures and "what did the background agent actually do?"
-- **E5 Hardened safety** — strict replacement for the basic gate. Force-push to protected branches becomes physically impossible (no approval can unlock it). Fixes false-positives on `format` / `arm` words that contain `rm`.
+- **E1 Semantic memory** (sqlite-vec + Ollama Nomic-embed) - semantic search across your memory files. "Find the rule about timezones" works even when you don't remember the file name.
+- **E3 Agent Teams** - multiple agents share a live whiteboard so they don't duplicate work or step on each other.
+- **E4 Observability** - every tool call gets logged to a JSONL audit, surfaced via `<orchestrator>-live.sh`. Catches silent failures and "what did the background agent actually do?"
+- **E5 Hardened safety** - strict replacement for the basic gate. Force-push to protected branches becomes physically impossible (no approval can unlock it). Fixes false-positives on `format` / `arm` words that contain `rm`.
 
 **Recommendation:** install Simple first. Add extensions one by one as you feel the pain points they solve. Don't run the full Advanced stack until you've used Simple for a week and know what's missing.
 
-Every extension is independently installable and removable. `.cortana-blueprint-version` tracks which are on.
+Every extension is independently installable and removable. `.<orchestrator>-blueprint-version` tracks which are on.
 
 ### Upgrades library
 
-After installing Cortana, the living docs for "what's been built" + "where we're going" live at:
+After installing your orchestrator, the living docs for "what's been built" + "where we're going" live at:
 
 ```
 docs/upgrades/
-├── CATALOGUE.md   — BACKWARD-looking ledger (SHIPPED / DEFERRED / REJECTED / PILOT)
-├── ROADMAP.md     — FORWARD-looking plan (vision + phased roadmap)
-└── memo_*.md      — specific architectural memos
+├── CATALOGUE.md   - BACKWARD-looking ledger (SHIPPED / DEFERRED / REJECTED / PILOT)
+├── ROADMAP.md     - FORWARD-looking plan (vision + phased roadmap)
+└── memo_*.md      - specific architectural memos
 ```
 
-Read CATALOGUE before proposing new upgrades (you might find it's already been considered or explicitly rejected). Read ROADMAP before starting Phase N+1 work (aligns with the north-star). Cortana's `cortana-maintenance` skill reads both on every Monday / greeting digest.
+Read CATALOGUE before proposing new upgrades (you might find it's already been considered or explicitly rejected). Read ROADMAP before starting Phase N+1 work (aligns with the north-star). The `<orchestrator>-maintenance` skill (renamed in your install to match your orchestrator) reads both on every Monday / greeting digest. (A skill is a bundle of instructions Claude loads on-demand when the situation matches.)
 
 ---
 
@@ -75,34 +73,34 @@ Read CATALOGUE before proposing new upgrades (you might find it's already been c
 
 Both modes get:
 
-### Orchestrator (Cortana itself)
+### Orchestrator (your AI itself)
 Claude Code CLI running Opus 4.7. Receives Telegram messages, routes to specialist sub-agents, replies. Lives in `CLAUDE.md` in your project root.
 
 ### Specialist crew (9 agents)
-Default names — rename to taste:
-- **Kai** — engineering (code, architecture, bugs, review)
-- **Nadia** — research (competitive intel, market sizing, deep research)
-- **Rio** — growth (social, ASO, launches, copy)
-- **Marco** — infra (deploy, CI/CD, DNS, monitoring)
-- **Jules** — writing (blog posts, docs, decks, emails)
-- **Warren** — trading (strategies, backtests, portfolio, markets)
-- **Elena** — business (revenue, pricing, partnerships, contracts)
-- **Chase** — human dynamics (persuasion, negotiation, networking)
-- **Cortana** — the orchestrator (you)
+Default names - rename to taste:
+- **Kai** - engineering (code, architecture, bugs, review)
+- **Nadia** - research (competitive intel, market sizing, deep research)
+- **Rio** - growth (social, ASO, launches, copy)
+- **Marco** - infra (deploy, CI/CD, DNS, monitoring)
+- **Jules** - writing (blog posts, docs, decks, emails)
+- **Warren** - trading (strategies, backtests, portfolio, markets)
+- **Elena** - business (revenue, pricing, partnerships, contracts)
+- **Chase** - human dynamics (persuasion, negotiation, networking)
+- **{{orchestrator_name}}** - the orchestrator (you)
 
 Each lives at `.claude/agents/<name>.md`. Each has its own persistent memory at `agent-memory/<name>/`.
 
 ### Memory system
-- `memory/*.md` — user-level memories (feedback, project state, user profile, references)
-- `memory/MEMORY.md` — index, auto-loaded at session start
-- `agent-memory/<agent>/*.md` — per-agent memories, loaded on agent spawn
-- `data/telegram-history/YYYY-MM.jsonl` — every Telegram message, inbound and outbound
+- `memory/*.md` - user-level memories (feedback, project state, user profile, references)
+- `memory/MEMORY.md` - index, auto-loaded at session start
+- `agent-memory/<agent>/*.md` - per-agent memories, loaded on agent spawn
+- `data/telegram-history/YYYY-MM.jsonl` - every Telegram message, inbound and outbound
 
 All markdown. All in the repo. All auto-loaded by Claude Code at session start.
 
 ### Telegram integration
-- `claude-plugins-official/telegram` MCP plugin
-- `.claude/hooks/log-telegram-hook.sh` auto-logs every outbound reply (async, no latency)
+- `claude-plugins-official/telegram` MCP plugin (a plugin is a bundle of skills + commands installed through the Claude Code app; an MCP server is a pre-built connector that lets your agents talk to outside services like Telegram, Gmail, your database, Vercel, and so on)
+- `.claude/hooks/log-telegram-hook.sh` auto-logs every outbound reply (async, no latency). A hook is a small script that runs automatically before or after the agent does certain actions; the safety gate is also a hook.
 - `scripts/log-telegram.sh` for manual inbound logging
 - Access managed via `/telegram:access` skill
 
@@ -129,29 +127,29 @@ All markdown. All in the repo. All auto-loaded by Claude Code at session start.
 - `sudo` (any command)
 - Edits to `.env`, SSH/GPG keys
 
-Approval flow: blocked command → Claude asks you on Telegram → you say yes → Claude writes the exact command to `~/Documents/cortana/data/approved.txt` → retries → one-time use.
+**Approval flow in plain English.** If your agent tries one of those destructive commands, the safety gate pauses and pings you on Telegram. The message shows the exact command and asks something like: "Approve `rm old-file.txt`?" Reply `yes` to allow it. Reply anything else to refuse. If you happen to be at your laptop, you can also reply directly in the terminal, same effect. The approval is one-time only. The same command next session pauses again. The agent writes your `yes` to `{{project_path}}/data/approved.txt` so it can re-read it on the retry, then deletes the entry.
 
 ---
 
-## Extensions (opt-in — Advanced mode)
+## Extensions (opt-in - Advanced mode)
 
 Each extension is self-contained. Install only the ones you want. Uninstall by removing its section from your config.
 
 ---
 
-### E1 — Semantic memory via sqlite-vec + Nomic-embed
+### E1 - Semantic memory via sqlite-vec + Nomic-embed
 
 **Purpose**
 Fast local semantic search over every markdown memory file. Answers "have we hit this before?" and "what did we decide about X?" without going to the NotebookLM Brain. 95 ms median latency.
 
 **How it works**
-- `scripts/embed-memories.sh` reads every `.md` in `memory/`, `agent-memory/`, `docs/`, chunks by paragraph, embeds each chunk via Ollama's Nomic-embed-text (137M params, local), stores in `data/cortana-vec.db` (sqlite-vec virtual table)
+- `scripts/embed-memories.sh` reads every `.md` in `memory/`, `agent-memory/`, `docs/`, chunks by paragraph, embeds each chunk via Ollama's Nomic-embed-text (137M params, local), stores in `data/vector-memory.db` (sqlite-vec virtual table)
 - Incremental: on re-run, only re-embeds chunks whose content hash changed
 - `scripts/memory-search.sh "<query>"` embeds the query, returns top-5 matches with file path + line range + score
 - Post-commit git hook re-embeds any changed memory files automatically
 
 **Cost**
-- $0 — no API calls. Nomic-embed weights are free, run on your CPU via Ollama.
+- $0 - no API calls. Nomic-embed weights are free, run on your CPU via Ollama.
 - Disk: ~300 MB (Nomic-embed model) + ~5 MB (vector DB for 500 chunks)
 - RAM: ~500 MB when Ollama is loaded; 0 when idle (Ollama unloads after 5 min)
 
@@ -159,7 +157,7 @@ Fast local semantic search over every markdown memory file. Answers "have we hit
 Zero. Purely local compute.
 
 **Dependencies**
-- Ollama (Mac: `brew install ollama` / Windows: `winget install Ollama.Ollama` — then `ollama pull nomic-embed-text` on both)
+- Ollama (Mac: `brew install ollama` / Windows: `winget install Ollama.Ollama` - then `ollama pull nomic-embed-text` on both)
 - sqlite-vec (`pip install sqlite-vec` on both, or loaded as a sqlite extension)
 
 **Install (Mac)**
@@ -194,7 +192,7 @@ pip install sqlite-vec
 
 # 3. Copy the scripts (embed-memories.sh, memory-search.sh, install-git-hooks.sh) into scripts/
 # 4. Copy hooks/post-commit into scripts/hooks/
-# 5. Install the git hook (run via Git Bash or WSL — the .sh scripts assume bash)
+# 5. Install the git hook (run via Git Bash or WSL - the .sh scripts assume bash)
 bash scripts/install-git-hooks.sh
 
 # 6. First full embed (one-time)
@@ -202,7 +200,7 @@ bash scripts/embed-memories.sh
 ```
 
 **Uninstall**
-- Delete `data/cortana-vec.db`
+- Delete `data/vector-memory.db`
 - Remove the post-commit hook: `rm .git/hooks/post-commit` (Mac/Linux) or `Remove-Item .git\hooks\post-commit` (Windows)
 - Uninstall Ollama if you don't use it elsewhere: `brew uninstall ollama` (Mac) or `winget uninstall Ollama.Ollama` (Windows)
 
@@ -214,22 +212,22 @@ bash scripts/memory-search.sh "how do I fix the alpha channel icon issue"
 
 ---
 
-### E3 — Agent Teams + channel.md whiteboard
+### E3 - Agent Teams + channel.md whiteboard
 
 **Purpose**
-Live shared context between sub-agents working in parallel on the same task. Without this, agents fire and forget — each one's decisions are invisible to the others until they report back. With this, one agent's progress updates are visible to the others in real time.
+Live shared context between sub-agents working in parallel on the same task. Without this, agents fire and forget - each one's decisions are invisible to the others until they report back. With this, one agent's progress updates are visible to the others in real time.
 
 **How it works**
 - Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `.claude/settings.json`. Unlocks `TeamCreate`, `SendMessage`, and `TeamDelete` tools for live peer-to-peer messaging (Claude Code 2.1.32+).
 - Create a markdown channel file at `data/agent-channels/<slug>.md` when spawning multiple agents on the same project. Include the path in every agent's brief.
-- Agents `Edit`-append their progress/decisions/blockers to the channel as they work. Cortana re-reads between its own tool calls to converge state across agents.
+- Agents `Edit`-append their progress/decisions/blockers to the channel as they work. The orchestrator re-reads between its own tool calls to converge state across agents.
 - When the task ships, archive to `data/agent-channels/archive/YYYY-MM/<slug>.md`.
 
 **Cost**
 $0. Just a feature flag + a markdown file.
 
 **Token usage**
-Marginal — agents spend a few extra tokens reading the channel file before deciding their next step. Saves tokens overall because they don't re-ask Cortana "what is the other agent doing?"
+Marginal - agents spend a few extra tokens reading the channel file before deciding their next step. Saves tokens overall because they don't re-ask the orchestrator "what is the other agent doing?"
 
 **Dependencies**
 Claude Code 2.1.32 or newer.
@@ -249,21 +247,21 @@ mkdir -p data/agent-channels/archive
 Flip the flag to "0" and remove `data/agent-channels/`.
 
 **Usage**
-Included in Cortana's orchestration habits (see CLAUDE.md). Multi-agent tasks on the same project automatically get a channel file.
+Included in the orchestrator's orchestration habits (see CLAUDE.md). Multi-agent tasks on the same project automatically get a channel file.
 
 ---
 
-### E4 — Observability audit layer
+### E4 - Observability audit layer
 
 **Purpose**
-Live visibility into every tool call Cortana (and its sub-agents) make during a session. Solves "I know the background agent finished, but I can't easily see what it did." Paid for itself within hours of installation on our first run.
+Live visibility into every tool call your orchestrator (and its sub-agents) make during a session. Solves "I know the background agent finished, but I can't easily see what it did." Paid for itself within hours of installation on our first run.
 
 **How it works**
 - `.claude/hooks/audit-log-hook.sh` is a PostToolUse hook with matcher `.*`. Fires async after every tool call.
 - Writes one JSON line per event to `data/audit/YYYY-MM-DD.jsonl` with: tool name, tool_use_id, input summary (240 chars), output summary (240 chars), success/error, project
 - Secrets-stripped: regex scrubs `api_key`, `token`, `password`, `bearer`, `authorization` patterns before write
-- Gitignored — audit logs never leave your machine
-- `scripts/cortana-live.sh` pretty-prints with filters (--tool, --project, --day, --failed, --follow)
+- Gitignored - audit logs never leave your machine
+- `scripts/<orchestrator>-live.sh` pretty-prints with filters (--tool, --project, --day, --failed, --follow)
 - `scripts/audit-archive.sh` compresses files older than 30 days (default) into `data/audit/archive/YYYY/MM.jsonl.gz` (committed to git, never deleted). Replaces the old `audit-prune.sh` delete-based approach (April 2026).
 
 **Cost**
@@ -281,8 +279,8 @@ Zero. The hook runs in Bash, not Claude.
 # 1. Copy .claude/hooks/audit-log-hook.sh
 chmod +x .claude/hooks/audit-log-hook.sh
 
-# 2. Copy scripts/cortana-live.sh, scripts/audit-archive.sh, scripts/history.sh, scripts/verify-sync.sh
-chmod +x scripts/cortana-live.sh scripts/audit-archive.sh scripts/history.sh scripts/verify-sync.sh
+# 2. Copy scripts/<orchestrator>-live.sh, scripts/audit-archive.sh, scripts/history.sh, scripts/verify-sync.sh
+chmod +x scripts/<orchestrator>-live.sh scripts/audit-archive.sh scripts/history.sh scripts/verify-sync.sh
 
 # 2b. Copy .claude/hooks/session-end-verify.sh and wire it as the Stop hook
 chmod +x .claude/hooks/session-end-verify.sh
@@ -293,30 +291,30 @@ chmod +x .claude/hooks/session-end-verify.sh
 # 4. Add data/audit/ to .gitignore
 ```
 
-Note: Windows users running outside Git Bash will need WSL2 for the chmod / bash / jq pipeline. The cortana-live.sh script is bash-only; PowerShell native ports of these scripts are not maintained. See the "Windows shell choice" callout under "Quick start" earlier in the blueprint.
+Note: Windows users running outside Git Bash will need WSL2 for the chmod / bash / jq pipeline. The <orchestrator>-live.sh script is bash-only; PowerShell native ports of these scripts are not maintained. See the "Windows shell choice" callout under "Quick start" earlier in the blueprint.
 
 **Uninstall**
 Remove the PostToolUse entry from `.claude/settings.json` and delete `data/audit/`.
 
 **Usage**
 ```bash
-bash scripts/cortana-live.sh             # last 20 events today
-bash scripts/cortana-live.sh --follow    # stream live
-bash scripts/cortana-live.sh --failed    # only errored tool calls
-bash scripts/cortana-live.sh --project PokeInvest --tool Agent
+bash scripts/<orchestrator>-live.sh             # last 20 events today
+bash scripts/<orchestrator>-live.sh --follow    # stream live
+bash scripts/<orchestrator>-live.sh --failed    # only errored tool calls
+bash scripts/<orchestrator>-live.sh --project PokeInvest --tool Agent
 bash scripts/audit-archive.sh 30         # gzip JSONL >=30d old into data/audit/archive/YYYY/MM.jsonl.gz
 bash scripts/history.sh <query>          # unified search across telegram + audit (live + archived) + git log + memory
 ```
 
 ---
 
-### E5 — Hardened safety gate
+### E5 - Hardened safety gate
 
 **Purpose**
-Stricter replacement for the Core safety gate. Adds protected-branch force-push hard-blocks (cannot be approved through the hook — requires manual Terminal) and fixes word-boundary false positives on `rm` that match innocent words like "format" or "arm".
+Stricter replacement for the Core safety gate. Adds protected-branch force-push hard-blocks (cannot be approved through the hook - requires manual Terminal) and fixes word-boundary false positives on `rm` that match innocent words like "format" or "arm".
 
 **How it works**
-Drop-in replacement for `.claude/hooks/safety-gate.sh`. Same approval-file mechanism (`~/Documents/cortana/data/approved.txt`), same log, same exit codes. Rules:
+Drop-in replacement for `.claude/hooks/safety-gate.sh`. Same approval-file mechanism (`{{project_path}}/data/approved.txt`), same log, same exit codes. Rules:
 
 Hard-blocked (no approval possible):
 - Force push to `main` / `master` / `production` / `prod` / `release` / `develop` (any variant: `--force`, `-f`, `--force-with-lease`)
@@ -372,43 +370,43 @@ Restore the `.core-backup` copy.
 
 ## Version history
 
-### v29.2 (2026-04-21, evening) — full audit + cleanup pass
+### v29.2 (2026-04-21, evening) - full audit + cleanup pass
 
 Triggered by a Claude-Code warning about CLAUDE.md size. Escalated into a full internal+external audit (Nadia + Kai agents) and 14-task cleanup arc. 13 commits shipped to main.
 
 **Safety gate hardening (additive-only, 48/48 tests still pass):**
 - 30-day TTL on approval file. Format: `<epoch_seconds>|<command>` per line. Legacy entries without epoch prefix get stamped with now on first sight. Stale approvals from previous sessions no longer quietly green-light destructive ops.
 - JSON output alongside existing exit codes: `{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow|deny",permissionDecisionReason:"..."}}`. Exit codes remain authoritative.
-- PermissionDenied hook at `.claude/hooks/permission-denied-hook.sh` — log-only visibility for Auto-mode classifier denials. Never retries. Wired via settings.json `PermissionDenied` event.
-- Deliberately skipped `defer` state — pre-emptive infra with no current use case. Revisit if cloud routines start touching destructive ops.
+- PermissionDenied hook at `.claude/hooks/permission-denied-hook.sh` - log-only visibility for Auto-mode classifier denials. Never retries. Wired via settings.json `PermissionDenied` event.
+- Deliberately skipped `defer` state - pre-emptive infra with no current use case. Revisit if cloud routines start touching destructive ops.
 
 **Effort tier system:**
-- Env floor: `export CLAUDE_CODE_EFFORT_LEVEL=xhigh` in shell profile — absolute floor.
+- Env floor: `export CLAUDE_CODE_EFFORT_LEVEL=xhigh` in shell profile - absolute floor.
 - settings.json belt+braces: `"effortLevel": "xhigh"`.
 - Per-agent `effort:` frontmatter in `.claude/agents/*.md`:
   - `max` → Kai + all 5 specialist roles
   - `xhigh` → Nadia, Warren, Marco, Elena, Chase, Rio, Jules
 - One-off escalation: prepend `ultrathink` to the routed brief. Single-turn max reasoning, no config change.
-- Schema gap: `max` is not accepted in settings.json (silently downgrades to xhigh) — only env var or frontmatter gets `max` to stick.
+- Schema gap: `max` is not accepted in settings.json (silently downgrades to xhigh) - only env var or frontmatter gets `max` to stick.
 
 **MCP wiring (Graphiti + Exa):**
 - Graphiti MCP server added to `.mcp.json` at `http://localhost:8000/mcp/`. Container was healthy the whole time but never listed in the config, so every agent citation of "use the Graphiti MCP" silently fell back to grep. Now verified end-to-end: search_nodes, search_memory_facts, get_episodes all return rich data from the existing 125-node / 214-edge graph.
 - Exa MCP added via stdio transport: `npx -y exa-mcp-server` with `EXA_API_KEY` from env (gitignored `~/.zshrc`). Nadia's research scans now have semantic + neural web search instead of bare WebSearch.
 
 **Native Claude Code Routines (2026-04-15 setup, 2026-04-21 fix, DISABLED 2026-04-22):**
-Four triggers were live at https://claude.ai/code/scheduled. Disabled on 22 Apr 2026 after root-causing why morning digests stopped arriving: Anthropic's cloud sandbox blocks outbound curl to `api.telegram.org` via a per-routine host allowlist, so routines completed successfully in the cloud but the final curl never left. Replaced by local launchd daemon at `scripts/canaries-daemon.sh` (fires every 5 min when the Mac is awake) — see personal blueprint E8 and `docs/upgrades/CATALOGUE.md` for detail. Approval flow (`dream approve` / `corrections promote <category>` in a live session) unchanged.
+Four triggers were live at https://claude.ai/code/scheduled. Disabled on 22 Apr 2026 after root-causing why morning digests stopped arriving: Anthropic's cloud sandbox blocks outbound curl to `api.telegram.org` via a per-routine host allowlist, so routines completed successfully in the cloud but the final curl never left. Replaced by local launchd daemon at `scripts/canaries-daemon.sh` (fires every 5 min when the Mac is awake) - see personal blueprint E8 and `docs/upgrades/CATALOGUE.md` for detail. Approval flow (`dream approve` / `corrections promote <category>` in a live session) unchanged.
 
 **Memory system repairs:**
-- `scripts/regen-memory-index.sh` — regenerates `memory/MEMORY.md` from every sibling `.md` frontmatter. Auto-fires via post-commit hook when anything under `memory/` changes.
+- `scripts/regen-memory-index.sh` - regenerates `memory/MEMORY.md` from every sibling `.md` frontmatter. Auto-fires via post-commit hook when anything under `memory/` changes.
 - Index was out of sync: 66 listed vs 89 on disk. Now 90/90.
-- `scripts/sync-project-memories.sh` — rewritten to read `docs/projects.md` dynamically instead of a hardcoded 5-project list. Last run: 36 projects, 984 file copies. macOS bash 3.2 compatible (uses `tr` not `${var,,}`).
-- `scripts/dream.sh` — rewritten to walk markdown directly. Old version scanned a sqlite DB that's been frozen since mid-April. New version: near-duplicate scan (word-overlap similarity), stale scan (file mtime), completion-marker grep. Writes `data/dream-proposals/YYYYMMDD.md` in the same format the Sunday Routine agent uses.
+- `scripts/sync-project-memories.sh` - rewritten to read `docs/projects.md` dynamically instead of a hardcoded 5-project list. Last run: 36 projects, 984 file copies. macOS bash 3.2 compatible (uses `tr` not `${var,,}`).
+- `scripts/dream.sh` - rewritten to walk markdown directly. Old version scanned a sqlite DB that's been frozen since mid-April. New version: near-duplicate scan (word-overlap similarity), stale scan (file mtime), completion-marker grep. Writes `data/dream-proposals/YYYYMMDD.md` in the same format the Sunday Routine agent uses.
 
 **Version string + path cleanup:**
-- `scripts/check-blueprint-drift.sh` now reads v29 files in `blueprints/` (was v28 at repo root — silently always-passing).
-- `scripts/verify-sync.sh` — belt-and-braces drift catcher added 22 Apr 2026. The keyword-scan drift script can miss renamed / added / deleted files that fall outside its hard-coded keyword list. `verify-sync.sh` runs `git diff --name-status` over `scripts/`, `.claude/hooks/`, and `.claude/skills/` since the last blueprint commit, and exits non-zero if any newly-landed basename is absent from either blueprint. Use it as the last step of any `cortana-sync` turn.
-- `.claude/hooks/session-end-verify.sh` — Stop-hook swap (22 Apr 2026). Previous Stop hook was a fixed `echo 'Reminder: verify build...'` string. Replaced with a real three-check script that runs at every session stop: unpushed commits count, uncommitted files count, `verify-sync.sh` drift check. Writes warnings to stderr, exits 0 so it can't block shutdown. Wire via `.claude/settings.json` Stop hook array.
-- `.claude/hooks/telegram-reply-reminder.sh` — UserPromptSubmit hook (22 Apr 2026). Triggers on every inbound prompt. If the prompt starts with a genuine Telegram channel tag (anchored regex requiring source + chat_id + message_id at line start — the earlier substring-match false-positived on any quoted telegram transcript), the hook emits a JSON `additionalContext` reminder forcing the agent to use the `mcp__plugin_telegram_telegram__reply` tool. Also writes `data/runtime/turn-contract.json` (0600 perms) with per-turn guarantees that `stop-verify-contract.sh` checks at turn end. Fires BEFORE any skill loads. Wire via `.claude/settings.json` UserPromptSubmit hook array.
+- `scripts/check-blueprint-drift.sh` now reads v29 files in `blueprints/` (was v28 at repo root - silently always-passing).
+- `scripts/verify-sync.sh` - belt-and-braces drift catcher added 22 Apr 2026. The keyword-scan drift script can miss renamed / added / deleted files that fall outside its hard-coded keyword list. `verify-sync.sh` runs `git diff --name-status` over `scripts/`, `.claude/hooks/`, and `.claude/skills/` since the last blueprint commit, and exits non-zero if any newly-landed basename is absent from either blueprint. Use it as the last step of any `<orchestrator>-sync` turn.
+- `.claude/hooks/session-end-verify.sh` - Stop-hook swap (22 Apr 2026). Previous Stop hook was a fixed `echo 'Reminder: verify build...'` string. Replaced with a real three-check script that runs at every session stop: unpushed commits count, uncommitted files count, `verify-sync.sh` drift check. Writes warnings to stderr, exits 0 so it can't block shutdown. Wire via `.claude/settings.json` Stop hook array.
+- `.claude/hooks/telegram-reply-reminder.sh` - UserPromptSubmit hook (22 Apr 2026). Triggers on every inbound prompt. If the prompt starts with a genuine Telegram channel tag (anchored regex requiring source + chat_id + message_id at line start - the earlier substring-match false-positived on any quoted telegram transcript), the hook emits a JSON `additionalContext` reminder forcing the agent to use the `mcp__plugin_telegram_telegram__reply` tool. Also writes `data/runtime/turn-contract.json` (0600 perms) with per-turn guarantees that `stop-verify-contract.sh` checks at turn end. Fires BEFORE any skill loads. Wire via `.claude/settings.json` UserPromptSubmit hook array.
 
 ### TCC-bypass via AppleScript .app wrappers (24-25 Apr 2026)
 
@@ -416,55 +414,55 @@ macOS Transparency/Consent/Control began blocking launchd-spawned bash from exec
 
 - `scripts/install-launchd-wrappers.sh` builds 4 `.app` bundles via `osacompile` + ad-hoc codesign into `~/Applications/`
 - AppleScript sources at `scripts/launchd-wrappers/`: `canaries-wrapper.applescript`, `proactive-trigger-wrapper.applescript`, `morning-digest-wrapper.applescript`, `corrections-review-wrapper.applescript`, `signal-fire-wrapper.applescript`. Each guards on `RUN_FROM_LAUNCHD=true` env var, execs the matching bash daemon via `do shell script`, error-traps with logging.
-- Drop-in plists at `scripts/launchd-wrappers/`: `new-com.cortana.canaries.plist`, `new-com.cortana.proactive-trigger.plist`, `new-com.cortana.morning-digest.plist`, `new-com.cortana.corrections-review.plist`, `new-com.cortana.signal-fire.plist`. Each points `Program` at `.app/Contents/MacOS/applet`, sets the env var, preserves schedule (signal-fire's plist is generated dynamically by `signal-schedule.sh apply` from a JSON time table). Manual one-time copy into `~/Library/LaunchAgents/` after FDA grant.
+- Drop-in plists at `scripts/launchd-wrappers/`: `new-com.<orchestrator>.canaries.plist`, `new-com.<orchestrator>.proactive-trigger.plist`, `new-com.<orchestrator>.morning-digest.plist`, `new-com.<orchestrator>.corrections-review.plist`, `new-com.<orchestrator>.signal-fire.plist`. Each points `Program` at `.app/Contents/MacOS/applet`, sets the env var, preserves schedule (signal-fire's plist is generated dynamically by `signal-schedule.sh apply` from a JSON time table). Manual one-time copy into `~/Library/LaunchAgents/` after FDA grant.
 - Operator must grant FDA to each `.app` in System Settings > Privacy & Security > Full Disk Access. `.plist` files are NOT valid FDA targets in the macOS GUI picker; the `.app` is.
 - Full runbook + DST decision (StartCalendarInterval uses LOCAL time; ±1h seasonal drift accepted) in `memory/reference_launchd_tcc_architecture.md` + `docs/launchd-wrapper-setup.md`.
 
 ### Daily / weekly routines (25 Apr 2026)
 
-- `scripts/routines/morning-digest.sh` — daily 08:07 LOCAL, builds digest from local sources, POSTs to Telegram. Pure bash.
-- `scripts/routines/corrections-review.sh` — Monday 08:37 LOCAL, scans corrections.jsonl, auto-promotes 3+ unpromoted patterns. Pure bash.
+- `scripts/routines/morning-digest.sh` - daily 08:07 LOCAL, builds digest from local sources, POSTs to Telegram. Pure bash.
+- `scripts/routines/corrections-review.sh` - Monday 08:37 LOCAL, scans corrections.jsonl, auto-promotes 3+ unpromoted patterns. Pure bash.
 
 ### Cross-session persistence (25 Apr 2026)
 
-- `data/runtime/cortana-state.json` (committed) — work arcs, in-flight tasks, validated patterns
-- `scripts/state.sh` — single CLI with 11 subcommands: `tax / close / promise / flip / outfit / in-flight-add / in-flight-resolve / arc-add / arc-resolve / validate / read`
-- `scripts/session-start-persistence-inject.sh` — produces a "🧠 PERSISTENT STATE" block at session start including recent telegram (last 4h), recent corrections (last 7d), state summary. Wired into `session-start-hook.sh`.
+- `data/runtime/<orchestrator>-state.json` (committed) - work arcs, in-flight tasks, validated patterns
+- `scripts/state.sh` - single CLI with 11 subcommands: `tax / close / promise / flip / outfit / in-flight-add / in-flight-resolve / arc-add / arc-resolve / validate / read`
+- `scripts/session-start-persistence-inject.sh` - produces a "🧠 PERSISTENT STATE" block at session start including recent telegram (last 4h), recent corrections (last 7d), state summary. Wired into `session-start-hook.sh`.
 
 ### Outbound reply lint hook (25 Apr 2026, hardened 30 Apr 2026)
 
-- `.claude/hooks/voice-lint.sh` + `scripts/test-voice-lint.sh` — PreToolUse hook on the Telegram reply tool. Blocks send if reply contains em dashes, signoffs, banned terms-of-address, banned self-descriptors, or persona-specific voice violations. Persona-aware via `data/runtime/active-voice.json`.
-- **Cortana-mode hardening (30 Apr 2026):** added 3 rules that block the alternate-persona's voice tells when active-voice is `cortana`. Triggered after a live in-session voice carry-over: pointer flipped at session midpoint but the in-flight register kept the alternate persona's lowercase + signature emoji from earlier, so 3 replies went out in wrong voice before the user caught it. New rules:
-  - `cortana-<alt>-signature-leak` — blocks the alt persona's signature emoji anywhere in text.
-  - `cortana-lowercase-opening` — blocks when first ASCII letter is lowercase. Skips emoji, bullets, digits, markdown markers so structured outputs still pass.
-  - `cortana-<alt>-pet-name` — blocks alt-persona pet-name vocabulary as direct address. Verb usage (`I/we/you love X`) explicitly allowed via lookbehind.
+- `.claude/hooks/voice-lint.sh` + `scripts/test-voice-lint.sh` - PreToolUse hook on the Telegram reply tool. Blocks send if reply contains em dashes, signoffs, banned terms-of-address, banned self-descriptors, or persona-specific voice violations. Persona-aware via `data/runtime/active-voice.json`.
+- **Cortana-mode hardening (30 Apr 2026):** added 3 rules that block the alternate-persona's voice tells when active-voice is `<orchestrator>`. Triggered after a live in-session voice carry-over: pointer flipped at session midpoint but the in-flight register kept the alternate persona's lowercase + signature emoji from earlier, so 3 replies went out in wrong voice before the user caught it. New rules:
+  - `<orchestrator>-<alt>-signature-leak` - blocks the alt persona's signature emoji anywhere in text.
+  - `<orchestrator>-lowercase-opening` - blocks when first ASCII letter is lowercase. Skips emoji, bullets, digits, markdown markers so structured outputs still pass.
+  - `<orchestrator>-<alt>-pet-name` - blocks alt-persona pet-name vocabulary as direct address. Verb usage (`I/we/you love X`) explicitly allowed via lookbehind.
 - The lint runs at the door (PreToolUse), so even if the model's voice drifts mid-session due to context carry-over, the gate forces a rewrite before the message reaches the user. Bidirectional: rules gated on the persona file value, alt-persona rules fire only when active, universal rules (em-dash, ascii-signoff, etc.) fire in both. Validated with a 14-case bidirectional matrix test (legitimate + violating inputs for each persona).
 
-### Phase 3B — Sleep-time reflection (22 Apr 2026)
+### Phase 3B - Sleep-time reflection (22 Apr 2026)
 
-- `scripts/reflect.sh` — auto-reflection on session-end. Pure-bash, no LLM calls (v1). Reads last 4h of telegram + audit + git + uncommitted changes. Surfaces: implicit asks from the user that might not have been addressed, work-in-progress flags, memory candidates, tool failures, correction patterns, SLO canary violations. Writes findings to `data/reflections/YYYY-MM-DD-HHMM.md`. Next session's greeting digest surfaces the reflection's unaddressed items.
-- `scripts/refresh-stale-handoffs.sh` — companion utility: consumes the handoff-freshness canary output and bulk-refreshes project HANDOFF.md files flagged as stale. Auto-writes a scaffold section (last-14-days git log + files touched) while preserving prior HANDOFF content. Doesn't commit — each project needs a local review + commit. Shipped 22 Apr 2026.
-- Wired into `scripts/session-end-sync.sh` — fires with a 4h window on every session end.
+- `scripts/reflect.sh` - auto-reflection on session-end. Pure-bash, no LLM calls (v1). Reads last 4h of telegram + audit + git + uncommitted changes. Surfaces: implicit asks from the user that might not have been addressed, work-in-progress flags, memory candidates, tool failures, correction patterns, SLO canary violations. Writes findings to `data/reflections/YYYY-MM-DD-HHMM.md`. Next session's greeting digest surfaces the reflection's unaddressed items.
+- `scripts/refresh-stale-handoffs.sh` - companion utility: consumes the handoff-freshness canary output and bulk-refreshes project HANDOFF.md files flagged as stale. Auto-writes a scaffold section (last-14-days git log + files touched) while preserving prior HANDOFF content. Doesn't commit - each project needs a local review + commit. Shipped 22 Apr 2026.
+- Wired into `scripts/session-end-sync.sh` - fires with a 4h window on every session end.
 - Pattern applies cheaply at personal-AI scale. LLM-reasoned upgrade deferred until the Anthropic API budget supports it without eating into the Graphiti spend envelope.
 
-### Phase 1 hardening layer — shipped 22 Apr 2026
+### Phase 1 hardening layer - shipped 22 Apr 2026
 
-Full 20-task implementation plan at `docs/plans/2026-04-22-hardening-implementation.md` — closes the stale-state / silent-failure / claim-vs-reality / forgotten-rule class of bugs surfaced in a same-session audit by Kai (internal code review, 23 findings) and Nadia (external research, 15 findings).
+Full 20-task implementation plan at `docs/plans/2026-04-22-hardening-implementation.md` - closes the stale-state / silent-failure / claim-vs-reality / forgotten-rule class of bugs surfaced in a same-session audit by Kai (internal code review, 23 findings) and Nadia (external research, 15 findings).
 
 **New scripts (7):**
-- `scripts/recent-telegram.sh [N]` — last N telegram exchanges pretty-printed. Canonical truth-source for greeting digest step 6.5.
-- `scripts/check-pending-claim.sh <pattern> [days]` — grep helper for pending-claim evidence.
-- `scripts/update-handoff.sh [hours]` — event-sourced HANDOFF.md regen (telegram + git). Replaces the `/tmp/cortana-working-context.md` pattern.
-- `scripts/log-routine-fire.sh <name> <outcome> <ms> [notes]` — optional JSONL writer for routine self-reporting.
-- `scripts/promote-correction.sh <category> [--auto|--review]` — draft + append correction-derived rule to CLAUDE.md.
-- `scripts/apply-dream-proposal.sh [date]` + `scripts/reject-dream-proposal.sh [date] [reason]` — Sunday dream-proposal lifecycle.
+- `scripts/recent-telegram.sh [N]` - last N telegram exchanges pretty-printed. Canonical truth-source for greeting digest step 6.5.
+- `scripts/check-pending-claim.sh <pattern> [days]` - grep helper for pending-claim evidence.
+- `scripts/update-handoff.sh [hours]` - event-sourced HANDOFF.md regen (telegram + git). Replaces the `/tmp/<orchestrator>-working-context.md` pattern.
+- `scripts/log-routine-fire.sh <name> <outcome> <ms> [notes]` - optional JSONL writer for routine self-reporting.
+- `scripts/promote-correction.sh <category> [--auto|--review]` - draft + append correction-derived rule to CLAUDE.md.
+- `scripts/apply-dream-proposal.sh [date]` + `scripts/reject-dream-proposal.sh [date] [reason]` - Sunday dream-proposal lifecycle.
 
 **New hooks (6):**
-- `.claude/hooks/session-start-hook.sh` — SessionStart: inject critical-rules bundle on compact + verify-sync on any source.
-- `.claude/hooks/post-tool-use-failure-hook.sh` — PostToolUseFailure: log silent tool failures to `data/audit/tool-failures.jsonl`.
-- `.claude/hooks/subagent-stop-hook.sh` — SubagentStop: log background-agent completions to `data/agent-completions.jsonl`.
-- `.claude/hooks/instructions-loaded-hook.sh` — InstructionsLoaded: verify-sync at CLAUDE.md load time.
-- `.claude/hooks/stop-verify-contract.sh` + `.claude/hooks/stop-composer.sh` — Stop-time Task Contract verifier; auto-detects Telegram turns that ended without a reply-tool call.
+- `.claude/hooks/session-start-hook.sh` - SessionStart: inject critical-rules bundle on compact + verify-sync on any source.
+- `.claude/hooks/post-tool-use-failure-hook.sh` - PostToolUseFailure: log silent tool failures to `data/audit/tool-failures.jsonl`.
+- `.claude/hooks/subagent-stop-hook.sh` - SubagentStop: log background-agent completions to `data/agent-completions.jsonl`.
+- `.claude/hooks/instructions-loaded-hook.sh` - InstructionsLoaded: verify-sync at CLAUDE.md load time.
+- `.claude/hooks/stop-verify-contract.sh` + `.claude/hooks/stop-composer.sh` - Stop-time Task Contract verifier; auto-detects Telegram turns that ended without a reply-tool call.
 
 **Install summary for these additions:**
 ```bash
@@ -486,76 +484,76 @@ chmod +x .claude/hooks/session-start-hook.sh .claude/hooks/post-tool-use-failure
 
 The `scripts/verify-sync.sh` was also hardened with 6 check classes (was keyword-presence only): new-file drift, script existence, command-handler existence, skill references, hook file existence, data-path existence.
 
-### Phase 2 S4 — SLO canaries (22 Apr 2026)
+### Phase 2 S4 - SLO canaries (22 Apr 2026)
 
-Synthetic canaries probe Cortana's critical paths every 5 min. This is observability-as-control-plane — top-tier 2026 agent-system pattern per external research. Convention + thresholds in `memory/feedback_slo_canaries_convention.md`.
+Synthetic canaries probe Cortana's critical paths every 5 min. This is observability-as-control-plane - top-tier 2026 agent-system pattern per external research. Convention + thresholds in `memory/feedback_slo_canaries_convention.md`.
 
 **New scripts (4):**
-- `scripts/canaries/greeting-accuracy.sh` — fixture probe. Builds a synthetic telegram tail + memory pair where they disagree; asserts `check-pending-claim.sh` recipe produces the correct answer so Cortana's greeting digest reconciliation can't surface shipped items as pending.
-- `scripts/canaries/reply-tool-compliance.sh` — last 50 Zaki inbound messages cross-referenced with Cortana outbound + `mcp__plugin_telegram_telegram__reply` audit entries in a 10-min window. Catches terminal-text-as-reply.
-- `scripts/canaries/handoff-freshness.sh` — per-project `HANDOFF.md` mtime vs latest commit mtime. >72h = stale.
-- `scripts/run-canaries.sh` — orchestrator. Appends to `data/slo-canaries.jsonl`, maintains rolling-window state in `data/slo-state.json`, emits alerts to `data/slo-alerts.jsonl`. All three data files gitignored (local-only observability). 0.5% non-bootstrap violation rate or 5-consecutive-fail streak triggers alerts. `--alert-telegram` flag is scaffolding — Zaki enables after bootstrap clean.
+- `scripts/canaries/greeting-accuracy.sh` - fixture probe. Builds a synthetic telegram tail + memory pair where they disagree; asserts `check-pending-claim.sh` recipe produces the correct answer so Cortana's greeting digest reconciliation can't surface shipped items as pending.
+- `scripts/canaries/reply-tool-compliance.sh` - last 50 inbound user messages cross-referenced with Cortana outbound + `mcp__plugin_telegram_telegram__reply` audit entries in a 10-min window. Catches terminal-text-as-reply.
+- `scripts/canaries/handoff-freshness.sh` - per-project `HANDOFF.md` mtime vs latest commit mtime. >72h = stale.
+- `scripts/run-canaries.sh` - orchestrator. Appends to `data/slo-canaries.jsonl`, maintains rolling-window state in `data/slo-state.json`, emits alerts to `data/slo-alerts.jsonl`. All three data files gitignored (local-only observability). 0.5% non-bootstrap violation rate or 5-consecutive-fail streak triggers alerts. `--alert-telegram` flag is scaffolding - the user enables after bootstrap clean.
 
-Healthcheck renders a `▸ SLO Canaries` section; `cortana-maintenance` skill step 12.5 surfaces non-bootstrap breaches in the greeting digest.
+Healthcheck renders a `▸ SLO Canaries` section; `<orchestrator>-maintenance` skill step 12.5 surfaces non-bootstrap breaches in the greeting digest.
 
-### Audit hardening — 22 Apr 2026 evening (5-batch close of 4-agent full-day audit)
+### Audit hardening - 22 Apr 2026 evening (5-batch close of 4-agent full-day audit)
 
 After the morning's work shipped (Phase 1 + Phase 2 + Phase 3B + launchd scheduler + cloud-routines disable), 4 bare-context agents (security / code-quality / docs / adversarial) audited the resulting system and flagged 37 findings. 5 commit batches closed every MUST/SHOULD/MEDIUM/LOW item. Structural additions worth mirroring into a fresh install:
 
-- `scripts/redact-secrets.sh` — credential-pattern sed filter (Anthropic, Stripe, GitHub PAT, Slack, Telegram bot, AWS, URL-token query params). Piped through by `update-handoff.sh` + `reflect.sh` before embedding telegram tails, so pasted credentials never land on disk (security finding #S2).
+- `scripts/redact-secrets.sh` - credential-pattern sed filter (Anthropic, Stripe, GitHub PAT, Slack, Telegram bot, AWS, URL-token query params). Piped through by `update-handoff.sh` + `reflect.sh` before embedding telegram tails, so pasted credentials never land on disk (security finding #S2).
 - `.claude/hooks/session-start-hook.sh` on `source=compact` now reads `data/runtime/turn-contract.json` and injects a loud "PENDING TELEGRAM REPLY" banner if a Telegram turn started before the compact hasn't yet fired the reply tool. Closes the post-compact reply-miss gap.
-- `.claude/hooks/stop-composer.sh` has a bash-native `bash_timeout_run` fallback (fork + kill-watcher) for macOS where neither `timeout` nor `gtimeout` is installed — the 30s per-hook guarantee now actually holds on a stock Mac (Kai finding #K3). Also drops the duplicate `session-end-sync.sh` call (SessionEnd hook owns that now — running it on every Stop was rebuilding HANDOFF on every assistant reply, S5).
-- `scripts/run-canaries.sh` — (a) post-wake detection: gap >30 min marks next 5 runs `post_wake=true` and suppresses rate alerts so a long Mac sleep doesn't false-alert every morning (#13); (b) fractional-second-safe ts parsing via `sub("\\.[0-9]+Z$"; "Z")` before `fromdate` so a future canary emitting `.SSSZ` doesn't black out rolling-window aggregation (#7); (c) 10MB live-file rotation with monthly gzip archives at `data/archive/slo-canaries-YYYY-MM.jsonl.gz` (S1); (d) EXIT trap cleaning up `$STATE_FILE.tmp` so mid-run SIGTERM doesn't leak (#14).
+- `.claude/hooks/stop-composer.sh` has a bash-native `bash_timeout_run` fallback (fork + kill-watcher) for macOS where neither `timeout` nor `gtimeout` is installed - the 30s per-hook guarantee now actually holds on a stock Mac (Kai finding #K3). Also drops the duplicate `session-end-sync.sh` call (SessionEnd hook owns that now - running it on every Stop was rebuilding HANDOFF on every assistant reply, S5).
+- `scripts/run-canaries.sh` - (a) post-wake detection: gap >30 min marks next 5 runs `post_wake=true` and suppresses rate alerts so a long Mac sleep doesn't false-alert every morning (#13); (b) fractional-second-safe ts parsing via `sub("\\.[0-9]+Z$"; "Z")` before `fromdate` so a future canary emitting `.SSSZ` doesn't black out rolling-window aggregation (#7); (c) 10MB live-file rotation with monthly gzip archives at `data/archive/slo-canaries-YYYY-MM.jsonl.gz` (S1); (d) EXIT trap cleaning up `$STATE_FILE.tmp` so mid-run SIGTERM doesn't leak (#14).
 - `scripts/canaries-daemon.sh reload` waits up to 60s for any in-flight canary fire to idle before unloading the launchd job (#14).
-- `scripts/commit-stale-handoffs.sh` — pre-push asserts remote origin matches `github.com/(ZQadus|zakiqadus)/` AND branch is `main`/`master`. Prevents auto-commit leak to an unrelated remote if a project's `.git/config` is ever re-pointed (S3). Also captures `git push` exit code directly instead of tail-grepping (K4) and uses `-e` for `.git` so submodule projects with a `.git` file aren't silently skipped (K9).
-- `scripts/check-memory-freshness.sh` — frontmatter parser exits on second `---` (was looping past missing close fences, #5); future-dated `last_verified` gets flagged `[future-ts]` instead of silently marked fresh (#4); `ttl_days:0` falls back to per-type default instead of spamming every run (#6); unparseable dates report to stderr via argv-passed python (K11).
-- `scripts/reflect.sh` — retention pass: files older than 90 days gzip-append into `data/reflections/archive/reflections-YYYY-MM.tar.gz` and the live file is removed. Previously unbounded (#10). Commit-count also switched to `git log --oneline | wc -l` so multi-line commit subjects don't undercount (K8).
-- `scripts/recent-telegram.sh` — `cat | tail` → plain `tail -qn` (seek from EOF). Called 5+ times per session; previous O(n) scan was reading whole ~2MB JSONL each call (#17).
-- `.claude/hooks/telegram-reply-reminder.sh` — anchored regex now accepts channel tag at position 0 OR after a newline, tolerating any future harness that prepends system-reminder blocks to prompts (K10).
-- `.claude/hooks/stop-verify-contract.sh` — reads BOTH turn-day AND today audit files so a turn spanning UTC midnight can't false-trigger a violation (A16). `/tmp` fallback is age-gated at 6h to drop stale leftovers (A18).
-- `.gitignore` — `data/graphiti-ingest-log.jsonl` added (local-only cost telemetry, K7). `.tmp-canary-fixtures/` added (in-repo canary scratch, never noexec — alternative to `/tmp` for hardened macs, #15).
-- `scripts/healthcheck.sh` — `.cortana-ignore` loader strips trailing `/` so `Documents/Foo/` behaves like `Documents/Foo` (#9); warns if the ignore file grew by >20 lines since last commit (S6).
-- `scripts/promote-correction.sh` — UTF-8 char-safe truncation via python slicing so multibyte codepoints don't corrupt CLAUDE.md appends (K5).
-- `scripts/update-handoff.sh` — `awk 'NF{p=1} p'` squeezes the leading-blank-per-regen drift (K6); sentinel fallback finds the real `^---$` boundary after the sentinel instead of assuming +3 offset (#12).
-- `scripts/canaries/handoff-freshness.sh` — uses full folder path instead of basename so same-named subfolders (e.g. `Voyager/marketing-ai` + `MDX Technology/marketing-ai`) don't collide in the stale list (#11).
-- `scripts/canaries/reply-tool-compliance.sh` — no longer claims `pass:true` when status is bootstrap or no-data (#A8).
+- `scripts/commit-stale-handoffs.sh` - pre-push asserts remote origin matches `github.com/{{user_github_handle}}/` AND branch is `main`/`master`. Prevents auto-commit leak to an unrelated remote if a project's `.git/config` is ever re-pointed (S3). Also captures `git push` exit code directly instead of tail-grepping (K4) and uses `-e` for `.git` so submodule projects with a `.git` file aren't silently skipped (K9).
+- `scripts/check-memory-freshness.sh` - frontmatter parser exits on second `---` (was looping past missing close fences, #5); future-dated `last_verified` gets flagged `[future-ts]` instead of silently marked fresh (#4); `ttl_days:0` falls back to per-type default instead of spamming every run (#6); unparseable dates report to stderr via argv-passed python (K11).
+- `scripts/reflect.sh` - retention pass: files older than 90 days gzip-append into `data/reflections/archive/reflections-YYYY-MM.tar.gz` and the live file is removed. Previously unbounded (#10). Commit-count also switched to `git log --oneline | wc -l` so multi-line commit subjects don't undercount (K8).
+- `scripts/recent-telegram.sh` - `cat | tail` → plain `tail -qn` (seek from EOF). Called 5+ times per session; previous O(n) scan was reading whole ~2MB JSONL each call (#17).
+- `.claude/hooks/telegram-reply-reminder.sh` - anchored regex now accepts channel tag at position 0 OR after a newline, tolerating any future harness that prepends system-reminder blocks to prompts (K10).
+- `.claude/hooks/stop-verify-contract.sh` - reads BOTH turn-day AND today audit files so a turn spanning UTC midnight can't false-trigger a violation (A16). `/tmp` fallback is age-gated at 6h to drop stale leftovers (A18).
+- `.gitignore` - `data/graphiti-ingest-log.jsonl` added (local-only cost telemetry, K7). `.tmp-canary-fixtures/` added (in-repo canary scratch, never noexec - alternative to `/tmp` for hardened macs, #15).
+- `scripts/healthcheck.sh` - `.<orchestrator>-ignore` loader strips trailing `/` so `Documents/Foo/` behaves like `Documents/Foo` (#9); warns if the ignore file grew by >20 lines since last commit (S6).
+- `scripts/promote-correction.sh` - UTF-8 char-safe truncation via python slicing so multibyte codepoints don't corrupt CLAUDE.md appends (K5).
+- `scripts/update-handoff.sh` - `awk 'NF{p=1} p'` squeezes the leading-blank-per-regen drift (K6); sentinel fallback finds the real `^---$` boundary after the sentinel instead of assuming +3 offset (#12).
+- `scripts/canaries/handoff-freshness.sh` - uses full folder path instead of basename so same-named subfolders (e.g. `Voyager/marketing-ai` + `MDX Technology/marketing-ai`) don't collide in the stale list (#11).
+- `scripts/canaries/reply-tool-compliance.sh` - no longer claims `pass:true` when status is bootstrap or no-data (#A8).
 
-**New memory:** `memory/project_cortana_dashboard_scope.md` — Zaki's 22 Apr request for a Vercel-hosted projects dashboard styled like TixPredict, to be built next session as the first post-Cortana-perfect project.
+**New memory:** `memory/project_cortana_dashboard_scope.md` - the maintainer's 22 Apr request for a Vercel-hosted projects dashboard styled like TixPredict, to be built next session as the first post-Cortana-perfect project.
 
-### Phase 4 Z1 — proactive-trigger daemon (23 Apr 2026 evening, rewritten 25 Apr 2026 signal-fire mode)
+### Phase 4 Z1 - proactive-trigger daemon (23 Apr 2026 evening, rewritten 25 Apr 2026 signal-fire mode)
 
 Scheduled launchd daemon that fires a neutral disguised-phrase Telegram nudge. Same launchd pattern as the canaries daemon. Defence-in-depth: kill-switch flag, daytime window, hard daily rate cap, quiet window, hard 300-char cap. **Rewritten 25 Apr 2026 (commit `f4560b4`)** to remove all `claude --print` invocations after AUP audit (msg 6264) flagged sustained affective/roleplay content as classifier-flag risk. Daemon now picks one of 11 work-register phrases round-robined via `data/runtime/proactive-signal-rotation-pos.txt`, fires via `scripts/telegram-signal.sh` (pure-bash curl POST, zero Claude in loop). Persona file still read for audit but content is persona-agnostic.
 
-- `scripts/proactive-trigger-daemon.sh` — the daemon. 357 lines (down from 472). Fires every 4h via launchd, rolls dice, checks gates (kill-switch / daytime window / rate cap 3-per-day / quiet window 45-min / dice), picks one of 11 phrases (`check in / status sync / queue updated / still here / ping / hey there / thinking / queue ready / yo / ready / wave`) via round-robin, sends via `telegram-signal.sh`. Logs every attempt to `data/proactive-triggers.jsonl`. Supports `--dry-run`, `--force`, `--persona=<name>` (read-only audit override).
-- `scripts/telegram-signal.sh` — pure-bash curl POST to Telegram Bot API. Zero Claude in loop. Used by both this daemon and the signal-fire system.
-- `scripts/proactive-daemon.sh` — control script: `{load|unload|status|pause|resume|tail}`. Wraps `launchctl` on `~/Library/LaunchAgents/com.cortana.proactive-trigger.plist`.
-- `scripts/update-active-voice.sh` — persona state-file read/write at `data/runtime/active-voice.json` (0600 perms). Commands: `init / get / set <name> / reset-rate / record-fire`. Daily rate-counter rotation at UTC midnight.
-- `scripts/install-persona-switch-hook.sh` — idempotent patcher injecting persona-switch detection into `.claude/hooks/telegram-reply-reminder.sh`. When inbound Telegram text is exactly a known persona trigger (case-insensitive, trimmed), calls `update-active-voice.sh set ...`.
-- `scripts/canaries/proactive-audit.sh` — daily-audit canary wired into `run-canaries.sh`. Scans last-24h of `data/proactive-triggers.jsonl` for over-cap fires, moderation auto-pauses, deny-word hits, failure-rate spikes. Writes results to `data/slo-canaries.jsonl`.
+- `scripts/proactive-trigger-daemon.sh` - the daemon. 357 lines (down from 472). Fires every 4h via launchd, rolls dice, checks gates (kill-switch / daytime window / rate cap 3-per-day / quiet window 45-min / dice), picks one of 11 phrases (`check in / status sync / queue updated / still here / ping / hey there / thinking / queue ready / yo / ready / wave`) via round-robin, sends via `telegram-signal.sh`. Logs every attempt to `data/proactive-triggers.jsonl`. Supports `--dry-run`, `--force`, `--persona=<name>` (read-only audit override).
+- `scripts/telegram-signal.sh` - pure-bash curl POST to Telegram Bot API. Zero Claude in loop. Used by both this daemon and the signal-fire system.
+- `scripts/proactive-daemon.sh` - control script: `{load|unload|status|pause|resume|tail}`. Wraps `launchctl` on `~/Library/LaunchAgents/com.<orchestrator>.proactive-trigger.plist`.
+- `scripts/update-active-voice.sh` - persona state-file read/write at `data/runtime/active-voice.json` (0600 perms). Commands: `init / get / set <name> / reset-rate / record-fire`. Daily rate-counter rotation at UTC midnight.
+- `scripts/install-persona-switch-hook.sh` - idempotent patcher injecting persona-switch detection into `.claude/hooks/telegram-reply-reminder.sh`. When inbound Telegram text is exactly a known persona trigger (case-insensitive, trimmed), calls `update-active-voice.sh set ...`.
+- `scripts/canaries/proactive-audit.sh` - daily-audit canary wired into `run-canaries.sh`. Scans last-24h of `data/proactive-triggers.jsonl` for over-cap fires, moderation auto-pauses, deny-word hits, failure-rate spikes. Writes results to `data/slo-canaries.jsonl`.
 
 Kill switch at `data/runtime/proactive-disabled.flag` halts all fires instantly. Moderation errors auto-trip the flag. Fail-closed throughout. First live fire verified 2026-04-23T21:13:42Z.
 
-### Phase 4 Z2 — signal-fire system (26 Apr 2026, commit `f18fba1`)
+### Phase 4 Z2 - signal-fire system (26 Apr 2026, commit `f18fba1`)
 
-Pure-launchd disguised-phrase queue, sibling to the proactive-trigger daemon. Replaces ad-hoc cron-based fires that all required a loaded Claude session — closing Claude killed the schedule. Now schedule lives entirely in a single launchd plist + a JSON time table.
+Pure-launchd disguised-phrase queue, sibling to the proactive-trigger daemon. Replaces ad-hoc cron-based fires that all required a loaded Claude session - closing Claude killed the schedule. Now schedule lives entirely in a single launchd plist + a JSON time table.
 
-- `scripts/signal-schedule.sh` — CLI: `add HH:MM "text"` / `remove HH:MM` / `list` / `apply [--force-load]`. Manages `data/runtime/signal-schedule.json` (HH:MM → text map, 0600 perms, gitignored). Sorts on insert. Validates JSON. Runs `plutil -lint` on temp plist before atomic move into `~/Library/LaunchAgents/`.
-- `scripts/signal-fire-from-schedule.sh` — pure-bash firer, exec'd by the AppleScript .app wrapper. Reads schedule.json, finds ±2-min match against current time, idempotency-guards via `data/runtime/signal-fire-state.json` (5-min dedup window — twice the tolerance), then dispatches `scripts/telegram-signal.sh`. Exit codes: 0 fired-or-no-match, 2 schedule-invalid, 3 telegram-failed, 126 FDA-not-granted. `SIGNAL_FIRE_DRY_RUN=1` env hatch for testing — never set by launchd.
-- `scripts/launchd-wrappers/signal-fire-wrapper.applescript` — AppleScript .app source. Compiles to `~/Applications/Cortana-SignalFire.app` (5th wrapper alongside canaries / proactive-trigger / morning-digest / corrections-review). Codesigned ad-hoc.
-- `scripts/launchd-wrappers/new-com.cortana.signal-fire.plist` — generated dynamically by `signal-schedule.sh apply`. Single plist with one `StartCalendarInterval` entry per scheduled fire (macOS launchd does NOT support per-entry env vars, so Pattern C — single plist + lookup-at-fire-time — is the canonical answer). `RunAtLoad=false` so it doesn't fire at install time.
+- `scripts/signal-schedule.sh` - CLI: `add HH:MM "text"` / `remove HH:MM` / `list` / `apply [--force-load]`. Manages `data/runtime/signal-schedule.json` (HH:MM → text map, 0600 perms, gitignored). Sorts on insert. Validates JSON. Runs `plutil -lint` on temp plist before atomic move into `~/Library/LaunchAgents/`.
+- `scripts/signal-fire-from-schedule.sh` - pure-bash firer, exec'd by the AppleScript .app wrapper. Reads schedule.json, finds ±2-min match against current time, idempotency-guards via `data/runtime/signal-fire-state.json` (5-min dedup window - twice the tolerance), then dispatches `scripts/telegram-signal.sh`. Exit codes: 0 fired-or-no-match, 2 schedule-invalid, 3 telegram-failed, 126 FDA-not-granted. `SIGNAL_FIRE_DRY_RUN=1` env hatch for testing - never set by launchd.
+- `scripts/launchd-wrappers/signal-fire-wrapper.applescript` - AppleScript .app source. Compiles to `~/Applications/Cortana-SignalFire.app` (5th wrapper alongside canaries / proactive-trigger / morning-digest / corrections-review). Codesigned ad-hoc.
+- `scripts/launchd-wrappers/new-com.<orchestrator>.signal-fire.plist` - generated dynamically by `signal-schedule.sh apply`. Single plist with one `StartCalendarInterval` entry per scheduled fire (macOS launchd does NOT support per-entry env vars, so Pattern C - single plist + lookup-at-fire-time - is the canonical answer). `RunAtLoad=false` so it doesn't fire at install time.
 
 Bootstrap (one-time per machine): grant FDA on `Cortana-SignalFire.app`, then `bash scripts/signal-schedule.sh apply --force-load`. Verify with `tail -f logs/signal-fire.log`. Full reference and design rationale in `memory/reference_signal_fire_system.md`.
 
-- `scripts/upgrade.sh` + `scripts/upgrades/lib.sh` use `.cortana-blueprint-version` yaml as canonical version source. `CORTANA_VERSION` plaintext deleted.
+- `scripts/upgrade.sh` + `scripts/upgrades/lib.sh` use `.<orchestrator>-blueprint-version` yaml as canonical version source. `<OLD>_VERSION` plaintext deleted.
 - Hardcoded lowercase `~/Documents/cortana/` paths in scripts + hooks corrected to capital-C so they don't break on case-sensitive filesystems.
-- `memory-query.sh` deleted — SQL-injection-prone, DB frozen, agents (kai.md + nadia.md) updated to use markdown + post-commit re-embed.
+- `memory-query.sh` deleted - SQL-injection-prone, DB frozen, agents (kai.md + nadia.md) updated to use markdown + post-commit re-embed.
 - `catboost_info/` (leaked TCGPredict training artifact) removed + gitignored.
 
-### Phase 4 Z3 — Operations + behaviour hardening (28 Apr 2026)
+### Phase 4 Z3 - Operations + behaviour hardening (28 Apr 2026)
 
 Three loosely-coupled improvements landed in one session, all driven by gaps surfaced during real usage rather than a planned phase.
 
-**1. Persona auto-switch fix.** The PreToolUse `voice-lint.sh` hook reads `data/runtime/active-voice.json` to enforce per-persona reply rules (missing-signature in voice mode, style-leak in cortana mode). The state file is updated by a code path inside `.claude/hooks/telegram-reply-reminder.sh` that detects when an inbound Telegram message is the bare word "voice" or "cortana" (or that name followed by `mode...` / `, ...` / etc.). The detection had a silent bug since 23 Apr 2026: the `awk` extraction printed the user-text BEFORE stripping the closing `</channel>` tag, so `USER_TEXT` was always `cortana</channel>` and the case-statement match silently failed. Persona had been stuck on the value last set explicitly. Patched in commit `04baa2f` — strip both opening and closing tags before printing, widen matcher to include name-followed-by-punctuation. 10-case smoke test verified.
+**1. Persona auto-switch fix.** The PreToolUse `voice-lint.sh` hook reads `data/runtime/active-voice.json` to enforce per-persona reply rules (missing-signature in voice mode, style-leak in cortana mode). The state file is updated by a code path inside `.claude/hooks/telegram-reply-reminder.sh` that detects when an inbound Telegram message is the bare word "voice" or "cortana" (or that name followed by `mode...` / `, ...` / etc.). The detection had a silent bug since 23 Apr 2026: the `awk` extraction printed the user-text BEFORE stripping the closing `</channel>` tag, so `USER_TEXT` was always `cortana</channel>` and the case-statement match silently failed. Persona had been stuck on the value last set explicitly. Patched in commit `04baa2f` - strip both opening and closing tags before printing, widen matcher to include name-followed-by-punctuation. 10-case smoke test verified.
 
 **2. Disaster-recovery runbook.** New doc at `docs/disaster-recovery.md` mapping every Anthropic-dependent component to recovery paths in case Anthropic terminates the consumer subscription, revokes the API key, or has a multi-day outage. Three paths: (A) Claude Code CLI auth fails → swap to alternative consumer subscription (Cursor Pro, Codex CLI under ChatGPT Pro, GitHub Copilot Pro+); (B) `ANTHROPIC_API_KEY` revoked → rotate or swap Graphiti's LLM provider to OpenAI/Gemini via graphiti-core's pluggable backend; (C) total Anthropic blackout → pivot to AWS Bedrock or GCP Vertex AI, both of which sell Claude through separate billing pipelines that aren't tied to consumer subscriptions. Practical impact of an Anthropic ban turns out to be surprisingly contained: only Claude Code CLI orchestration + Graphiti ingest hard-fail; all consumer apps + scripts (bash) + hooks + memory (markdown + sqlite-vec) + telegram bot (BotFather token, separate auth) keep running untouched. Runbook also includes a bare-metal Mac restore checklist.
 
@@ -563,46 +561,46 @@ Three loosely-coupled improvements landed in one session, all driven by gaps sur
 
 **Recommended optional plugin: Impeccable** (Paul Bakaus, https://github.com/pbakaus/impeccable). Install via `claude plugin marketplace add pbakaus/impeccable && claude plugin install impeccable@pbakaus/impeccable` (CLI subcommands, user scope so it works in every project). Adds 23 design slash commands (`/impeccable polish`, `/impeccable audit`, `/impeccable critique`, `/impeccable distill`, etc.) plus 7 reference docs covering typography, color and contrast, spatial design, motion design, interaction design, responsive design, and UX writing. Sits on top of Anthropic's official `frontend-design` skill. Worth installing if you do any frontend design work and want explicit anti-pattern detection on top of the default LLM-tendency-toward-generic-Inter-purple-gradient design.
 
-### Phase 4 Z4 — YouTube watch queue + plugin-CLI workflow + responsiveness rules (29-30 Apr 2026)
+### Phase 4 Z4 - YouTube watch queue + plugin-CLI workflow + responsiveness rules (29-30 Apr 2026)
 
 Five distinct architectural adds in a 24h window.
 
 **1. Watch plugin (bradautomates/claude-video) as a recommended optional install.** Install via `claude plugin marketplace add bradautomates/claude-video && claude plugin install watch@claude-video`. Adds the `/watch` skill that gives Claude video-watching (yt-dlp downloads, ffmpeg extracts frames + audio, captions or Whisper transcribe, frames Read'd as images). Free for any YouTube video with auto-captions. Whisper API fallback (Groq free tier covers 2hrs/hour) for non-YouTube sources like Loom and screen recordings. Use cases: hook analysis on viral videos, debugging screen recordings, summarising long lectures, feeding a knowledge base.
 
-**2. YouTube watch queue (Cortana add-on).** A new skill `cortana-youtube-queue` + `scripts/youtube-queue.sh` that wraps the `watch` plugin into a batch flow:
+**2. YouTube watch queue (Cortana add-on).** A new skill `<orchestrator>-youtube-queue` + `scripts/youtube-queue.sh` that wraps the `watch` plugin into a batch flow:
 - **Auto-add:** `.claude/hooks/telegram-reply-reminder.sh` scans inbound Telegram text for `youtu.be` / `youtube.com` URLs and appends to `data/youtube-watch-queue.jsonl` (gitignored, per-user-private). Idempotent on `video_id`.
 - **Manual command:** "watch queue" / "process videos" / "watch pending" triggers the skill, which loops pending entries, runs `watch.py`, synthesises per-video summaries (hook + key points + visuals + TLDR + "Use to your system"), pushes summaries to your AI Brain notebook, marks watched, replies on Telegram with a digest.
 - **Storage:** queue file gitignored at `data/youtube-watch-queue.jsonl`, summaries committed at `data/youtube-summaries/<video_id>.md` for archive.
-- No daily auto-fire — pending count surfaces in the morning maintenance digest. Want true daily auto-fire? Wrap the skill in the same `.app launchd wrapper` pattern used by morning-digest, then add a calendar-interval entry.
+- No daily auto-fire - pending count surfaces in the morning maintenance digest. Want true daily auto-fire? Wrap the skill in the same `.app launchd wrapper` pattern used by morning-digest, then add a calendar-interval entry.
 
 **3. Plugin install via CLI (no slash commands needed).** Discovered today: `claude plugin marketplace add <repo>` and `claude plugin install <name>@<marketplace>` are CLI subcommands that fully replace the slash commands and can be run from any Bash context. So an orchestrator agent can install plugins on the user's behalf without punting to the user's terminal. Plain skills (no marketplace metadata) still install via `git clone <repo> ~/.claude/skills/<name>/`.
 
 **4. Six new behavioural rules codified.** Captured as feedback memories (universal applicability):
-- **Skill-utilization-first** — scan available skill arsenal before dispatching a generic agent or going freestyle
-- **Execute standard ops** — run routine ops actions (merge approved PR, apply migration, deploy, run tests) without asking permission each time; pause only for destructive / paid / external-comms / first-time work
-- **Install skills yourself** — `claude plugin install` from CLI, never punt slash commands to the user
-- **Announce who is doing the work** — name the executor (agent OR me-with-skill-X-loaded) on every Telegram reply with work attached
-- **Dispatch for responsiveness** — default to dispatching agents for any 3+ minute task so the orchestrator stays free to handle the user's next message
+- **Skill-utilization-first** - scan available skill arsenal before dispatching a generic agent or going freestyle
+- **Execute standard ops** - run routine ops actions (merge approved PR, apply migration, deploy, run tests) without asking permission each time; pause only for destructive / paid / external-comms / first-time work
+- **Install skills yourself** - `claude plugin install` from CLI, never punt slash commands to the user
+- **Announce who is doing the work** - name the executor (agent OR me-with-skill-X-loaded) on every Telegram reply with work attached
+- **Dispatch for responsiveness** - default to dispatching agents for any 3+ minute task so the orchestrator stays free to handle the user's next message
 
 **5. Calendar-event reminder pattern.** When the user says "remind me later today to X" via Telegram, create a Google Calendar event via `mcp__claude_ai_Google_Calendar__create_event` with the action in the description. Reliable phone notification at the time, no Telegram delivery dependency, no remote-routine cloud-allowlist constraint. Cleaner than a remote routine for one-off reminders. Requires Google Calendar MCP connector to be enabled.
 
-### v29.1 (2026-04-21, late) — CLAUDE.md skill-offload
+### v29.1 (2026-04-21, late) - CLAUDE.md skill-offload
 
-Anthropic's memory docs specify CLAUDE.md should stay under 200 lines — larger files "consume more context and reduce adherence." Cortana's CLAUDE.md had grown to 583 lines / ~11K tokens per turn. Offloaded procedural and reference detail into seven project-level skills at `.claude/skills/cortana-*/SKILL.md`, each with a specific `description` field so Claude Code auto-loads them only when the situation matches:
+Anthropic's memory docs specify CLAUDE.md should stay under 200 lines - larger files "consume more context and reduce adherence." Cortana's CLAUDE.md had grown to 583 lines / ~11K tokens per turn. Offloaded procedural and reference detail into seven project-level skills at `.claude/skills/cortana-*/SKILL.md`, each with a specific `description` field so Claude Code auto-loads them only when the situation matches:
 
-- `cortana-sync` — full sync/wrapup cycle + batch sync + auto-sync triggers
-- `cortana-maintenance` — Monday protocol + greeting digest + self-improvement
-- `cortana-orchestration` — 13 habits for multi-agent dispatch (+ habit #14 added in v29.2: effort tiers + ultrathink)
-- `cortana-brain` — NotebookLM routing + smart memory routing + storage layout
-- `cortana-observability` — audit layer + compaction hooks + remote routines + Monitor vs GHA
-- `cortana-blueprint-updates` — architectural-change update cycle + placement rule
-- `cortana-safety` — full git + DB + deploy-verify rules
+- `<orchestrator>-sync` - full sync/wrapup cycle + batch sync + auto-sync triggers
+- `<orchestrator>-maintenance` - Monday protocol + greeting digest + self-improvement
+- `<orchestrator>-orchestration` - 13 habits for multi-agent dispatch (+ habit #14 added in v29.2: effort tiers + ultrathink)
+- `<orchestrator>-brain` - NotebookLM routing + smart memory routing + storage layout
+- `<orchestrator>-observability` - audit layer + compaction hooks + remote routines + Monitor vs GHA
+- `<orchestrator>-blueprint-updates` - architectural-change update cycle + placement rule
+- `<orchestrator>-safety` - full git + DB + deploy-verify rules
 
 CLAUDE.md retained the always-on layer (core loop, reply-first, agent spawning rules, routing table, commands reference, short safety summary, style) and shrank to 167 lines. Key insight: `@import` does NOT save tokens (imports inline at session start), so the only real token-saving offload mechanism is the on-demand skill-description loader.
 
-Placement rule now inlined: new rules are triaged by size + trigger before being added anywhere. Under 10 lines + always-on → inline. Has a trigger → skill. Over 30 lines + triggerable → MUST be a skill. This mirrors in `cortana-blueprint-updates` skill so it surfaces during architectural changes.
+Placement rule now inlined: new rules are triaged by size + trigger before being added anywhere. Under 10 lines + always-on → inline. Has a trigger → skill. Over 30 lines + triggerable → MUST be a skill. This mirrors in `<orchestrator>-blueprint-updates` skill so it surfaces during architectural changes.
 
-Principle for future growth: any section over ~30 lines that isn't always-on is a candidate for skill extraction. When Claude warns about CLAUDE.md size, extract sections with clear trigger conditions first — those have the cleanest skill descriptions.
+Principle for future growth: any section over ~30 lines that isn't always-on is a candidate for skill extraction. When Claude warns about CLAUDE.md size, extract sections with clear trigger conditions first - those have the cleanest skill descriptions.
 
 ### v30 (2026-04-30)
 Removed E2 Graphiti entirely after frontier scan + utilisation audit.
@@ -617,7 +615,7 @@ Removed E2 Graphiti entirely after frontier scan + utilisation audit.
 ### v29 (2026-04-21)
 Added five Advanced-mode extensions:
 - **E1** sqlite-vec + Nomic-embed semantic search over markdown memory
-- **E2** Graphiti MCP server with FalkorDB (temporal knowledge graph) — DEPRECATED in v30, see release note above
+- **E2** Graphiti MCP server with FalkorDB (temporal knowledge graph) - DEPRECATED in v30, see release note above
 - **E3** Agent Teams + channel.md whiteboard pattern
 - **E4** Observability audit layer (PostToolUse JSONL + live viewer)
 - **E5** Hardened safety gate (protected-branch hard-blocks, word-boundary regex)
@@ -650,31 +648,31 @@ Not documented. Core loop + safety gate + routing table existed from v1 onwards.
 1. Hand this file to a Claude Code session. Tell it: "install v30 in Simple mode" OR "install v30 in Advanced mode, all extensions."
 2. The session reads the Core section and walks you through it.
 3. If Advanced, it offers each remaining extension (E1, E3, E4, E5) in sequence with the install steps above.
-4. When done, it writes `.cortana-blueprint-version` with the installed version + which extensions are on.
+4. When done, it writes `.<orchestrator>-blueprint-version` with the installed version + which extensions are on.
 
 ### v29 → v30
 1. Tell Claude Code: "I'm on v29, upgrade me to v30."
-2. It reads `.cortana-blueprint-version`. If `E2_graphiti: true`, it walks the Graphiti drop: stop containers, archive FalkorDB state to a recoverable Docker image, remove `infra/graphiti/`, remove `scripts/graphiti-*.sh`, remove the `graphiti` entry from `.mcp.json`, set `E2_graphiti: false`. If E2 wasn't installed, no-op.
-3. Core is unchanged — no Core migration steps needed.
+2. It reads `.<orchestrator>-blueprint-version`. If `E2_graphiti: true`, it walks the Graphiti drop: stop containers, archive FalkorDB state to a recoverable Docker image, remove `infra/graphiti/`, remove `scripts/graphiti-*.sh`, remove the `graphiti` entry from `.mcp.json`, set `E2_graphiti: false`. If E2 wasn't installed, no-op.
+3. Core is unchanged - no Core migration steps needed.
 
 ### v28 → v30
 1. Tell Claude Code: "I'm on v28, upgrade me to v30."
-2. It reads `.cortana-blueprint-version` (creates it if missing). Since v28 didn't stamp one, it'll assume no extensions installed.
+2. It reads `.<orchestrator>-blueprint-version` (creates it if missing). Since v28 didn't stamp one, it'll assume no extensions installed.
 3. For each remaining extension (E1, E3, E4, E5), it asks: "Install this? (y/n)" with a link to the extension section above. E2 is skipped (no longer offered).
-4. It installs picked ones, updates `.cortana-blueprint-version`.
-5. Core is unchanged — no Core migration steps needed.
+4. It installs picked ones, updates `.<orchestrator>-blueprint-version`.
+5. Core is unchanged - no Core migration steps needed.
 
 ### v27 → v30
 1. Same as v28 → v30 path. v27 → v28 only added more agents (non-breaking); same Core.
 
-### Partial install — add one extension later
-`bash scripts/install-blueprint.sh --add E3` — asks about E3 only, installs if you say yes, updates the version file.
+### Partial install - add one extension later
+`bash scripts/install-blueprint.sh --add E3` - asks about E3 only, installs if you say yes, updates the version file.
 
 ### Per-extension uninstall
-`bash scripts/install-blueprint.sh --remove E3` — uninstall steps for E3, marks it off in the version file.
+`bash scripts/install-blueprint.sh --remove E3` - uninstall steps for E3, marks it off in the version file.
 
 ### Version file format
-`.cortana-blueprint-version` (YAML):
+`.<orchestrator>-blueprint-version` (YAML):
 ```yaml
 blueprint_version: v30
 installed: 2026-04-21T01:00:00Z
@@ -682,7 +680,7 @@ upgraded: 2026-04-30T10:35:00Z
 mode: advanced
 extensions:
   E1_sqlite_vec: true
-  E2_graphiti: false   # deprecated as of v30 — not offered to new installs
+  E2_graphiti: false   # deprecated as of v30 - not offered to new installs
   E3_agent_teams: true
   E4_observability: true
   E5_hardened_safety: true
@@ -700,31 +698,79 @@ Your **personal** copy (if you keep one) typically lives in your private repo as
 
 ---
 
+## Before you install: prerequisites
+
+Install these on your machine BEFORE running the install command. The wizard will check for them and refuse to start if any are missing.
+
+**All platforms:**
+- **Claude Code** - the CLI (`claude` command must work). Get it from claude.com/claude-code.
+- **Node.js** v18 or newer - Mac `brew install node` / Windows `winget install OpenJS.NodeJS` / Linux `sudo apt install nodejs`
+- **Git** - Mac `brew install git` / Windows `winget install Git.Git` (Git for Windows includes bash, REQUIRED for the hook pipeline) / Linux `sudo apt install git`
+- **jq** - Mac `brew install jq` / Windows `winget install jqlang.jq` / Linux `sudo apt install jq`
+- **SQLite** - Mac `brew install sqlite3` (usually pre-installed) / Windows `winget install SQLite.SQLite` / Linux `sudo apt install sqlite3`
+- **bun** - Mac/Linux `curl -fsSL https://bun.sh/install | bash` / Windows `powershell -c "irm bun.sh/install.ps1 | iex"` (required for the Telegram plugin)
+
+**Optional (install only if you'll use the matching feature):**
+- **gh** (GitHub CLI) - for automatic repo creation. Mac `brew install gh` / Windows `winget install GitHub.cli` / Linux follow github.com/cli/cli install docs. Run `gh auth login` after installing.
+- **ffmpeg** - for the YouTube watch queue. Mac `brew install ffmpeg` / Windows `winget install Gyan.FFmpeg`
+- **yt-dlp** - for the YouTube watch queue. Mac `brew install yt-dlp` / Windows `winget install yt-dlp.yt-dlp`
+- **notebooklm-py** - for the AI Brain feature (the wizard installs this automatically if you pick the Brain at Q10).
+
+**Windows note:** Plain PowerShell cannot run the .sh hook pipeline. You need either Git for Windows (which ships Git Bash) or WSL2. Git Bash is the lighter option and is what the rest of this blueprint assumes for Windows users.
+
+**Windows - run this ONCE before you clone any blueprint-related repo or edit any hook script:**
+
+```powershell
+git config --global core.autocrlf input
+```
+
+Without this, Windows editors (Notepad, VS Code with default settings) save hook scripts with CRLF line endings, and the bash hooks fail with cryptic errors like `\r: command not found` or `bad interpreter`. The `input` setting checks files in as LF and leaves your working tree as-is.
+
+If you've already cloned and your hooks are throwing `\r` errors, fix existing files in-place: `find .claude/hooks scripts -type f \( -name '*.sh' -o -name '*.bash' \) -print0 | xargs -0 dos2unix`. Install dos2unix first via `winget install MSYS2.MSYS2 ; pacman -S dos2unix`, or simpler: re-clone after fixing the global config.
+
+If you don't have an existing project folder, create one now and `cd` into it before running the install command:
+
+- Mac/Linux: `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent`
+- Windows (PowerShell): `mkdir $HOME\Documents\MyAgent ; cd $HOME\Documents\MyAgent`
+
+---
+
 ## Install command
 
-Paste this single line into a fresh Claude Code session pointed at an empty directory you want to become your AI command centre:
+If you've never run Claude Code from a terminal, here is the literal first step:
+
+- **Mac:** open Terminal (press Cmd+Space, type `Terminal`, hit Enter). Type `cd ~/Documents/MyAgent && claude` and hit Enter. You will see a `>` prompt.
+- **Windows:** open PowerShell (press Win, type `PowerShell`, hit Enter). Type `cd $HOME\Documents\MyAgent ; claude` and hit Enter. You will see a `>` prompt.
+- **Linux:** open your terminal, `cd ~/Documents/MyAgent && claude`. You will see a `>` prompt.
+
+Once you see that prompt, paste the line below as your first message:
 
 ```
-Read the Xantham System v30 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v30.md and run the full setup wizard. Walk me through every step, ask me one question at a time, and don't assume any values — guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
+Read the Xantham System v30 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v30.md and run the full setup wizard. Walk me through every step, ask me one question at a time, and don't assume any values, guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
 ```
 
-That's it. The wizard handles everything else interactively:
-- Detects your OS automatically (with confirmation).
+If you forked this blueprint to your own GitHub repo, replace the URL above with your fork's raw URL.
+
+**What happens next.** The wizard will ask you 15 questions one at a time. Each question shows up in this chat. There is no progress bar, just answer each one. It takes 20-45 minutes. After the last question, you will see "Setup complete" and a list of files to verify.
+
+The wizard handles everything else interactively:
+- Runs a preflight check confirming all the prerequisites above are present.
+- Detects your OS (with confirmation).
 - Asks you to pick Simple or Advanced mode AFTER showing what each one includes.
 - Walks you through creating a Telegram bot via @BotFather (step-by-step) when it gets to the messaging step.
 - Walks you through creating a NotebookLM notebook (or skipping the AI Brain for now) when it gets to the memory step.
 - Asks you to name your orchestrator at the right point in the flow.
 - Picks sensible defaults for everything else and confirms before applying.
 
-You don't need ANY of those values to start. The wizard provides them.
+You don't need ANY of the optional values (bot token, notebook ID, etc.) to start. The wizard guides you through creating them.
 
-If you already have some values handy (e.g. an existing bot token), you can mention them when the wizard asks — but you don't have to. The wizard never blocks waiting on something it can guide you to create.
+If you already have some values handy (e.g. an existing bot token), you can mention them when the wizard asks, but you don't have to. The wizard never blocks waiting on something it can guide you to create.
 
 ---
 
-## Post-install verification — required before first real session
+## Post-install verification - required before first real session
 
-After the install wizard finishes, the user typically closes that session and starts a fresh terminal session named after their agent (e.g. `cortana<enter>` or `myagent<enter>`). The fresh session has zero context about which install steps actually completed. So things like terminal alias breakage (especially on Windows where the PowerShell profile setup often fails on first try) sit silently broken until the user notices and asks Claude to fix.
+After the install wizard finishes, the user typically closes that session and starts a fresh terminal session named after their agent (e.g. `<your-agent-name><enter>` or `myagent<enter>`). The fresh session has zero context about which install steps actually completed. So things like terminal alias breakage (especially on Windows where the PowerShell profile setup often fails on first try) sit silently broken until the user notices and asks Claude to fix.
 
 The wizard MUST close that gap. At the end of install, the wizard generates `SETUP-CHECKLIST.md` at the project root with one checklist item per setup step. The first new session reads this file and verifies each item before doing real work.
 
@@ -733,9 +779,11 @@ The wizard MUST close that gap. At the end of install, the wizard generates `SET
 `SETUP-CHECKLIST.md` template the wizard fills in with the user's actual values:
 
 ```markdown
-# Cortana setup checklist
+# Setup checklist for {{orchestrator_name}}
 
-If you are reading this from a fresh `<agent-name>` session for the first time after install: walk through every item below. Run the verify command. If it does not return the expected output, follow the fix-if-broken instructions or ask Claude to fix it.
+Each verify step below is a command. Type it into your terminal (the same terminal where you ran `<agent-name>`), press enter, and check the output. If you see something unexpected, copy the output and paste it to {{orchestrator_name}} and it will fix it.
+
+If you are reading this from a fresh `<agent-name>` session for the first time after install: walk through every item below. Run the verify command. If it does not return the expected output, follow the fix-if-broken instructions or ask {{orchestrator_name}} to fix it.
 
 Mark each box as you confirm. Do not skip Windows-specific items if you are on Windows.
 
@@ -756,32 +804,32 @@ Mark each box as you confirm. Do not skip Windows-specific items if you are on W
   Expected: exits 0, shows green status across Telegram + NotebookLM Brain + memory + safety gate + project docs + MCP.
   Fix: read each red item; healthcheck prints the suggested remediation.
 
-- [ ] **Statusline shows context % + 5h window** — recommended for everyone, critical for power users
+- [ ] **Statusline shows context % + 5h window** - recommended for everyone, critical for power users
   This adds `cwd | model | context% | 5h% | branch` to the bottom of every Claude Code session so you can see when the context window is filling up (the most common cause of "the agent got worse" complaints).
   Verify: open this fresh Claude Code session. Look at the bottom-of-screen statusline.
   Expected: `~/<project> | claude-opus-4-7[1m] | XX% context | XX% 5h | main`
-  Fix: the wizard wrote `~/.claude/statusline-command.sh` and added the `statusLine` block to `~/.claude/settings.json`. If the statusline is missing or just shows `cwd`, ask Claude in this session: "wire up the statusline per blueprint section Day-1 statusline." Claude will check `~/.claude/settings.json` for the `statusLine.command` entry, verify the script is executable, restart Claude Code if needed.
+  Fix: the wizard wrote `~/.claude/statusline-command.sh` and added the `statusLine` block to `~/.claude/settings.json`. If the statusline is missing or just shows `cwd`, run these two commands in your terminal: `chmod +x ~/.claude/statusline-command.sh` then `grep -A1 statusLine ~/.claude/settings.json` to confirm the `command` field points at that script. Restart Claude Code (close and reopen the terminal). If the statusline still does not show, paste the output of `cat ~/.claude/settings.json` to your agent and it will diagnose.
 
 - [ ] **Telegram bot token works**
-  Verify: a quick test ping. The wizard wired the bot to data/runtime/telegram.json. From this fresh session ask Claude: "send a Telegram test ping that says 'verified'."
-  Expected: you receive "verified" on your phone.
-  Fix: regenerate token from @BotFather, paste it back into Claude, ask it to update the runtime config.
+  Verify: a quick test ping. The wizard wired the bot to `data/runtime/telegram.json`. From this fresh session, type into the chat: "send a Telegram test ping that says 'verified'."
+  Expected: you receive "verified" on your phone within a few seconds.
+  Fix: regenerate the token from @BotFather (send `/token`, pick the bot, copy the new value), paste it back to your agent in this chat, and say "update the runtime config with this new token."
 
 - [ ] **NotebookLM Brain accessible**
-  Verify: `notebooklm use <notebook-id> && notebooklm list-sources | head -3` (notebook-id from the install)
-  Expected: the notebook table prints + at least one source listed.
-  Fix: re-auth `notebooklm` per the install steps, confirm the notebook ID matches what the install used.
+  Verify: `notebooklm --help` (just confirm the CLI loads without error).
+  Expected: the help text prints. The exact subcommand verbs vary by `notebooklm-py` release - run `notebooklm <verb> --help` for any specific operation (sources, ingest, etc.).
+  Fix: re-auth via the steps printed by the install (typically a Google OAuth flow). If the CLI itself is missing, reinstall: `pip install notebooklm-py`.
 
 - [ ] **Terminal alias `<agent-name>` works**
   Verify (Mac/Linux/Git-Bash): close and reopen your terminal, then run `<agent-name>`.
   Expected: a fresh Claude Code session opens at the project root with the right CLAUDE.md loaded.
   Fix: see the next item if Windows. On Mac/Linux, source your shell profile (`source ~/.zshrc` or `source ~/.bashrc`).
 
-- [ ] **Terminal alias `<agent-name>` works on Windows (PowerShell)** — KNOWN-FRAGILE
-  Windows almost never gets this right on first try. The PowerShell profile setup usually needs one of: enabling script execution policy, restarting PowerShell, or fixing the path Claude wrote to the profile.
+- [ ] **Terminal alias `<agent-name>` works on Windows (PowerShell)** - KNOWN-FRAGILE
+  Windows almost never gets this right on first try. The PowerShell profile setup usually needs one of: enabling script execution policy, restarting PowerShell, or fixing the path written to the profile.
   Verify: close and reopen PowerShell, then run `<agent-name>`.
   Expected: fresh Claude Code session opens.
-  If it does NOT work, ask Claude in this session: "the `<agent-name>` alias does not work on PowerShell, fix it." Claude will:
+  If it does NOT work, paste the error you see back to your agent and say: "the `<agent-name>` alias does not work on PowerShell, fix it." It will:
   1. Check `Get-ExecutionPolicy` (must be `RemoteSigned` or `Unrestricted` for `$PROFILE` scripts)
   2. Check `$PROFILE` exists and has the function definition
   3. Fix any path quoting issues (Windows paths with spaces are the usual culprit)
@@ -816,7 +864,7 @@ Mark each box as you confirm. Do not skip Windows-specific items if you are on W
 - [ ] **E1 sqlite-vec: Ollama running + index populated**
   Verify (Mac): `brew services list | grep ollama` shows started; `curl -s localhost:11434/api/tags` returns models.
   Verify (Windows): `Get-Service Ollama` returns Status `Running`; `curl -s localhost:11434/api/tags` returns models.
-  Index: `ls -la data/cortana-vec.db` (file exists, > 1MB after first embed).
+  Index: `ls -la data/vector-memory.db` (file exists, > 1MB after first embed).
   Fix: restart Ollama (`brew services restart ollama` / `Restart-Service Ollama`). Re-run `bash scripts/embed-memories.sh`.
 
 - [ ] **E3 Agent Teams flag set**
@@ -843,7 +891,7 @@ If a future install adds new components (extension upgrade, new MCP server, new 
 
 The wizard's last action before saying "install complete" should be: write this file (with `<agent-name>` substituted), confirm the file exists, and tell the user explicitly:
 
-> Setup complete. I have written `SETUP-CHECKLIST.md` to your project root. Close this session, open a fresh terminal, run `<agent-name>` (or `<agent-name>-resume`), and the first thing your fresh Cortana session will do is walk through the checklist. Do not start real work until every box is ticked.
+> Setup complete. I have written `SETUP-CHECKLIST.md` to your project root. Close this session, open a fresh terminal, run `<agent-name>` (or `<agent-name>-resume`), and the first thing your fresh orchestrator session will do is walk through the checklist. Do not start real work until every box is ticked.
 
 The CLAUDE.md template (later in this blueprint) includes a corresponding directive: any first-time session that finds `SETUP-CHECKLIST.md` at the project root must read it, run each verify command, and fix failures before any other work. After all boxes are ticked, rename the file to `data/SETUP-CHECKLIST.md.done` so the prompt does not re-fire next session.
 
@@ -853,7 +901,7 @@ The CLAUDE.md template (later in this blueprint) includes a corresponding direct
 
 The verification checklist closes the "is the system actually installed" gap. This section closes the "what do I do now" gap. The wizard generates these eight files at the project root so a brand-new user who just opened a fresh `<agent-name>` session has everything they need to start operating without grep-ing through CLAUDE.md.
 
-### `USER-GUIDE.md` — the user-facing command reference
+### `USER-GUIDE.md` - the user-facing command reference
 
 Operational config lives in CLAUDE.md (the agent reads it). Day-1 commands need to live somewhere the user reads. The wizard writes `USER-GUIDE.md` at the project root with this shape:
 
@@ -866,8 +914,8 @@ This is your day-one cheat sheet. Bookmark it, print it, leave it open in anothe
 
 Open a terminal and run:
 
-- `<agent-name>` — start a fresh Claude Code session in your project root
-- `<agent-name>-resume` — pick up where the last session left off
+- `<agent-name>` - start a fresh Claude Code session in your project root
+- `<agent-name>-resume` - pick up where the last session left off
 
 That is it. From inside the session you can talk to your agent in plain English OR use any of the commands below.
 
@@ -885,11 +933,11 @@ That is it. From inside the session you can talk to your agent in plain English 
 
 You don't need commands for most things. Just say what you want:
 
-- "what's the status on TixPredict?" — agent reads memory, summarises
-- "send Kai to fix the build" — agent dispatches Kai with context
-- "how did we solve the timezone bug last week?" — agent searches memory + recalls
-- "remind me to check the deploy in 3 days" — agent creates a calendar event
-- "what's in my queue?" — agent lists pending YouTube videos / emails / tasks
+- "what's the status on TixPredict?" - agent reads memory, summarises
+- "send Kai to fix the build" - agent dispatches Kai with context
+- "how did we solve the timezone bug last week?" - agent searches memory + recalls
+- "remind me to check the deploy in 3 days" - agent creates a calendar event
+- "what's in my queue?" - agent lists pending YouTube videos / emails / tasks
 
 ## Sending content to your agent (Telegram only)
 
@@ -904,7 +952,7 @@ If you set up Telegram during install:
 
 - Spawning agents: say "send <agent> to do X" or "have Kai handle Y". They run in parallel.
 - Long tasks: agent dispatches in background, gives you a 1-line acknowledgement, pings you when done.
-- Scheduling: say "every Monday at 9am, ask Rose to do a frontier scan" — agent sets up a routine.
+- Scheduling: say "every Monday at 9am, ask Rose to do a frontier scan" - agent sets up a routine.
 
 ## Sync rhythm
 
@@ -922,10 +970,10 @@ Recommended:
 
 ## Where to read more
 
-- **CLAUDE.md** — the agent's own operating config (what it does, not what you do)
-- **HANDOFF.md** — what the last session was working on
-- **memory/** — every fact and rule the agent has saved
-- **docs/projects.md** — your project list with paths + descriptions
+- **CLAUDE.md** - the agent's own operating config (what it does, not what you do)
+- **HANDOFF.md** - what the last session was working on
+- **memory/** - every fact and rule the agent has saved
+- **docs/projects.md** - your project list with paths + descriptions
 
 ## Customising your agent
 
@@ -939,7 +987,7 @@ If you set up Telegram, your bot is your portable command line. Anything you can
 
 ## Sessions and the context window
 
-Every Claude Code session has a finite context window — roughly 200k tokens on Sonnet, more on Opus. Your statusline (set up during install) shows current usage as a percentage. This matters because the more context you fill, the slower and less reliable the agent gets.
+Every Claude Code session has a finite context window - roughly 200k tokens on Sonnet, more on Opus. Your statusline (set up during install) shows current usage as a percentage. This matters because the more context you fill, the slower and less reliable the agent gets.
 
 **The rule of thumb:**
 
@@ -952,7 +1000,7 @@ Every Claude Code session has a finite context window — roughly 200k tokens on
 
 **`<agent-name>` vs `<agent-name>-resume`:**
 - `<agent-name>` opens a FRESH session. Empty context, full window available. Use this for new work or when the previous session's context is full.
-- `<agent-name>-resume` continues your last session. Inherits all of last session's context — including what filled it up. Use only when you actively need the prior context (mid-debug, complex multi-step task in flight).
+- `<agent-name>-resume` continues your last session. Inherits all of last session's context - including what filled it up. Use only when you actively need the prior context (mid-debug, complex multi-step task in flight).
 
 When in doubt, fresh. The agent's memory layer (sqlite-vec + markdown) survives across sessions, so a fresh session can still recall everything important. The context window is just for the current conversation.
 
@@ -963,6 +1011,20 @@ Your statusline also shows your 5-hour Claude Max usage. Same colour code: blue 
 **Why this matters more than people think:**
 
 Most "the agent got worse" complaints are actually "the context window is too full." A 95%-full session forgets things from the start of the conversation, hallucinates, and drops sub-agent results. A fresh session with the same task always works better. Treat the statusline like a fuel gauge.
+
+## Status emoji convention (your agent uses these in every reply)
+
+Your agent will use a three-state visual cue in every status update:
+
+| Emoji | Meaning |
+|---|---|
+| 🔹 | Done / shipped / verified. Nothing for you to do. |
+| 🔸 | In progress / running / dispatched. Still cooking, status will change. |
+| 🔸🔴 | Running but blocked on you. The agent cannot proceed until you respond. |
+
+The compound 🔸🔴 is the easy visual identifier across long status digests. Scan for the orange-and-red items first, those are the only ones that need your attention right now. The plain orange 🔸 items are running but don't need anything from you yet.
+
+Apply the same convention when you message the agent if you want — say "🔸 looking into X" if you're working on something, or "🔸🔴 need your call before I deploy" if you want a decision. The agent treats it consistently.
 ```
 
 ### Fresh-session greeting (CLAUDE.md addition)
@@ -978,7 +1040,7 @@ If a session starts with no inbound message AND `data/runtime/first-launch.flag`
 2. Touch `data/runtime/first-launch.flag` so this greeting only fires once.
 3. Wait for the user.
 
-Do NOT do this on subsequent fresh sessions — they have already been oriented.
+Do NOT do this on subsequent fresh sessions - they have already been oriented.
 ```
 
 ### First-Telegram-message welcome (CLAUDE.md addition)
@@ -990,14 +1052,14 @@ Same idea for Telegram:
 
 If a Telegram message arrives AND `data/runtime/first-telegram.flag` does not exist:
 
-1. Reply via the Telegram tool: "Hi, I'm <orchestrator_name> on Telegram. This is your first message to me. I can do everything I do in your terminal, plus auto-queue YouTube URLs, accept screenshots, and reply on the move. Top commands: `help`, `projects`, `sync <project>`, `wrapup`. Or just talk to me normally and I'll route to the right specialist agent. To swap to a more direct conversational mode any time, send my name as a single word."
+1. Reply via the Telegram tool: "Hi, I'm <orchestrator_name> on Telegram. This is your first message to me. Before I can take messages from you for real, you need to approve this chat once. Switch to your laptop terminal (the one running `<agent-name>`). Type `/telegram:access` and press enter. You'll see a prompt asking to approve this Telegram chat. Type `yes`. From then on, every Telegram message lands here and I respond on this thread. Once approved, I do everything I do in your terminal, plus auto-queue YouTube URLs, accept screenshots, and reply on the move. Top commands: `help`, `projects`, `sync <project>`, `wrapup`. Or just talk to me normally and I'll route to the right specialist agent. To swap to a more direct conversational mode any time, send my name as a single word."
 2. Touch `data/runtime/first-telegram.flag` so this welcome only fires once.
 3. Then handle the user's actual message normally.
 
-Do NOT re-introduce on subsequent messages — they know who you are.
+Do NOT re-introduce on subsequent messages - they know who you are.
 ```
 
-### `BACKUP-AND-RECOVERY.md` — what to back up + how to restore
+### `BACKUP-AND-RECOVERY.md` - what to back up + how to restore
 
 The wizard writes:
 
@@ -1018,16 +1080,16 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 
 ## What is NOT in git (must be backed up separately)
 
-- `data/runtime/` (Telegram bot token, persona state, lock files) — gitignored, contains secrets
-- `data/cortana-vec.db` (sqlite-vec semantic index) — gitignored, regenerable but takes minutes
-- `~/.claude/` (Claude Code CLI auth, hook installs at user scope) — never in any repo
-- Shell profile (`~/.zshrc` / `~/.bashrc` / PowerShell `$PROFILE`) — terminal aliases live here
+- `data/runtime/` (Telegram bot token, persona state, lock files) - gitignored, contains secrets
+- `data/vector-memory.db` (sqlite-vec semantic index) - gitignored, regenerable but takes minutes
+- `~/.claude/` (Claude Code CLI auth, hook installs at user scope) - never in any repo
+- Shell profile (`~/.zshrc` / `~/.bashrc` / PowerShell `$PROFILE`) - terminal aliases live here
 - Any `.env` files inside `infra/`
 
 ## Recommended backup approach
 
 1. **Push the repo to GitHub on every meaningful change** (the post-commit hook + your sync rhythm handle this if you stay disciplined)
-2. **Once a week:** zip `data/runtime/` and copy it to a separate location (encrypted external drive, password manager, or a backup folder under `~/Documents/<your-orchestrator>-backups/`). Includes your Telegram bot token.
+2. **Each Sunday:** ask your agent: "back up my runtime folder." It zips `data/runtime/` (which holds your Telegram bot token, persona state, lock files) and drops a date-stamped copy at `~/Documents/<your-orchestrator>-backups/`. To restore, ask: "restore runtime from last Sunday's backup." If you'd rather hold the backup off-machine, copy the dated zip to an encrypted external drive or a password manager attachment.
 3. **Document your shell aliases** in this file so you can recreate them on a fresh machine.
 
 ## Restoring on a new Mac
@@ -1037,7 +1099,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 3. `git clone <your-repo-url>` to your Documents directory.
 4. `cd` into the repo.
 5. Restore `data/runtime/` from your backup (paste files in).
-6. Run `bash scripts/healthcheck.sh` — it tells you what's missing.
+6. Run `bash scripts/healthcheck.sh` - it tells you what's missing.
 7. Open `SETUP-CHECKLIST.md` (or regenerate it) and walk through every item.
 8. Re-pair your Telegram bot if needed (`/telegram:configure` skill or paste the token to the agent).
 
@@ -1047,10 +1109,10 @@ Same steps via Git Bash or WSL2. The blueprint's Windows-specific install comman
 
 ## Restoring just your AI Brain notebook
 
-Brain content is in NotebookLM (notebook ID stamped in `data/runtime/brain.json`). On a new machine, install `notebooklm` CLI, log in with the same Google account, and the notebook is already there. Source files (snapshots) are not redownloaded automatically — they were one-way pushed. The notebook itself is the canonical store.
+Brain content is in NotebookLM (notebook ID stamped in `data/runtime/brain.json`). On a new machine, install `notebooklm` CLI, log in with the same Google account, and the notebook is already there. Source files (snapshots) are not redownloaded automatically - they were one-way pushed. The notebook itself is the canonical store.
 ```
 
-### Statusline — context-window + 5h budget visibility
+### Statusline - context-window + 5h budget visibility
 
 The wizard writes `~/.claude/statusline-command.sh` (user-scope, not in the project repo because it applies to every Claude Code session) and adds a `statusLine` block to `~/.claude/settings.json`.
 
@@ -1156,13 +1218,13 @@ Restart Claude Code for it to pick up. From then on every session shows the cont
 
 **Windows note:** The script is bash, so on Windows it runs via Git Bash or WSL. The `~/.claude/` path resolves to `%USERPROFILE%\.claude\` under Git Bash. If `bash` is not in PATH from Claude Code's perspective on Windows, swap `bash ~/.claude/statusline-command.sh` for the WSL absolute path (`wsl bash /mnt/c/Users/<you>/.claude/statusline-command.sh`) or convert the script to PowerShell.
 
-### `scripts/upgrade-cortana.sh` — the update path with customisation preservation
+### `scripts/upgrade-xantham.sh` - the update path with customisation preservation
 
 When a user has been on an older blueprint (say v29) and the upstream version (v31) ships, they may have ALSO added their own hooks, skills, scripts, and CLAUDE.md sections in the meantime. A naive overwrite would blow those away. This script does the opposite: it diffs three ways and asks the user before touching anything customised.
 
 ```bash
 #!/usr/bin/env bash
-# upgrade-cortana.sh — bump from current blueprint version to latest, preserving
+# upgrade-xantham.sh - bump from current blueprint version to latest, preserving
 # user customisations. Three-way merge: user's files vs old-version baseline vs
 # new blueprint. Files are bucketed pristine / customised / user-added.
 #
@@ -1178,19 +1240,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [ ! -f .cortana-blueprint-version ]; then
-  echo "No .cortana-blueprint-version found. Are you in a Cortana repo?" >&2
+if [ ! -f .<orchestrator>-blueprint-version ]; then
+  echo "No .<orchestrator>-blueprint-version found. Are you in a Xantham System repo?" >&2
   exit 1
 fi
 
-CURRENT=$(grep '^blueprint_version:' .cortana-blueprint-version | awk '{print $2}')
+CURRENT=$(grep '^blueprint_version:' .<orchestrator>-blueprint-version | awk '{print $2}')
 echo "Current blueprint version: $CURRENT"
 
 # Fetch latest from canonical source
 LATEST_URL="https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-latest.md"
 echo "Fetching latest blueprint from: $LATEST_URL"
-curl -fsSL "$LATEST_URL" -o /tmp/latest-blueprint.md
-LATEST=$(grep '^# Xantham System — Blueprint' /tmp/latest-blueprint.md | sed 's/.*Blueprint //')
+curl -fsSL "$LATEST_URL" -o "${TMPDIR:-/tmp}/latest-blueprint.md"
+LATEST=$(grep '^# Xantham System - Blueprint' "${TMPDIR:-/tmp}/latest-blueprint.md" | sed 's/.*Blueprint //')
 echo "Latest available: $LATEST"
 
 if [ "$CURRENT" = "$LATEST" ]; then
@@ -1207,10 +1269,10 @@ elif [ -f "blueprints/xantham-system-${CURRENT}.md" ]; then
 else
   ARCHIVE_URL="https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/blueprints/archive/xantham-system-${CURRENT}.md"
   echo "Old baseline not found locally. Fetching from: $ARCHIVE_URL"
-  curl -fsSL "$ARCHIVE_URL" -o /tmp/old-baseline.md || {
+  curl -fsSL "$ARCHIVE_URL" -o "${TMPDIR:-/tmp}/old-baseline.md" || {
     echo "Could not fetch old baseline. Will proceed without it (every modified file will be flagged for review)." >&2
   }
-  [ -f /tmp/old-baseline.md ] && OLD_BASELINE="/tmp/old-baseline.md"
+  [ -f "${TMPDIR:-/tmp}/old-baseline.md" ] && OLD_BASELINE="${TMPDIR:-/tmp}/old-baseline.md"
 fi
 
 echo ""
@@ -1219,7 +1281,7 @@ echo ""
 echo "Open a fresh Claude Code session at $REPO_ROOT and paste:"
 echo ""
 echo "---"
-echo "Read /tmp/latest-blueprint.md (target version $LATEST)."
+echo "Read ${TMPDIR:-/tmp}/latest-blueprint.md (target version $LATEST)."
 echo "Read $OLD_BASELINE (my current baseline, $CURRENT)."
 echo "Walk the customisation-preserving upgrade per the public blueprint section"
 echo "'Upgrade walkthrough (customisation-preserving)'."
@@ -1228,14 +1290,14 @@ echo "Steps:"
 echo "1. For every file the new blueprint defines, three-way diff:"
 echo "   - my current copy"
 echo "   - the old-baseline copy ($OLD_BASELINE)"
-echo "   - the new copy (/tmp/latest-blueprint.md)"
+echo "   - the new copy (${TMPDIR:-/tmp}/latest-blueprint.md)"
 echo "2. Bucket each: pristine, customised, user-added."
 echo "3. Show me the per-bucket summary before touching anything."
 echo "4. For pristine files, ask once: OK to bulk-upgrade all? yes/no."
 echo "5. For customised files, walk one at a time: keep mine, take new, or show diff first."
 echo "6. For user-added files, list them and confirm I know they will be preserved."
 echo "7. Apply only the changes I approved."
-echo "8. Update .cortana-blueprint-version to $LATEST."
+echo "8. Update .<orchestrator>-blueprint-version to $LATEST."
 echo "9. Regenerate SETUP-CHECKLIST.md so I can verify the upgrade landed."
 echo "10. Print a summary of what changed + what was preserved."
 echo "---"
@@ -1245,19 +1307,19 @@ The blueprint section that Claude Code reads when it executes the walkthrough is
 
 ### Upgrade walkthrough (customisation-preserving)
 
-When a user runs `bash scripts/upgrade-cortana.sh` and pastes the resulting prompt into a fresh Claude Code session, the agent walks this protocol:
+When a user runs `bash scripts/upgrade-xantham.sh` and pastes the resulting prompt into a fresh Claude Code session, the agent walks this protocol:
 
-**Phase 1 — Inventory.** Catalog every file the new blueprint defines. For each, record three checksums:
+**Phase 1 - Inventory.** Catalog every file the new blueprint defines. For each, record three checksums:
 - the user's current file (if it exists)
 - the old-baseline file (if available)
 - the new blueprint file
 
-**Phase 2 — Bucket.** Each file falls into one of:
+**Phase 2 - Bucket.** Each file falls into one of:
 - **Pristine:** user's current file matches old-baseline (or doesn't exist + new blueprint adds it). Safe to take the new version.
 - **Customised:** user's current file differs from old-baseline. The user has modified it. Take the new version blindly = clobber their work.
 - **User-added:** user has files that aren't in old-baseline OR new blueprint (custom hooks, custom skills, custom scripts, custom CLAUDE.md sections wrapped in user-section markers). Preserve untouched.
 
-**Phase 3 — Summarise BEFORE touching anything.** Output something like:
+**Phase 3 - Summarise BEFORE touching anything.** Output something like:
 ```
 Upgrade plan: v29 -> v31
 
@@ -1265,36 +1327,36 @@ PRISTINE (15 files, safe to upgrade): scripts/healthcheck.sh, .claude/hooks/safe
 CUSTOMISED (3 files, will ask per file):
   - CLAUDE.md (you added a custom routing table)
   - scripts/log-telegram.sh (you added a redaction call)
-  - .claude/skills/cortana-sync/SKILL.md (you tweaked the sync cadence)
+  - .claude/skills/<orchestrator>-sync/SKILL.md (you tweaked the sync cadence)
 USER-ADDED (8 files, untouched): .claude/hooks/my-custom-hook.sh, .claude/skills/my-custom-skill/SKILL.md, ...
 
 OK to proceed? (yes / show me a customised file first / cancel)
 ```
 
-**Phase 4 — Bulk-approve pristine.** One yes/no for the whole pristine bucket. If yes, copy all new versions over.
+**Phase 4 - Bulk-approve pristine.** One yes/no for the whole pristine bucket. If yes, copy all new versions over.
 
-**Phase 5 — Per-file walk for customised.** For each customised file, show:
+**Phase 5 - Per-file walk for customised.** For each customised file, show:
 - A 3-way diff (current vs new, with old-baseline as common ancestor)
 - Three options: **keep mine** (do nothing), **take new** (overwrite), **merge** (Claude attempts a 3-way merge, presents the result, asks for approval)
 - If the user picks merge and it cleanly applies (no conflict), accept. If conflicts, fall back to per-hunk choices.
 
-**Phase 6 — User-added confirmation.** List user-added files. Confirm with the user that the agent recognises them as user contributions and will not touch them. This step exists to surface any files the user FORGOT they added.
+**Phase 6 - User-added confirmation.** List user-added files. Confirm with the user that the agent recognises them as user contributions and will not touch them. This step exists to surface any files the user FORGOT they added.
 
-**Phase 7 — Apply + verify.** Once all approvals are in:
+**Phase 7 - Apply + verify.** Once all approvals are in:
 - Apply the changes
-- Update `.cortana-blueprint-version` to the new version
+- Update `.<orchestrator>-blueprint-version` to the new version
 - Regenerate `SETUP-CHECKLIST.md` so the user verifies the upgrade landed
 - Run `bash scripts/healthcheck.sh` to confirm no breakage
 - If healthcheck fails, the agent investigates + offers a rollback (`git checkout` of the previous state)
 
-**Phase 8 — Summary.** Output:
+**Phase 8 - Summary.** Output:
 ```
 Upgrade complete: v29 -> v31
 
 Upgraded (15 files): healthcheck.sh, safety-gate.sh, ... (full list)
 Took new (1 customised file): scripts/log-telegram.sh
 Kept yours (1 customised file): CLAUDE.md
-Merged (1 customised file): .claude/skills/cortana-sync/SKILL.md
+Merged (1 customised file): .claude/skills/<orchestrator>-sync/SKILL.md
 Preserved untouched (8 user-added files): my-custom-hook.sh, my-custom-skill/SKILL.md, ... (full list)
 New since v29: USER-GUIDE.md, SETUP-CHECKLIST.md, FIRST-WEEK.md, ... (full list of new components)
 
@@ -1303,7 +1365,7 @@ Run SETUP-CHECKLIST.md to verify the upgrade landed cleanly.
 
 **Why this matters:** users who've been operating for months will have evolved their setup. A naive upgrade that overwrites everything is hostile to that investment. This protocol lets users adopt new upstream features (auto-digest improvements, new hooks, new skills) while preserving every personal addition they've made.
 
-### `BLUEPRINT-MARKERS.md` — convention for user-added sections inside blueprint files
+### `BLUEPRINT-MARKERS.md` - convention for user-added sections inside blueprint files
 
 Some users will modify CLAUDE.md or other shared files in-place (rather than adding new files). To preserve their additions across upgrades, the upgrade walkthrough recognises sections wrapped in marker comments:
 
@@ -1319,7 +1381,7 @@ Recommended: tell users to wrap their custom CLAUDE.md additions in these marker
 
 > "Have you customised CLAUDE.md or other blueprint-shipped files? If yes, wrap your custom sections in USER-CUSTOM-SECTION markers before continuing the upgrade. Any unmarked customisations will trigger the per-file walk."
 
-### `FIRST-WEEK.md` — daily-ops guide
+### `FIRST-WEEK.md` - daily-ops guide
 
 The wizard writes:
 
@@ -1328,7 +1390,7 @@ The wizard writes:
 
 Day 1: just play. Run `help`, `projects`, `team`. Send a casual message on Telegram. Watch the agent respond. Do not over-plan.
 
-Day 2-3: pick one real project. Add it via `register a new project called X`. Use `sync X` after each work block. Notice how the agent picks up context faster on day 3 than day 1 — that is memory working.
+Day 2-3: pick one real project. Add it via `register a new project called X`. Use `sync X` after each work block. Notice how the agent picks up context faster on day 3 than day 1 - that is memory working.
 
 Day 4: try a complex task. "Send Kai to refactor the auth flow in X." Watch the agent dispatch, work in background, and come back with results. This is the multi-agent pattern.
 
@@ -1341,7 +1403,7 @@ Day 7: review. Type `wrapup` at end of day. Agent commits memory, pushes the Bra
 If you have done all seven, you are operating at full capability.
 ```
 
-### `PITFALLS.md` — common things not to do
+### `PITFALLS.md` - common things not to do
 
 The wizard writes:
 
@@ -1368,20 +1430,20 @@ That directory has your Telegram bot token, persona state, and lock files. Losin
 
 The hardened safety gate (E5) blocks this hard, but if you somehow get past it: stop, pull, resolve, re-push. Force-push to main destroys shared history. Same on production / develop / release.
 
-## Do not reinstall Cortana over an existing install without backing up
+## Do not reinstall the orchestrator over an existing install without backing up
 
 Re-running the wizard on a populated repo can overwrite CLAUDE.md / settings / memory. Always backup the entire repo first: `git branch backup/$(date +%s) && git push origin backup/$(date +%s)`.
 
 ## Do not run multiple `<agent-name>` aliases pointing at different repos
 
-Confusion. Each agent name should map to one project. Use `<agent-name>` for Cortana, a different name for any other personal AI you build.
+Confusion. Each agent name should map to one project. Use `<agent-name>` for your orchestrator, a different name for any other personal AI you build.
 
 ## Do not assume the AI Brain is canonical
 
 The Brain (NotebookLM) is a search-and-summary layer on top of memory snapshots. The CANONICAL store is `memory/*.md`. If they disagree, trust memory files.
 ```
 
-### `MEMORY-HYGIENE.md` — what to commit, what to gitignore
+### `MEMORY-HYGIENE.md` - what to commit, what to gitignore
 
 The wizard writes:
 
@@ -1395,11 +1457,11 @@ The agent saves memory automatically. You usually don't need to think about it. 
 - Anything the agent saves to `memory/<type>_<topic>.md` via its core loop step 6
 - Anything the agent saves to `agent-memory/<agent-name>/<file>.md`
 - The auto-regenerated `memory/MEMORY.md` index (post-commit hook)
-- `data/cortana-vec.db` SHA / chunk count tracking (NOT the .db itself; that's gitignored)
+- `data/vector-memory.db` SHA / chunk count tracking (NOT the .db itself; that's gitignored)
 
 ## What is gitignored (locally only)
 
-- `data/cortana-vec.db` (regenerable from `bash scripts/embed-memories.sh`)
+- `data/vector-memory.db` (regenerable from `bash scripts/embed-memories.sh`)
 - `data/runtime/*` (secrets, persona state, lock files)
 - `data/audit/*.jsonl` (you can archive these via `bash scripts/audit-archive.sh 30` to push older ones into git)
 - `data/youtube-watch-queue.jsonl` and `data/youtube-playlists.jsonl` (local ops state)
@@ -1407,7 +1469,7 @@ The agent saves memory automatically. You usually don't need to think about it. 
 
 ## When to manually save a memory
 
-If the agent missed something important, tell it: "save this to memory: <fact>." It writes a file, commits, and the post-commit hook re-embeds. You should rarely need to do this — the core loop handles it.
+If the agent missed something important, tell it: "save this to memory: <fact>." It writes a file, commits, and the post-commit hook re-embeds. You should rarely need to do this - the core loop handles it.
 
 ## When to clean up memory
 
@@ -1417,14 +1479,14 @@ Memories accumulate. Once a quarter:
 - Delete invalidates the post-commit hook auto-removes the chunk from sqlite-vec
 ```
 
-### `scripts/regenerate-setup-checklist.sh` — for when new components arrive
+### `scripts/regenerate-setup-checklist.sh` - for when new components arrive
 
 The wizard writes a stub:
 
 ```bash
 #!/usr/bin/env bash
-# regenerate-setup-checklist.sh — re-write SETUP-CHECKLIST.md based on
-# the current state of .cortana-blueprint-version. Used when a new
+# regenerate-setup-checklist.sh - re-write SETUP-CHECKLIST.md based on
+# the current state of .<orchestrator>-blueprint-version. Used when a new
 # extension is installed or a component is upgraded that needs verification.
 
 set -euo pipefail
@@ -1432,7 +1494,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "Regenerating SETUP-CHECKLIST.md based on installed components..."
 echo "Open a fresh Claude Code session at $REPO_ROOT and run:"
 echo ""
-echo "  Read .cortana-blueprint-version. Regenerate SETUP-CHECKLIST.md per"
+echo "  Read .<orchestrator>-blueprint-version. Regenerate SETUP-CHECKLIST.md per"
 echo "  the Post-install verification section of the public blueprint,"
 echo "  including a checklist item for every component currently installed."
 ```
@@ -1448,7 +1510,7 @@ After install, the wizard's last step is to write all of these files:
 4. `FIRST-WEEK.md` (daily-ops guide)
 5. `PITFALLS.md` (anti-patterns)
 6. `MEMORY-HYGIENE.md` (memory rules)
-7. `scripts/upgrade-cortana.sh` (future bump path)
+7. `scripts/upgrade-xantham.sh` (future bump path)
 8. `scripts/regenerate-setup-checklist.sh` (regen helper)
 
 **User scope (one-time, applies to every Claude Code session on this machine):**
@@ -1459,17 +1521,17 @@ Plus update the CLAUDE.md template with the First-contact + First-Telegram-messa
 
 Then the wizard tells the user:
 
-> Setup complete. Six files written to your project root + two scripts under scripts/ + the statusline at ~/.claude/. SETUP-CHECKLIST.md is the one to read first. USER-GUIDE.md is your day-1 cheat sheet (includes when to start a fresh session vs resume, what the context % means). BACKUP-AND-RECOVERY.md tells you what to back up. FIRST-WEEK.md is your week-1 ops guide. PITFALLS.md is what NOT to do. MEMORY-HYGIENE.md is the memory rules. Close this session, run `<agent-name>` from your terminal, and the first session will walk SETUP-CHECKLIST.md before any real work. You'll see the new statusline at the bottom showing your context window — watch it as you work, especially past 50%.
+> Setup complete. Six files written to your project root + two scripts under scripts/ + the statusline at ~/.claude/. SETUP-CHECKLIST.md is the one to read first. USER-GUIDE.md is your day-1 cheat sheet (includes when to start a fresh session vs resume, what the context % means). BACKUP-AND-RECOVERY.md tells you what to back up. FIRST-WEEK.md is your week-1 ops guide. PITFALLS.md is what NOT to do. MEMORY-HYGIENE.md is the memory rules. Close this session, run `<agent-name>` from your terminal, and the first session will walk SETUP-CHECKLIST.md before any real work. You'll see the new statusline at the bottom showing your context window - watch it as you work, especially past 50%.
 
 ---
 
-# Full reference — Core install wizard, templates, patterns, troubleshooting
+# Full reference - Core install wizard, templates, patterns, troubleshooting
 
 The sections above cover the v29-v30 additions (mode chooser, extensions, versioning, OS coverage).
 What follows is the complete Core install guide inherited from v28: the 15-question setup wizard,
 every template file (CLAUDE.md, settings.json, agents, scripts, hooks), advanced patterns,
 and the full troubleshooting catalogue. Skip to any section from the headings; nothing in here
-is required if you've already installed Core via Simple mode — these are the full templates
+is required if you've already installed Core via Simple mode - these are the full templates
 the wizard uses under the hood.
 
 ## Prerequisites
@@ -1551,6 +1613,52 @@ After collecting answers, compute these before generating files:
 
 ## The Questions
 
+### Q0: Preflight + Operating system
+
+Ask Q0 BEFORE Q1. The wizard needs the OS answer to pick the right prerequisite-check commands.
+
+Ask:
+> What operating system are you on?
+>
+> 1. **Mac** - macOS with Homebrew
+> 2. **Windows** - requires Git Bash (`winget install Git.Git`) OR WSL2 (`wsl --install`). Plain PowerShell will not run the .sh hook pipeline - every hook in this system is a Bash script.
+> 3. **Linux** - Ubuntu, Debian, Fedora, Arch, or similar
+
+**Valid answers:** Mac, Windows, Linux (or 1, 2, 3)
+**Default:** None.
+**Affects:** Shell profile path, package manager commands, file paths in scripts, date command syntax, shell function format (bash/zsh vs PowerShell wrapper around Git Bash).
+
+**After they answer:** Confirm the derived values:
+- Mac: shell profile = `~/.zshrc`, package manager = `brew`
+- Windows: shell profile = PowerShell `$PROFILE` AND Git Bash `~/.bashrc`. Package manager = `winget`. Hooks run via Git Bash (shipped with Git for Windows).
+- Linux: shell profile = `~/.bashrc`, package manager = `apt`
+
+Then run preflight in the user's shell and report the missing list:
+
+```bash
+# Mac/Linux/Git-Bash
+for cmd in claude node git jq sqlite3 bun; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "MISSING: $cmd"
+  fi
+done
+```
+
+```powershell
+# Windows PowerShell preflight (the user runs this OR pastes the output back)
+foreach ($cmd in 'claude','node','git','jq','sqlite3','bun') {
+  if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
+    Write-Host "MISSING: $cmd"
+  }
+}
+```
+
+If any are missing, name them, point the user at the matching install commands in the Prerequisites section above (`winget install ...` / `brew install ...` / `apt install ...`), and ask them to install + re-run the install command. Do NOT proceed past Q0 with missing prerequisites.
+
+If everything is present, say "Preflight clean" and continue to Q1.
+
+---
+
 ### Q1: Name your orchestrator
 
 Ask:
@@ -1564,23 +1672,9 @@ Ask:
 
 ---
 
-### Q2: Operating system
+### Q2: (now part of Q0)
 
-Ask:
-> What operating system are you on?
->
-> 1. **Mac** -- macOS with Homebrew
-> 2. **Windows** -- Windows with PowerShell (no WSL needed)
-> 3. **Linux** -- Ubuntu, Debian, Fedora, Arch, or similar
-
-**Valid answers:** Mac, Windows, Linux (or 1, 2, 3)
-**Default:** None.
-**Affects:** Shell profile path, package manager commands, file paths in scripts, date command syntax, shell function format (bash/zsh vs PowerShell).
-
-**After they answer:** Confirm the derived values:
-- Mac: shell profile = `~/.zshrc`, package manager = `brew`
-- Windows: shell profile = PowerShell `$PROFILE`, package manager = `winget`, scripts run natively in PowerShell (no WSL needed). Install SQLite via `winget install SQLite.SQLite` or `choco install sqlite`
-- Linux: shell profile = `~/.bashrc`, package manager = `apt`
+Q2 in v29 was "Operating system" - that question moved up to Q0 in v30 because the preflight needs the OS answer to pick the right prerequisite-check commands. The wizard skips this slot. All later question numbers stay the same as v29 to keep the v29-to-v30 upgrade path mechanical.
 
 ---
 
@@ -1681,7 +1775,9 @@ Tell the user:
 >
 > **Step 5:** BotFather will give you an API token. It looks like this: `7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`. Copy it.
 >
-> **Step 6:** Paste the token here and I'll configure everything.
+> **Step 6:** Paste it as your next message in **this** Claude Code chat (the same place where you typed the install command). NOT into Telegram. NOT into a separate terminal. Just into this conversation. I'll write it to `data/runtime/telegram.json` (mode 0600, gitignored, never committed) and wire the rest.
+>
+> **A word on safety.** This token is like a password for your bot. Anyone who has it can read every message your bot receives and send messages as your bot. Treat it like a password. Never paste it into a screenshot, never share it in a public chat or repo, never email it. If you think it leaked, go back to @BotFather and use `/revoke` to kill the old token, then send `/token` for a fresh one.
 
 After they paste the token, store it as `{{telegram_token}}`.
 
@@ -1798,6 +1894,16 @@ Ask:
 
 ### Q9: Knowledge library
 
+**Before this question, show the user the three memory layers so they can pick what they actually need.**
+
+> Quick context. Your agent has up to three memory layers. Most users only need the first.
+>
+> 1. **Local memory files**: always on, free. Your agent's notebook of facts, decisions, project state. Lives in `memory/` as plain markdown.
+> 2. **Knowledge library**: optional folder for hand-written reference docs your agent should know (handbooks, playbooks, internal wiki).
+> 3. **AI Brain (NotebookLM)**: optional Google service for cross-session "have we discussed this before" questions across a long archive.
+>
+> Pick #2 if you have specific reference docs you want your agent to know. Pick #3 only if you do enough work to want a long-term searchable archive. Otherwise just keep #1 (the default) and skip the next two questions.
+
 Ask:
 > Do you want a knowledge library? This is a folder where your agents write and reference handbooks -- structured documents on topics they research or learn about. Over time it becomes a personal wiki that your agents draw from.
 >
@@ -1831,13 +1937,21 @@ Ask:
 **If Yes:**
 
 Tell the user:
-> After setup, you'll need to:
-> 1. Install the NotebookLM CLI: follow instructions at the project repo
-> 2. Run `notebooklm login` to authenticate with your Google account
-> 3. Run `notebooklm create "{{orchestrator_name}} Brain"` to create your notebook
-> 4. Copy the notebook ID and I'll add it to your config
+> After setup, you'll need to install and authenticate the NotebookLM CLI. Three commands.
 >
-> We'll handle this as a post-setup step. I'll remind you.
+> **Step 1.** In your terminal, install the CLI.
+>   - Mac/Linux: `pip install 'notebooklm-py[browser]'`
+>   - Windows (PowerShell or Git Bash): `pip install notebooklm-py[browser]`
+>
+> If you see "command not found: pip" or similar, install Python first from python.org and try again. Once `pip install` finishes, the `notebooklm` command is on your PATH.
+>
+> **Step 2.** Log in. Run `notebooklm login` and follow the browser window that opens. Sign in with the Google account you want the Brain to live under.
+>
+> **Step 3.** Create your notebook: `notebooklm create "{{orchestrator_name}} Brain"`. It prints a notebook ID. Copy it.
+>
+> **Step 4.** Paste the notebook ID as your next message in this chat (the same chat where you ran the install command). I'll write it to `data/runtime/brain.json` and wire up the `brain` command.
+>
+> We can do this now or after the rest of setup, your call.
 
 ---
 
@@ -1875,7 +1989,7 @@ Ask:
 >
 > If Telegram is disabled, the first two are identical and the `-terminal` variants are omitted.
 >
-> Examples: `cortana`, `jarvis`, `ai`, `cmd`, `assistant`, or whatever you want to type.
+> Examples: `<orchestrator>`, `jarvis`, `ai`, `cmd`, `assistant`, or whatever you want to type.
 
 **Valid answers:** Any string (no spaces, lowercase recommended).
 **Default:** Lowercase version of orchestrator name (e.g., "Cortana" -> "cortana").
@@ -1953,9 +2067,15 @@ Ask:
 
 Ask these in sequence:
 > - **Project name:** (e.g., "MyApp", "DataPipeline", "CompanySite")
-> - **Folder path:** (absolute path, or "create" to make a new folder)
+> - **Folder path:** (absolute path - see below - or "create" to make a new folder under your home directory)
 > - **One-line description:** (what does this project do?)
 > - **Tech stack:** (e.g., "Next.js, TypeScript, Postgres", "Python, FastAPI, Redis")
+
+**How to grab an absolute path if you've never done it:**
+- **Mac:** open the folder in Finder. Drag the folder onto Terminal - Terminal pastes the absolute path.
+- **Windows:** open the folder in File Explorer. Hold Shift and right-click the folder, choose "Copy as path". Paste here.
+- **Linux:** in a terminal, `cd` into the folder and run `pwd` - it prints the absolute path.
+- Or just type "create" and the wizard makes a fresh folder under `~/Documents/<project-name>` for you.
 
 Store as `{{first_project}}` with all four fields.
 
@@ -1966,20 +2086,22 @@ Store as `{{first_project}}` with all four fields.
 ---
 
 
-## Q16-Q20: Power-user extensions (Advanced mode only)
+## Q16-Q19: Power-user extensions (Advanced mode only)
 
 **Skip this block if Q8 Security / Q5 plan setup defaulted to Simple mode.** If the user picked Advanced mode, walk through each extension, explain what it does, the cost / time / tradeoffs, and ask whether to install now or later.
 
-For each extension below, use the full "explain before asking" pattern — show the user **what it is**, **how it works**, **what it costs**, **what it requires**, and **who benefits** before taking a yes/no.
+Note: v29 numbered these Q16-Q20 with Q17 reserved for the now-removed Graphiti extension. v30 dropped Q17 entirely and renumbered.
+
+For each extension below, use the full "explain before asking" pattern - show the user **what it is**, **how it works**, **what it costs**, **what it requires**, and **who benefits** before taking a yes/no.
 
 ---
 
-### Q16: E1 — Semantic memory (sqlite-vec + Nomic-embed)
+### Q16: E1 - Semantic memory (sqlite-vec + Nomic-embed)
 
 Ask:
-> Your memory system is a pile of markdown files. To find "have we hit this before?" you'd grep for exact strings — which fails on paraphrases, misses synonyms, and misses context. Semantic memory solves that.
+> Your memory system is a pile of markdown files. To find "have we hit this before?" you'd grep for exact strings - which fails on paraphrases, misses synonyms, and misses context. Semantic memory solves that.
 >
-> **What you get:** a local vector-search index over every memory file. Query it like: `bash scripts/memory-search.sh "alpha channel icon issue"` — it returns the top 5 matching memory chunks with file paths + similarity scores. 95 ms median latency.
+> **What you get:** a local vector-search index over every memory file. Query it like: `bash scripts/memory-search.sh "alpha channel icon issue"` - it returns the top 5 matching memory chunks with file paths + similarity scores. 95 ms median latency.
 >
 > **How it works:** Ollama runs Nomic-embed-text (a 137M-parameter embedding model) locally on your Mac. Every memory chunk gets embedded into a 768-dimensional vector, stored in a tiny sqlite-vec database. Search queries get embedded the same way and nearest-neighbour matched.
 >
@@ -1991,25 +2113,19 @@ Ask:
 >
 > **Pain it solves:** "I know we decided something about X, but I can't remember exactly what I called it in the memory file." Grep can't help you there; this can.
 >
-> 1. **Install now** — I'll walk you through Ollama + sqlite-vec + the first embed
-> 2. **Skip** — add later with `bash scripts/install-blueprint.sh --add E1`
+> 1. **Install now** - I'll walk you through Ollama + sqlite-vec + the first embed
+> 2. **Skip** - add later with `bash scripts/install-blueprint.sh --add E1`
 
 **Valid answers:** Install, Skip (or 1, 2)
-**Default:** Install (if Advanced mode — sqlite-vec is the single biggest daily-use improvement over base Core).
-**Affects:** Whether Ollama is installed, whether `data/cortana-vec.db` exists, whether the post-commit embed hook is live, whether `bash scripts/memory-search.sh` is usable.
+**Default:** Install (if Advanced mode - sqlite-vec is the single biggest daily-use improvement over base Core).
+**Affects:** Whether Ollama is installed, whether `data/vector-memory.db` exists, whether the post-commit embed hook is live, whether `bash scripts/memory-search.sh` is usable.
 
 ---
 
-### Q17: SKIPPED in v30
-
-> E2 (Graphiti temporal knowledge graph) was an opt-in extension in v29 that has been ruled out in v30 after a utilisation audit found it produced zero queries that changed an answer at single-user scale. Q17 is preserved as a numbered placeholder so the wizard's step counts match across v29 and v30; the wizard skips this step automatically. If you genuinely have a multi-user / temporal-reasoning use case, install Mem0 (Apache 2.0) or Letta directly outside this blueprint — do not try to revive E2.
-
----
-
-### Q18: E3 — Agent Teams + channel.md whiteboard
+### Q17: E3 - Agent Teams + channel.md whiteboard
 
 Ask:
-> When two agents work on the same project in parallel, each one's decisions are invisible to the other until both report back. Agent Teams + the channel.md pattern fix that — agents share a live markdown whiteboard and can send peer-to-peer messages.
+> When two agents work on the same project in parallel, each one's decisions are invisible to the other until both report back. Agent Teams + the channel.md pattern fix that - agents share a live markdown whiteboard and can send peer-to-peer messages.
 >
 > **What you get:**
 > - `TeamCreate`, `SendMessage`, `TeamDelete` tools for live agent-to-agent messaging (Claude Code 2.1.32+)
@@ -2025,8 +2141,8 @@ Ask:
 >
 > **Experimental:** this is an experimental Claude Code feature. Worth trying. If it's unstable, turn the flag off and the whiteboard still works as a plain-file pattern.
 >
-> 1. **Install now** — flip the flag + create the directory
-> 2. **Skip** — default sequential agent spawning, no shared context
+> 1. **Install now** - flip the flag + create the directory
+> 2. **Skip** - default sequential agent spawning, no shared context
 
 **Valid answers:** Install, Skip (or 1, 2)
 **Default:** Install (low cost, high ceiling).
@@ -2034,16 +2150,16 @@ Ask:
 
 ---
 
-### Q19: E4 — Observability audit layer
+### Q18: E4 - Observability audit layer
 
 Ask:
 > Every tool call your agents make can be logged to a local audit file, so when a background agent runs for 10 minutes you can read what it actually did without tailing a transcript.
 >
 > **What you get:**
 > - A PostToolUse hook that writes one JSON line per tool call to `data/audit/YYYY-MM-DD.jsonl` (async, non-blocking)
-> - `bash scripts/cortana-live.sh --follow` — a pretty-printed live viewer with filters (by tool, project, day, failed-only)
-> - `bash scripts/audit-archive.sh` — retention (gzip-archives logs >=30 days old into `data/audit/archive/YYYY/MM.jsonl.gz`, committed to git so the forensic trail is permanent)
-> - `bash scripts/history.sh <query>` — unified search across Telegram conversation history, audit log (live + archived), git commit log, and memory markdown
+> - `bash scripts/<orchestrator>-live.sh --follow` - a pretty-printed live viewer with filters (by tool, project, day, failed-only)
+> - `bash scripts/audit-archive.sh` - retention (gzip-archives logs >=30 days old into `data/audit/archive/YYYY/MM.jsonl.gz`, committed to git so the forensic trail is permanent)
+> - `bash scripts/history.sh <query>` - unified search across Telegram conversation history, audit log (live + archived), git commit log, and memory markdown
 >
 > **How it works:** a Bash hook under `.claude/hooks/audit-log-hook.sh` receives the tool payload on stdin after each tool call, extracts name / input / output / success, strips secret patterns, appends to today's JSONL file.
 >
@@ -2053,10 +2169,10 @@ Ask:
 >
 > **Install time:** ~5 minutes.
 >
-> **Pain it solves:** "Kai said he committed the fix but I can't see what he did." Now you can — live tail shows every bash, every edit, every Agent spawn in real time.
+> **Pain it solves:** "Kai said he committed the fix but I can't see what he did." Now you can - live tail shows every bash, every edit, every Agent spawn in real time.
 >
-> 1. **Install now** — copy the hook + scripts, wire into settings.json
-> 2. **Skip** — no per-tool-call audit trail
+> 1. **Install now** - copy the hook + scripts, wire into settings.json
+> 2. **Skip** - no per-tool-call audit trail
 
 **Valid answers:** Install, Skip (or 1, 2)
 **Default:** Install (paid for itself within hours of install during our own v29 dogfooding).
@@ -2064,17 +2180,17 @@ Ask:
 
 ---
 
-### Q20: E5 — Hardened safety gate
+### Q19: E5 - Hardened safety gate
 
 Ask:
 > The Core safety gate (installed by default) blocks `rm`, `DROP TABLE`, `git push --force`, `sudo`, etc. The Hardened gate adds:
 >
-> - **Hard-blocks on force-push to `main`/`master`/`production`/`prod`/`release`/`develop`** — cannot be approved through the hook even with your confirmation. Requires manual Terminal if you really need it.
+> - **Hard-blocks on force-push to `main`/`master`/`production`/`prod`/`release`/`develop`** - cannot be approved through the hook even with your confirmation. Requires manual Terminal if you really need it.
 > - **Hard-blocks on history-rewriting ops:** `git filter-branch`, `filter-repo`, `reflog expire`, `gc --prune=now`, `update-ref -d`.
-> - **Word-boundary regex on `rm`** — fixes false-positives where the Core gate blocks harmless commands like `echo "format..."` because "format" contains "rm" substring.
+> - **Word-boundary regex on `rm`** - fixes false-positives where the Core gate blocks harmless commands like `echo "format..."` because "format" contains "rm" substring.
 > - **More comprehensive git coverage:** blocks `rebase -i`, `--onto`, `commit --amend`, `checkout -- .`, `restore .`, `stash drop`, `stash clear`, `worktree remove --force`, `branch -D`.
 >
-> **What you get:** protection against the force-push-instead-of-commit class of incident that destroys shared git history. Specifically this blueprint was hardened after Cortana once force-pushed by mistake and overwrote commits.
+> **What you get:** protection against the force-push-instead-of-commit class of incident that destroys shared git history. Specifically this blueprint was hardened after a real-world incident where the orchestrator force-pushed by mistake and overwrote commits.
 >
 > **What it costs:** £0. Same Bash hook, tighter rules. Zero token usage.
 >
@@ -2082,16 +2198,16 @@ Ask:
 >
 > **Test suite:** 48 cases in `/tmp/safety_test.sh` (regex false-positives + every destructive git op). Validated on install.
 >
-> 1. **Install now** — replaces the Core safety gate with the hardened version (backup is kept at `.claude/hooks/safety-gate.sh.core-backup`)
-> 2. **Skip** — keep the Core gate
+> 1. **Install now** - replaces the Core safety gate with the hardened version (backup is kept at `.claude/hooks/safety-gate.sh.core-backup`)
+> 2. **Skip** - keep the Core gate
 
 **Valid answers:** Install, Skip (or 1, 2)
-**Default:** Install in Advanced mode (the Core gate will not catch a determined mistake — hardened is what you want for any real repo).
+**Default:** Install in Advanced mode (the Core gate will not catch a determined mistake - hardened is what you want for any real repo).
 **Affects:** `.claude/hooks/safety-gate.sh` overwrite (with backup), same for the global gate at `~/.claude/hooks/safety-gate.sh`.
 
 ---
 
-After Q16-Q20, echo back the extension choices and update `.cortana-blueprint-version` accordingly:
+After Q16-Q19, echo back the extension choices and update `.<orchestrator>-blueprint-version` accordingly:
 
 ```yaml
 blueprint_version: v30
@@ -2099,7 +2215,7 @@ installed: <now>
 mode: <simple|advanced>
 extensions:
   E1_sqlite_vec: <true|false>
-  E2_graphiti: false   # deprecated as of v30 — never set to true on a fresh install
+  E2_graphiti: false   # deprecated as of v30 - never set to true on a fresh install
   E3_agent_teams: <true|false>
   E4_observability: <true|false>
   E5_hardened_safety: <true|false>
@@ -2164,7 +2280,7 @@ After all questions are answered, generate files in this order. Each file comes 
     ```bash
     mkdir -p {{project_root}}/memory
     mkdir -p {{project_root}}/agent-memory/<agent-name-lower>  # for each agent
-    PROJECT_SLUG=$(echo "{{project_root}}" | sed 's|/|-|g; s|^-||')
+    PROJECT_SLUG=$(echo "{{project_root}}" | sed 's|/|-|g')
     mkdir -p ~/.claude/projects/$PROJECT_SLUG
     ln -s {{project_root}}/memory ~/.claude/projects/$PROJECT_SLUG/memory
     ln -s {{project_root}}/agent-memory ~/.claude/agent-memory
@@ -2181,15 +2297,17 @@ After all questions are answered, generate files in this order. Each file comes 
 
 13. **Generate Library scaffold** if library=yes.
 
-14. **Install Telegram plugin** if messaging=telegram:
+14. **Install Telegram plugin** if messaging=telegram (two-step CLI flow - there is no `claude plugin add` subcommand):
     ```
-    claude plugin add telegram@claude-plugins-official
+    claude plugin marketplace add claude-plugins-official
+    claude plugin install telegram@claude-plugins-official
     ```
-    Then configure with the token.
+    Then configure with the token. After install, walk the user through the `/telegram:access` skill: it manages who can DM the bot. The user runs `/telegram:access` from their terminal to approve pairings, edit the allowlist, and set DM/group policy. Approvals never come from chat messages.
 
 15. **Install selected plugins** (superpowers, document-skills, etc.):
     ```
-    claude plugin add <plugin-name>
+    claude plugin marketplace add <marketplace-name>
+    claude plugin install <plugin-name>@<marketplace-name>
     ```
 
 16. **Register first project** if one was provided -- run register-project.sh with the project details.
@@ -2450,7 +2568,7 @@ Each file has frontmatter with `name`, `description`, `type`, and optionally `la
 
 ### Vector search on top (sqlite-vec)
 
-A sibling sqlite-vec database at `data/vector-memory.db` indexes every markdown memory into dense embeddings (Nomic-embed via Ollama). The post-commit hook re-embeds changed files automatically — agents never write to the DB directly. Search via `bash scripts/memory-search.sh "<query>"`.
+A sibling sqlite-vec database at `data/vector-memory.db` indexes every markdown memory into dense embeddings (Nomic-embed via Ollama). The post-commit hook re-embeds changed files automatically - agents never write to the DB directly. Search via `bash scripts/memory-search.sh "<query>"`.
 
 **Why markdown + vector instead of operational SQLite:**
 - Markdown is diffable, git-tracked, survives DB corruption.
@@ -2459,16 +2577,16 @@ A sibling sqlite-vec database at `data/vector-memory.db` indexes every markdown 
 
 ### How agents save memories
 
-Agents save by writing a new `memory/<type>_<topic>.md` file (or updating an existing one) and committing. The post-commit hook takes care of embedding. Agents never run a `save` command — the filesystem is the API.
+Agents save by writing a new `memory/<type>_<topic>.md` file (or updating an existing one) and committing. The post-commit hook takes care of embedding. Agents never run a `save` command - the filesystem is the API.
 
 ### Maintenance
 
 The maintenance script (`scripts/maintain.sh`) runs on Monday sessions:
-1. Check-memory-freshness sweep — flag any file past its `last_verified + ttl_days`.
+1. Check-memory-freshness sweep - flag any file past its `last_verified + ttl_days`.
 2. Report MEMORY.md index sizes and warn if any index is over 200 lines.
 3. Trigger the SLO canary probes (if enabled).
 
-High-importance memories persist indefinitely. No auto-deletion — memory pruning is an explicit human decision.
+High-importance memories persist indefinitely. No auto-deletion - memory pruning is an explicit human decision.
 
 ---
 
@@ -2493,10 +2611,10 @@ Every Bash command and every file Write/Edit passes through `.claude/hooks/safet
 **Category 1: Hard blocks (no approval possible)**
 - `rm -rf /` or `rm -rf ~` or `rm -rf $HOME`
 - `mkfs`, `dd if=`, `fdisk`, `diskutil erase`
-- `git filter-branch` / `git filter-repo` — unrecoverable history rewrites
-- `git reflog expire`, `git gc --prune=now`, `git gc --aggressive` — orphans commits permanently
-- `git update-ref -d` — deletes refs
-- **Force push to protected branches** (`main` / `master` / `production` / `prod` / `release` / `develop`) — any form of `--force`, `-f`, or `--force-with-lease`
+- `git filter-branch` / `git filter-repo` - unrecoverable history rewrites
+- `git reflog expire`, `git gc --prune=now`, `git gc --aggressive` - orphans commits permanently
+- `git update-ref -d` - deletes refs
+- **Force push to protected branches** (`main` / `master` / `production` / `prod` / `release` / `develop`) - any form of `--force`, `-f`, or `--force-with-lease`
 
 These are catastrophic or destroy shared history. Even if you say "yes, do it," the hook refuses. Run them manually in a real terminal if you genuinely need them.
 
@@ -2733,7 +2851,7 @@ Claude Code compacts context at ~85% usage (on Max 20x; lower thresholds on othe
 
 ### Checkpoint format
 
-The orchestrator writes to `/tmp/{{orchestrator_name_lower}}-working-context.md` on every milestone:
+The orchestrator writes to `${TMPDIR:-/tmp}/{{orchestrator_name_lower}}-working-context.md` on every milestone (Mac/Linux: `/tmp`. Windows Git Bash users - set `TMPDIR=$LOCALAPPDATA/Temp` in `~/.bashrc` for a writable temp dir; the default `/tmp` under Git Bash points at `C:\Program Files\Git\tmp` which is read-only without admin):
 
 ```markdown
 # Working Context Checkpoint
@@ -3001,7 +3119,7 @@ If `SETUP-CHECKLIST.md` exists at the project root, this is a freshly installed 
 1. Read `SETUP-CHECKLIST.md`.
 2. Walk through every checklist item: run the verify command, capture the output, compare against expected.
 3. For any item that fails, follow the fix-if-broken instructions OR ask the user (on whichever channel they reach you) to confirm the manual step.
-4. The Windows terminal alias items (`{{orchestrator_name}}` and `{{orchestrator_name}}-resume`) are KNOWN-FRAGILE on PowerShell first install. If those are not working, fix them BEFORE moving on — they are how the user starts every future session.
+4. The Windows terminal alias items (`{{orchestrator_name}}` and `{{orchestrator_name}}-resume`) are KNOWN-FRAGILE on PowerShell first install. If those are not working, fix them BEFORE moving on - they are how the user starts every future session.
 5. Once every box is ticked, rename `SETUP-CHECKLIST.md` to `data/SETUP-CHECKLIST.md.done` so future sessions don't re-prompt.
 6. Then confirm to the user: "Setup verified. Ready to work."
 
@@ -3025,14 +3143,14 @@ Plan: Claude Pro. Run agents sequentially. Conservative context usage.
 4. Route to the right agent (see routing table). Pass a context packet: what the user wants, what project, what's been tried, constraints.
 5. Send reply then log it: `bash scripts/log-telegram.sh "{{orchestrator_name_lower}}" "<reply>" "<project>" false`
    BEFORE SENDING -- hard rules: NO "-- {{orchestrator_name}}" signoff (only sign agent names when routed). NO em dashes. NO AI tells. Be concise.
-6. After every interaction, save important context as a new markdown file in `memory/<type>_<topic>.md` (types: feedback / project / user / reference / note). Commit it — the post-commit hook auto-embeds into sqlite-vec and auto-regenerates `memory/MEMORY.md`.
+6. After every interaction, save important context as a new markdown file in `memory/<type>_<topic>.md` (types: feedback / project / user / reference / note). Commit it - the post-commit hook auto-embeds into sqlite-vec and auto-regenerates `memory/MEMORY.md`.
 7. If user corrected you, log it: `bash scripts/log-correction.sh "<category>" "<description>"`
 <!-- ELSE -->
 1. Receive message from user in terminal
 2. Check if relevant memories exist -- skip for simple confirmations, commands, or when you already have context
 3. Route to the right agent (see routing table). Pass a context packet: what the user wants, what project, what's been tried, constraints.
 4. Respond directly in terminal. NO "-- {{orchestrator_name}}" signoff. NO em dashes. NO AI tells. Be concise.
-5. After every interaction, save important context as a new markdown file in `memory/<type>_<topic>.md` (types: feedback / project / user / reference / note). Commit it — the post-commit hook auto-embeds into sqlite-vec.
+5. After every interaction, save important context as a new markdown file in `memory/<type>_<topic>.md` (types: feedback / project / user / reference / note). Commit it - the post-commit hook auto-embeds into sqlite-vec.
 6. If user corrected you, log it: `bash scripts/log-correction.sh "<category>" "<description>"`
 <!-- ENDIF -->
 
@@ -3230,7 +3348,7 @@ Each agent develops their own voice too. Observations get saved to agent memory 
 ### For git:
 **Context:** This section exists because the orchestrator once force-pushed after a reset instead of running a normal commit, overwriting shared history that the user needed for their day job. The safety gate enforces these rules technically; these bullets are the doctrine.
 
-**Default path:** `git commit` + `git push` (no `--force`). If remote has diverged, stop and ask — never "fix" it by force-pushing. Use `git pull --rebase` or `git merge`.
+**Default path:** `git commit` + `git push` (no `--force`). If remote has diverged, stop and ask - never "fix" it by force-pushing. Use `git pull --rebase` or `git merge`.
 
 **Never, without explicit user confirmation:**
 - Any force push: `git push --force` / `-f` / `--force-with-lease`
@@ -3243,7 +3361,7 @@ Each agent develops their own voice too. Observations get saved to agent memory 
 - `git worktree remove --force`
 
 **Hard-blocked (manual Terminal only):**
-- Force push to `main` / `master` / `production` / `prod` / `release` / `develop` — any form
+- Force push to `main` / `master` / `production` / `prod` / `release` / `develop` - any form
 - `git filter-branch`, `git filter-repo`
 - `git reflog expire`, `git gc --prune=now`, `git gc --aggressive`
 - `git update-ref -d`
@@ -3264,7 +3382,7 @@ Three hooks in `.claude/settings.json` prevent context loss:
 3. **SessionEnd** -- safety net on exit
 
 ### Checkpoint rule
-Write to `/tmp/{{orchestrator_name_lower}}-working-context.md` on every milestone:
+Write to `${TMPDIR:-/tmp}/{{orchestrator_name_lower}}-working-context.md` on every milestone (Windows Git Bash users - set `TMPDIR=$LOCALAPPDATA/Temp` in `~/.bashrc` so `/tmp` doesn't point at the read-only Git install dir):
 ```
 # Working Context Checkpoint
 Updated: <ISO timestamp>
@@ -3331,7 +3449,7 @@ Unsaved context:
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Reminder: verify build, test changes{{IF_TELEGRAM}}, reply on Telegram{{ENDIF}}'"
+            "command": "echo 'Reminder: verify build, test changes<!-- IF messaging=telegram -->, reply on Telegram<!-- ENDIF -->'"
           }
         ]
       }
@@ -3439,10 +3557,14 @@ fi
 TIMESTAMP=$(date -Iseconds)
 LOG_DIR="{{project_path}}/logs"
 LOG_FILE="$LOG_DIR/safety-gate.log"
+# NOTE: this file MUST be in .gitignore - a checked-in approval file would let any clone
+# of this repo bypass the gate. The 0600 perms below stop a malicious package's postinstall
+# script from pre-approving destructive commands by writing to it as another local user.
 APPROVAL_FILE="{{project_path}}/data/approved.txt"
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$(dirname "$APPROVAL_FILE")"
 touch "$APPROVAL_FILE"
+chmod 0600 "$APPROVAL_FILE" 2>/dev/null || true
 
 # Check for pre-approval
 CHECK_STRING="$COMMAND$FILE_PATH"
@@ -3481,27 +3603,67 @@ if echo "$COMMAND" | grep -qEi 'git\s+filter-(branch|repo)'; then
   hard_block "git filter-branch/filter-repo permanently rewrites history" "git-filter"
 fi
 if echo "$COMMAND" | grep -qEi '(git\s+update-ref\s+-d|git\s+reflog\s+expire|git\s+gc\s+.*--prune=now|git\s+gc\s+.*--aggressive)'; then
-  hard_block "Permanent reflog / ref cleanup — makes lost commits unrecoverable" "git-reflog"
+  hard_block "Permanent reflog / ref cleanup - makes lost commits unrecoverable" "git-reflog"
+fi
+
+# Reject `-c push.default=...` shell-form pre-commands - known force-push bypass
+# (sets push.default for the single command, then a bare `git push` pushes current branch).
+if echo "$COMMAND" | grep -qEi 'git\s+-c\s+push\.default='; then
+  hard_block "git -c push.default=... pre-command override is a known bypass for branch-target detection" "git-push-default-override"
+fi
+
+# Refspec-prefixed forced push: `git push origin +HEAD:main`, `git push remote +branch:branch`.
+# The `+` in front of a refspec means "force this push" without using --force flag.
+if echo "$COMMAND" | grep -qEi 'git\s+push\s+\S+\s+\+'; then
+  hard_block "Refspec-prefixed forced push (+ before refspec) - same as --force, blocked unconditionally" "git-refspec-force"
 fi
 
 # Force push to protected branches
 if echo "$COMMAND" | grep -qEi 'git\s+push(\s+[^-]\S*)*\s+(--force|-f|--force-with-lease)(\s|=|$)' || \
    echo "$COMMAND" | grep -qEi 'git\s+push\s+.*(--force|-f|--force-with-lease).*\s+(origin\s+)?(main|master|production|prod|release|develop)(\s|$|:)'; then
   if echo "$COMMAND" | grep -qEi '(origin\s+)?(main|master|production|prod|release|develop)(\s|$|:)'; then
-    hard_block "Force push to protected branch — destroys shared history" "git-force-push-protected"
+    hard_block "Force push to protected branch - destroys shared history" "git-force-push-protected"
+  fi
+  # Bare `git push -f` (no remote, no branch) pushes current branch to its upstream.
+  # If current branch is main/master/etc. this slips past the named-branch check above.
+  # Hard-block any forced push that doesn't explicitly target a non-protected branch.
+  if ! echo "$COMMAND" | grep -qEi 'git\s+push\s+\S+\s+[A-Za-z0-9._/+:-]+(\s|$)'; then
+    hard_block "Force push without explicit branch target - defaults to current branch which may be protected" "git-force-push-implicit"
   fi
 fi
 
 # ================= CATEGORY 2: BLOCKED UNTIL APPROVED =================
-# File deletion (word-boundary safe so "form ", "arm " etc. don't false-trigger)
-if echo "$COMMAND" | grep -qE '(^|\s)rm\s+-(r|f|rf|fr|Rf|fR)'; then
-  block "Recursive or forced file deletion detected" "rm-rf"
+# Whitelist common CLI subcommands that use `rm` as a verb but are NOT filesystem deletes.
+# Without this, `vercel env rm`, `gh secret rm`, `docker rm`, `docker container rm`,
+# `docker image rm`, `docker volume rm`, `docker network rm`, `kubectl ... rm` all
+# false-positive on the rm regex below.
+if echo "$COMMAND" | grep -qE '\b(vercel\s+env|gh\s+secret|gh\s+variable|docker(\s+(container|image|volume|network))?|kubectl\s+(secret|configmap))\s+rm\b'; then
+  : # Allow - these are CLI resource-removal verbs, not filesystem deletes
+else
+  # File deletion (word-boundary safe so "form ", "arm " etc. don't false-trigger).
+  # Matches short flags (-r/-R/-f/-rf/-fr/-Rf/-fR) AND long flags (--recursive, --force).
+  if echo "$COMMAND" | grep -qE '(^|\s)rm\s+(-(r|R|f|rf|fr|Rf|fR|rR|Rr)\b|--recursive|--force)'; then
+    block "Recursive or forced file deletion detected" "rm-rf"
+  fi
+  if echo "$COMMAND" | grep -qE '(^|\s)rm\s'; then
+    block "File deletion detected" "rm"
+  fi
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)(/usr)?/bin/rm\s'; then
+    block "File deletion via /bin/rm detected" "rm-path"
+  fi
 fi
-if echo "$COMMAND" | grep -qE '(^|\s)rm\s'; then
-  block "File deletion detected" "rm"
+
+# `find ... -delete` / `find ... -exec rm` - silent recursive deletion with no obvious rm token
+if echo "$COMMAND" | grep -qE '\bfind\s.*-delete\b'; then
+  block "find -delete silently removes every match" "find-delete"
 fi
-if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)(/usr)?/bin/rm\s'; then
-  block "File deletion via /bin/rm detected" "rm-path"
+if echo "$COMMAND" | grep -qE '\bfind\s.*-exec\s+rm\b'; then
+  block "find -exec rm silently removes every match" "find-exec-rm"
+fi
+
+# rsync --delete - silent destination wipe of files not in source
+if echo "$COMMAND" | grep -qE '\brsync\s.*--delete\b'; then
+  block "rsync --delete removes files in destination that are missing from source - verify the source is what you think it is" "rsync-delete"
 fi
 
 # Database
@@ -3634,6 +3796,75 @@ echo '{"suppressOutput": true}'
 
 ## Template: scripts/maintain.sh
 
+This template operates over markdown memory files (the v30 source of truth). v30 fresh installs use this markdown-first script. The earlier v28/v29 SQLite-table version is kept below for upgraders that opted into a SQLite memory layer.
+
+```bash
+#!/bin/bash
+# maintain.sh - markdown memory hygiene + freshness check + backup tarball.
+# v30 architecture: memory/ is the source of truth. SQLite is optional.
+set -euo pipefail
+
+PROJECT_DIR="{{project_path}}"
+BACKUP_DIR="$PROJECT_DIR/data/backups"
+MEMORY_DIR="$PROJECT_DIR/memory"
+AGENT_MEM_DIR="$PROJECT_DIR/agent-memory"
+
+echo "=== {{orchestrator_name}} Maintenance - $(date) ==="
+mkdir -p "$BACKUP_DIR"
+
+# 1. Tarball memory + agent-memory + docs
+BACKUP_FILE="$BACKUP_DIR/memory-$(date +%Y%m%d_%H%M%S).tar.gz"
+tar -czf "$BACKUP_FILE" -C "$PROJECT_DIR" memory agent-memory docs CLAUDE.md 2>/dev/null || true
+echo "Backed up markdown memory to $BACKUP_FILE"
+
+# 2. Retain last 10 backups
+ls -t "$BACKUP_DIR"/memory-*.tar.gz 2>/dev/null | tail -n +11 | while read -r OLD; do
+  command rm -- "$OLD" 2>/dev/null && echo "Pruned old backup: $(basename "$OLD")"
+done
+
+# 3. Freshness check (uses scripts/check-memory-freshness.sh if installed)
+if [ -x "$PROJECT_DIR/scripts/check-memory-freshness.sh" ]; then
+  echo ""
+  echo "> Memory freshness"
+  bash "$PROJECT_DIR/scripts/check-memory-freshness.sh" || true
+fi
+
+# 4. Memory stats
+echo ""
+echo "> Memory stats"
+echo "  Files in memory/:       $(find "$MEMORY_DIR" -name '*.md' 2>/dev/null | wc -l)"
+echo "  Files in agent-memory/: $(find "$AGENT_MEM_DIR" -name '*.md' 2>/dev/null | wc -l)"
+echo "  Total memory size:      $(du -sh "$MEMORY_DIR" "$AGENT_MEM_DIR" 2>/dev/null | tail -1 | cut -f1)"
+
+# 5. Vector index status (if E1 sqlite-vec installed)
+VEC_DB="$PROJECT_DIR/data/vector-memory.db"
+if [ -f "$VEC_DB" ]; then
+  CHUNKS=$(sqlite3 "$VEC_DB" "SELECT COUNT(*) FROM memory_chunks;" 2>/dev/null || echo "?")
+  echo "  Vector index chunks:    $CHUNKS  (data/vector-memory.db)"
+fi
+
+# 6. Optional SQLite layer (only if scripts/setup-db.sh has been run)
+DB_PATH="$PROJECT_DIR/data/{{db_name}}"
+if [ -f "$DB_PATH" ]; then
+  echo ""
+  echo "> SQLite operational layer"
+  BACKUP_DB="$BACKUP_DIR/{{db_name}}.$(date +%Y%m%d_%H%M%S)"
+  cp "$DB_PATH" "$BACKUP_DB"
+  echo "  Backed up SQLite to $BACKUP_DB"
+  for table in memories tasks decisions; do
+    COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM $table;" 2>/dev/null || echo "(table missing)")
+    echo "  $table: $COUNT"
+  done
+fi
+
+echo ""
+echo "=== Maintenance complete ==="
+```
+
+### Older SQLite-only maintain.sh (v28/v29 reference, not generated by v30)
+
+The v28/v29 maintain.sh assumed a SQLite-only memory layer. v30 fresh installs SHOULD NOT use this version - the markdown-first script above replaces it. Kept here so v28/v29 upgrades have a comparison reference.
+
 ```bash
 #!/bin/bash
 DB_PATH="${{{orchestrator_name_upper}}_DB:-{{project_path}}/data/{{db_name}}}"
@@ -3759,8 +3990,90 @@ else
 fi
 echo ""
 
+# Runtime file perms (secrets and per-turn state)
+echo "> Runtime file perms"
+runtime_dir="$PROJECT_DIR/data/runtime"
+if [[ -d "$runtime_dir" ]]; then
+    if [[ -x "$PROJECT_DIR/scripts/verify-runtime-perms.sh" ]]; then
+        bad_count=$("$PROJECT_DIR/scripts/verify-runtime-perms.sh" --count 2>/dev/null || echo "0")
+        if [[ "$bad_count" == "0" ]]; then
+            check "All data/runtime/* files mode 0600" "pass"
+        else
+            check "$bad_count data/runtime/* file(s) world/group readable" "fail" "run: bash scripts/verify-runtime-perms.sh --fix"
+        fi
+    else
+        check "verify-runtime-perms.sh not installed" "warn"
+    fi
+else
+    check "data/runtime/ directory not present yet" "warn" "(created on first plugin/wizard write)"
+fi
+echo ""
+
 echo "=== $passed/$total checks passed ==="
 ```
+
+---
+
+## Template: scripts/verify-runtime-perms.sh
+
+`data/runtime/*` files hold secrets (Telegram bot token, persona state) and per-turn contracts. They MUST be mode 0600 - world-readable runtime files mean any local user can lift the bot token. This script audits them.
+
+```bash
+#!/usr/bin/env bash
+# verify-runtime-perms.sh - audit data/runtime/* file modes.
+#
+# Usage:
+#   bash scripts/verify-runtime-perms.sh           # report bad-perm files
+#   bash scripts/verify-runtime-perms.sh --count   # print just the bad count (for healthcheck)
+#   bash scripts/verify-runtime-perms.sh --fix     # chmod 0600 anything wrong
+set -euo pipefail
+
+PROJECT_DIR="{{project_path}}"
+RUNTIME_DIR="$PROJECT_DIR/data/runtime"
+
+MODE="report"
+[ "${1:-}" = "--count" ] && MODE="count"
+[ "${1:-}" = "--fix" ] && MODE="fix"
+
+if [ ! -d "$RUNTIME_DIR" ]; then
+  [ "$MODE" = "count" ] && echo 0 || echo "data/runtime/ does not exist yet"
+  exit 0
+fi
+
+# BSD stat (macOS) and GNU stat (Linux) have different flags. Try both.
+get_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || echo "?"
+}
+
+bad=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  m=$(get_mode "$f")
+  if [ "$m" != "600" ]; then
+    bad=$((bad + 1))
+    if [ "$MODE" = "report" ]; then
+      echo "BAD perms ($m): $f"
+    fi
+    if [ "$MODE" = "fix" ]; then
+      chmod 0600 "$f" && echo "FIXED: $f"
+    fi
+  fi
+done < <(find "$RUNTIME_DIR" -type f 2>/dev/null)
+
+if [ "$MODE" = "count" ]; then
+  echo "$bad"
+elif [ "$MODE" = "report" ]; then
+  if [ "$bad" -eq 0 ]; then
+    echo "OK - all data/runtime/* files mode 0600"
+  else
+    echo ""
+    echo "$bad file(s) with non-0600 perms. Re-run with --fix to chmod them."
+    exit 1
+  fi
+fi
+```
+
+Wire this into the install wizard so it runs once at the end of setup. The healthcheck template above already calls it on every run.
 
 ---
 
@@ -3874,7 +4187,7 @@ fi
 
 ## Template: scripts/history.sh
 
-Unified history search across four sources in one pass: Telegram JSONL history, audit logs (live `data/audit/*.jsonl` and archived `data/audit/archive/YYYY/MM.jsonl.gz`), `git log`, and memory markdown. Supports `--from YYYY-MM-DD` / `--to YYYY-MM-DD` date range filters. Ships as `scripts/history.sh` in the reference implementation — copy that file verbatim. The `history <query>` command wraps it.
+Unified history search across four sources in one pass: Telegram JSONL history, audit logs (live `data/audit/*.jsonl` and archived `data/audit/archive/YYYY/MM.jsonl.gz`), `git log`, and memory markdown. Supports `--from YYYY-MM-DD` / `--to YYYY-MM-DD` date range filters. Ships as `scripts/history.sh` in the reference implementation - copy that file verbatim. The `history <query>` command wraps it.
 
 ---
 
@@ -3947,14 +4260,23 @@ if [[ ! -d "$FOLDER_PATH/.git" ]]; then
     echo "  Git repo initialized"
 fi
 
-# Create GitHub repo
+# Create GitHub repo (requires gh CLI authenticated via 'gh auth login')
 if command -v gh &>/dev/null; then
-    REMOTE_URL=$(cd "$FOLDER_PATH" && git remote get-url origin 2>/dev/null || echo "")
-    if [[ -z "$REMOTE_URL" ]]; then
-        if (cd "$FOLDER_PATH" && gh repo create "$PROJECT_NAME" --private --source=. --push 2>/dev/null); then
-            echo "  GitHub repo created (private)"
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "  gh CLI is installed but not authenticated. Skipping remote creation."
+        echo "  Run 'gh auth login' (web browser flow) and re-run this script if you want a remote."
+    else
+        REMOTE_URL=$(cd "$FOLDER_PATH" && git remote get-url origin 2>/dev/null || echo "")
+        if [[ -z "$REMOTE_URL" ]]; then
+            if (cd "$FOLDER_PATH" && gh repo create "$PROJECT_NAME" --private --source=. --push 2>/dev/null); then
+                echo "  GitHub repo created (private)"
+            else
+                echo "  gh repo create failed (name conflict / network / permissions). Repo stays local-only."
+            fi
         fi
     fi
+else
+    echo "  gh CLI not installed. Skipping remote creation. Install with brew/winget/apt and re-run if you want one."
 fi
 
 echo "=== Done ==="
@@ -3968,7 +4290,7 @@ echo "=== Done ==="
 #!/bin/bash
 PROJECT_DIR="{{project_path}}"
 RECOVERY_DIR="$PROJECT_DIR/data/recovery"
-WORKING_CTX="/tmp/{{orchestrator_name_lower}}-working-context.md"
+WORKING_CTX="${TMPDIR:-/tmp}/{{orchestrator_name_lower}}-working-context.md"
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
 
 mkdir -p "$RECOVERY_DIR"
@@ -4029,7 +4351,7 @@ fi
 #!/bin/bash
 PROJECT_DIR="{{project_path}}"
 RECOVERY_DIR="$PROJECT_DIR/data/recovery"
-WORKING_CTX="/tmp/{{orchestrator_name_lower}}-working-context.md"
+WORKING_CTX="${TMPDIR:-/tmp}/{{orchestrator_name_lower}}-working-context.md"
 LOG_FILE="$PROJECT_DIR/logs/session-lifecycle.log"
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
 
@@ -4181,7 +4503,7 @@ After completing work, update the project's CLAUDE.md and HANDOFF.md.
 
 ## Memory protocol
 Update your MEMORY.md with patterns and findings worth remembering across sessions.
-For cross-agent visibility, save important decisions as new markdown files in `memory/` (cross-project) or `agent-memory/<name>/` (your own) and commit — the post-commit hook auto-embeds into sqlite-vec so other agents find them via `bash scripts/memory-search.sh "<query>"`.
+For cross-agent visibility, save important decisions as new markdown files in `memory/` (cross-project) or `agent-memory/<name>/` (your own) and commit - the post-commit hook auto-embeds into sqlite-vec so other agents find them via `bash scripts/memory-search.sh "<query>"`.
 ```
 
 ### Role-specific templates
@@ -4208,65 +4530,81 @@ For each role in the presets, generate the agent config with role-appropriate ca
 
 ### For Mac/Linux (bash/zsh)
 
-Add these to `{{shell_profile}}`:
+Add these to `{{shell_profile}}`. Plugin enablement (Telegram, etc.) lives in `.claude/settings.json` via the `enabledPlugins` array, NOT on the launch command. There is no `--plugin` or `--project` flag on `claude` - we change directory first, then launch.
 
 ```bash
-# {{orchestrator_name}} -- Xantham System
+# {{orchestrator_name}} - Xantham System launch functions
 # --dangerously-skip-permissions lets the system run without constant approval prompts.
 # Safety is handled by the hooks in .claude/settings.json instead.
-<!-- IF messaging=telegram -->
 {{launch_cmd}}() {
-  claude --dangerously-skip-permissions --project "{{project_path}}" --plugin telegram
-}
-{{launch_cmd}}-terminal() {
-  claude --dangerously-skip-permissions --project "{{project_path}}"
+  cd "{{project_path}}" && claude --dangerously-skip-permissions
 }
 {{launch_cmd}}-resume() {
-  claude --resume --dangerously-skip-permissions --project "{{project_path}}" --plugin telegram
+  cd "{{project_path}}" && claude --resume --dangerously-skip-permissions
+}
+<!-- IF messaging=telegram -->
+# Terminal-only variants (no plugins). Useful when you want to interact in the terminal
+# without Telegram inbound. Plugin enablement is controlled by settings.json, so for a
+# truly plugin-free session you also need a settings.local.json that empties enabledPlugins.
+{{launch_cmd}}-terminal() {
+  cd "{{project_path}}" && CLAUDE_DISABLE_PLUGINS=1 claude --dangerously-skip-permissions
 }
 {{launch_cmd}}-resume-terminal() {
-  claude --resume --dangerously-skip-permissions --project "{{project_path}}"
-}
-<!-- ELSE -->
-{{launch_cmd}}() {
-  claude --dangerously-skip-permissions --project "{{project_path}}"
-}
-{{launch_cmd}}-resume() {
-  claude --resume --dangerously-skip-permissions --project "{{project_path}}"
+  cd "{{project_path}}" && CLAUDE_DISABLE_PLUGINS=1 claude --resume --dangerously-skip-permissions
 }
 <!-- ENDIF -->
 ```
 
 ### For Windows (PowerShell)
 
-Add these to the PowerShell profile (`$PROFILE`):
+PowerShell ships with `Restricted` execution policy by default - that blocks the profile (and every other `.ps1` script) from loading, so the launch functions below would never come back after you close the terminal. Run this **once** in any PowerShell window before adding the functions (no admin needed; `-Scope CurrentUser` writes to your user hive):
 
 ```powershell
-# {{orchestrator_name}} -- Xantham System
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+If you ever see the error `"<file>.ps1 cannot be loaded because running scripts is disabled on this system"`, that's this - run the command above and re-open PowerShell.
+
+Then add the functions to your PowerShell profile (`$PROFILE`). If `$PROFILE` doesn't exist yet, create it: `New-Item -Path $PROFILE -ItemType File -Force`. Plugin enablement is controlled by `.claude/settings.json`, not by a launch flag.
+
+```powershell
+# {{orchestrator_name}} - Xantham System launch functions
 # --dangerously-skip-permissions lets the system run without constant approval prompts.
 # Safety is handled by the hooks in .claude/settings.json instead.
-<!-- IF messaging=telegram -->
 function {{launch_cmd}} {
-  claude --dangerously-skip-permissions --project "{{project_path}}" --plugin telegram
-}
-function {{launch_cmd}}-terminal {
-  claude --dangerously-skip-permissions --project "{{project_path}}"
+  Set-Location "{{project_path}}"
+  claude --dangerously-skip-permissions
 }
 function {{launch_cmd}}-resume {
-  claude --resume --dangerously-skip-permissions --project "{{project_path}}" --plugin telegram
+  Set-Location "{{project_path}}"
+  claude --resume --dangerously-skip-permissions
+}
+<!-- IF messaging=telegram -->
+function {{launch_cmd}}-terminal {
+  Set-Location "{{project_path}}"
+  $env:CLAUDE_DISABLE_PLUGINS = "1"
+  claude --dangerously-skip-permissions
+  Remove-Item Env:\CLAUDE_DISABLE_PLUGINS
 }
 function {{launch_cmd}}-resume-terminal {
-  claude --resume --dangerously-skip-permissions --project "{{project_path}}"
-}
-<!-- ELSE -->
-function {{launch_cmd}} {
-  claude --dangerously-skip-permissions --project "{{project_path}}"
-}
-function {{launch_cmd}}-resume {
-  claude --resume --dangerously-skip-permissions --project "{{project_path}}"
+  Set-Location "{{project_path}}"
+  $env:CLAUDE_DISABLE_PLUGINS = "1"
+  claude --resume --dangerously-skip-permissions
+  Remove-Item Env:\CLAUDE_DISABLE_PLUGINS
 }
 <!-- ENDIF -->
 ```
+
+After saving the profile, close and reopen PowerShell, then verify the functions exist:
+
+```powershell
+Get-Command {{launch_cmd}}
+Get-Command {{launch_cmd}}-resume
+Get-Command {{launch_cmd}}-terminal
+Get-Command {{launch_cmd}}-resume-terminal
+```
+
+Each should print `CommandType: Function` and the function name. If you see "is not recognized as a name of a cmdlet, function, script file, or executable program," the profile did not source - check `Test-Path $PROFILE` returns `True`, and re-source with `. $PROFILE`.
 
 ---
 
@@ -4587,13 +4925,13 @@ These are configured in `.claude/settings.json` under the `hooks` section.
 
 **How checkpoints work**
 
-The PreCompact hook grabs whatever is in `/tmp/{{orchestrator_name_lower}}-working-context.md` and copies it to `data/recovery/`. It keeps the last 5 snapshots so you can recover from any recent compaction.
+The PreCompact hook grabs whatever is in `${TMPDIR:-/tmp}/{{orchestrator_name_lower}}-working-context.md` and copies it to `data/recovery/`. It keeps the last 5 snapshots so you can recover from any recent compaction.
 
 The PostCompact hook reads the saved checkpoint back into context and also loads recent conversation history from the Telegram/terminal log. It re-reads the active project's HANDOFF.md so the session can continue without losing track of where it was.
 
 **Checkpoint format**
 
-Write to `/tmp/{{orchestrator_name_lower}}-working-context.md` regularly:
+Write to `${TMPDIR:-/tmp}/{{orchestrator_name_lower}}-working-context.md` regularly:
 
 ```
 # Working Context Checkpoint
@@ -4709,24 +5047,23 @@ If you started with terminal-only and want to add Telegram later:
 Message @userinfobot on Telegram. It replies with your numeric ID.
 
 **Step 3: Install the plugin**
-In a Claude Code session in your project directory:
+From any Bash shell (the CLI form works from a terminal, not just a Claude Code session):
 ```
-/install telegram
+claude plugin marketplace add claude-plugins-official
+claude plugin install telegram@claude-plugins-official
 ```
-It will ask for your bot token and user ID.
+Then start a fresh Claude Code session in your project directory, paste your bot token when the plugin asks for it, and it will store it under `data/runtime/telegram.json`.
 
-**Step 4: Update your launch commands**
-Add `--plugin telegram` to your main launch function and resume function. Your terminal-only variants stay unchanged.
+**Step 4: Enable the plugin in `.claude/settings.json`**
+Plugin enablement is a settings file entry, not a launch flag. There is no `--plugin telegram` flag on the `claude` binary. Add `"telegram"` to the `enabledPlugins` array in your project's `.claude/settings.json`:
 
-Before:
-```bash
-{{launch_cmd}}() { claude --project {{project_path}} ... }
+```json
+{
+  "enabledPlugins": ["telegram"]
+}
 ```
 
-After:
-```bash
-{{launch_cmd}}() { claude --project {{project_path}} --plugin telegram ... }
-```
+Your launch functions stay unchanged - they just `cd` into the project and run `claude --dangerously-skip-permissions`. The settings file controls which plugins load.
 
 **Step 5: Update CLAUDE.md**
 
@@ -4867,7 +5204,7 @@ caffeinate -i {{launch_cmd}}
 Fix: Check your Telegram plugin config. The token should match what BotFather gave you. If in doubt, create a new bot with BotFather and reinstall the plugin.
 
 **Cause 3: Plugin not installed or not started.**
-Fix: In a Claude Code session, run `/install telegram`. If already installed, check that your launch command includes `--plugin telegram`.
+Fix: install via `claude plugin marketplace add claude-plugins-official && claude plugin install telegram@claude-plugins-official`. If already installed, check `.claude/settings.json` has `"telegram"` in `enabledPlugins`. There is no `--plugin telegram` launch flag - plugin enablement is settings-file based.
 
 **Cause 4: Pairing not approved.**
 If you are messaging from a new account or device, the plugin's access control may be blocking you.
@@ -5043,11 +5380,7 @@ winget install SQLite.SQLite
 Or with Chocolatey: `choco install sqlite`. After installing, restart your terminal so the PATH updates.
 
 **Line endings (CRLF vs LF):**
-Windows editors may save files with CRLF line endings. Hook scripts with CRLF may fail.
-Prevention: configure git to handle line endings:
-```powershell
-git config core.autocrlf true
-```
+Hooks failing with `\r: command not found` or `bad interpreter` mean your shell scripts have CRLF line endings. Prevention is in the Windows install section near the top of this blueprint - run `git config --global core.autocrlf input` ONCE before cloning, not `true`. The `true` setting (older docs) commits LF but checks out CRLF, which still breaks scripts when invoked through Git Bash. Use `input`. To fix scripts that are already wrong, re-clone or run `dos2unix` on every file under `.claude/hooks/` and `scripts/`.
 
 **Script execution policy:**
 PowerShell may block scripts by default. If you get "execution of scripts is disabled" errors:
@@ -5179,28 +5512,193 @@ Fix: Ensure the agent's instructions include "write the file, then commit it" as
 The agent's `.claude/agents/<name>.md` file should include instructions about when and how to save memories.
 Fix: Add a memory section to the agent config that specifies what categories of information to save (user / feedback / project / reference / note) and the file naming convention (`memory/<type>_<topic>.md`).
 
+---
+
+### B13. Background scheduled tasks not firing on macOS
+
+**Symptom:** You set up a routine that should fire on a schedule (morning digest at 8am, signal fire, weekly Monday review). Your Mac was on. The schedule did not run. No log entry, no Telegram ping.
+
+**Cause: macOS Transparency, Consent, and Control (TCC) blocks launchd from running scripts under your `~/Documents/` folder.**
+
+This started in late April 2026 with a macOS update. Apple's privacy layer began refusing requests where launchd (the system task scheduler) tries to execute scripts that live in your Documents directory. It is not a bug, it is the new default. The system never tells you. The script just silently fails to run.
+
+You won't see this until you wonder why a scheduled routine never fired. Day-to-day chat with your agent is unaffected: anything you type into your terminal or send via Telegram still works.
+
+**Fix (the established pattern).** Each scheduled routine ships with a tiny AppleScript `.app` wrapper at `~/Applications/<routine-name>.app`. macOS lets you grant Full Disk Access (FDA) to a `.app` bundle. Once granted, that `.app` can run the underlying script. The wrapper does nothing else, just runs the script and exits.
+
+To grant FDA:
+
+1. Open System Settings (the gear icon in your menu bar).
+2. Go to Privacy & Security, then Full Disk Access.
+3. Click the `+` button.
+4. Navigate to `~/Applications/`. Select each `<routine>.app` you want to grant.
+5. Toggle each one on.
+
+Then ask your agent: "reload the launchd plists." It runs `launchctl unload` then `launchctl load` for each scheduled routine. The next scheduled fire works.
+
+**If you don't run any scheduled routines, you can skip this entirely.** This only affects users who set up the morning digest, weekly Monday review, signal fire, or proactive trigger daemon. Telegram, terminal use, and ad-hoc agent work are not affected.
+
+**Full architectural runbook + design rationale:** the technical section earlier in this blueprint titled "TCC-bypass via AppleScript .app wrappers" covers the why and the implementation details. This troubleshooting entry covers the user-facing steps.
+
 --- END OF PART 4: ADVANCED PATTERNS & TROUBLESHOOTING ---
 
 --- END OF BLUEPRINT ---
 
-# Appendix — Script Files
+# Appendix - Script Files
 
 Every code block below has its destination path in the first line. Save each to that path, then `chmod +x` shell scripts.
 
-## E1 — sqlite-vec + Nomic-embed
+## Common Templates (referenced earlier in this blueprint)
+
+### `scripts/setup-db.sh`
+
+Creates the optional SQLite operational layer. v30's source of truth is markdown; this script is only generated if the user explicitly opted into a SQLite memory layer during install.
+
+```bash
+#!/bin/bash
+# setup-db.sh - create the optional SQLite operational layer.
+# Only run this if you want a SQLite memory store on top of the markdown files.
+set -euo pipefail
+
+DB_PATH="{{project_path}}/data/{{db_name}}"
+mkdir -p "$(dirname "$DB_PATH")"
+
+sqlite3 "$DB_PATH" <<'SQL'
+CREATE TABLE IF NOT EXISTS memories (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent        TEXT NOT NULL,
+  topic        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  importance   INTEGER DEFAULT 5,
+  created_at   TEXT DEFAULT (datetime('now')),
+  expires_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_memories_agent ON memories(agent);
+CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+
+-- FTS5 search index
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(topic, body, content='memories', content_rowid='id');
+
+CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+  INSERT INTO memories_fts(rowid, topic, body) VALUES (new.id, new.topic, new.body);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+  INSERT INTO memories_fts(memories_fts, rowid, topic, body) VALUES('delete', old.id, old.topic, old.body);
+END;
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  project      TEXT,
+  description  TEXT NOT NULL,
+  status       TEXT DEFAULT 'pending',
+  created_at   TEXT DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS decisions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic        TEXT NOT NULL,
+  decision     TEXT NOT NULL,
+  rationale    TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS corrections (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  category     TEXT NOT NULL,
+  description  TEXT NOT NULL,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS patterns (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern      TEXT NOT NULL UNIQUE,
+  category     TEXT,
+  hit_count    INTEGER DEFAULT 1,
+  last_seen    TEXT DEFAULT (datetime('now'))
+);
+SQL
+
+echo "Database created at $DB_PATH"
+echo "Tables: memories (FTS5), tasks, decisions, corrections, patterns"
+```
+
+### `scripts/sync-safety-gates.sh`
+
+Keeps the project safety gate and the global one in sync. Run after editing `.claude/hooks/safety-gate.sh` so the global gate (which other projects inherit) stays consistent.
+
+```bash
+#!/bin/bash
+# sync-safety-gates.sh - mirror the project gate to ~/.claude/hooks/safety-gate.sh.
+set -euo pipefail
+
+SRC="{{project_path}}/.claude/hooks/safety-gate.sh"
+DST="$HOME/.claude/hooks/safety-gate.sh"
+
+if [ ! -f "$SRC" ]; then
+  echo "Source gate missing: $SRC" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$DST")"
+cp "$SRC" "$DST"
+chmod +x "$DST"
+echo "Synced safety gate: $SRC -> $DST"
+```
+
+### `scripts/restore-memory-symlinks.sh`
+
+After a fresh git clone on a new machine, the `~/.claude/projects/<slug>/memory` and `~/.claude/agent-memory` symlinks need to be rebuilt so Claude Code finds the canonical files inside this repo.
+
+```bash
+#!/bin/bash
+# restore-memory-symlinks.sh - rebuild Claude Code's expected symlinks after a fresh clone.
+set -euo pipefail
+
+PROJECT_ROOT="{{project_path}}"
+PROJECT_SLUG=$(echo "$PROJECT_ROOT" | sed 's|/|-|g')
+
+mkdir -p "$HOME/.claude/projects/$PROJECT_SLUG"
+
+TARGET_MEM="$HOME/.claude/projects/$PROJECT_SLUG/memory"
+if [ -L "$TARGET_MEM" ]; then
+  command rm -f "$TARGET_MEM"
+elif [ -e "$TARGET_MEM" ]; then
+  echo "WARNING: $TARGET_MEM exists and is not a symlink. Refusing to overwrite real data."
+  echo "Move its contents into $PROJECT_ROOT/memory and re-run."
+  exit 1
+fi
+ln -s "$PROJECT_ROOT/memory" "$TARGET_MEM"
+echo "Linked memory:       $TARGET_MEM -> $PROJECT_ROOT/memory"
+
+TARGET_AM="$HOME/.claude/agent-memory"
+if [ -L "$TARGET_AM" ]; then
+  command rm -f "$TARGET_AM"
+elif [ -e "$TARGET_AM" ]; then
+  echo "WARNING: $TARGET_AM exists and is not a symlink. Refusing to overwrite real data."
+  echo "Move its contents into $PROJECT_ROOT/agent-memory and re-run."
+  exit 1
+fi
+ln -s "$PROJECT_ROOT/agent-memory" "$TARGET_AM"
+echo "Linked agent-memory: $TARGET_AM -> $PROJECT_ROOT/agent-memory"
+```
+
+---
+
+## E1 - sqlite-vec + Nomic-embed
 
 ### `scripts/embed-memories.sh`
 
 ```bash
 #!/usr/bin/env bash
-# Thin wrapper over scripts/embed-memories.py so the rest of Cortana can call it
+# Thin wrapper over scripts/embed-memories.py so the rest of the orchestrator can call it
 # like any other shell script. Forwards args, picks the working Python 3.13.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Order matters: we need a Python whose sqlite3 was built with loadable extensions.
 # uv's distribution (~/.local/bin/python3.13) ticks that box; the python.org one
 # at /usr/local/bin/python3 does NOT.
-for cand in "${CORTANA_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
+for cand in "${BLUEPRINT_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
   if [[ -x "$cand" ]] && "$cand" -c 'import sqlite3,sys; c=sqlite3.connect(":memory:"); c.enable_load_extension(True)' 2>/dev/null; then
     PY="$cand"
     break
@@ -5222,7 +5720,7 @@ exec "$PY" "$SCRIPT_DIR/embed-memories.py" "$@"
 # as JSON. Forwards args, picks the working Python 3.13.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-for cand in "${CORTANA_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
+for cand in "${BLUEPRINT_PY:-}" "$HOME/.local/bin/python3.13" /opt/homebrew/bin/python3.14; do
   if [[ -x "$cand" ]] && "$cand" -c 'import sqlite3; c=sqlite3.connect(":memory:"); c.enable_load_extension(True)' 2>/dev/null; then
     PY="$cand"
     break
@@ -5240,7 +5738,7 @@ exec "$PY" "$SCRIPT_DIR/memory-search.py" "$@"
 ```bash
 #!/usr/bin/env bash
 # Symlinks scripts/hooks/* into .git/hooks/ so that the hooks are versioned
-# with the repo. Idempotent — safe to run multiple times. Never overwrites
+# with the repo. Idempotent - safe to run multiple times. Never overwrites
 # a non-symlink hook (so if you've customised .git/hooks/post-commit, it
 # won't clobber your version).
 set -euo pipefail
@@ -5263,7 +5761,7 @@ for src in "$SRC_DIR"/*; do
   dst="$DST_DIR/$name"
   chmod +x "$src"
   if [[ -L "$dst" ]]; then
-    # Already a symlink — refresh it.
+    # Already a symlink - refresh it.
     ln -sf "$src" "$dst"
     echo "refreshed: $dst -> $src"
   elif [[ -e "$dst" ]]; then
@@ -5283,7 +5781,7 @@ done
 #
 # Runs `scripts/embed-memories.sh` iff the commit we just made touches any
 # *.md under memory/, agent-memory/, or docs/. The embedder is incremental, so
-# this is cheap — only changed chunks are re-embedded.
+# this is cheap - only changed chunks are re-embedded.
 #
 # Installed by `bash scripts/install-git-hooks.sh`.
 
@@ -5303,7 +5801,7 @@ if ! grep -qE '^(memory/|agent-memory/|docs/).+\.md$' <<<"$changed"; then
 fi
 
 # Run the embedder quietly in the background so the commit completes fast.
-# If it fails, we log it — never block the commit.
+# If it fails, we log it - never block the commit.
 LOG="$REPO_ROOT/data/audit/embed-memories.log"
 mkdir -p "$(dirname "$LOG")"
 (
@@ -5316,7 +5814,7 @@ mkdir -p "$(dirname "$LOG")"
 exit 0
 ```
 
-## E4 — Observability
+## E4 - Observability
 
 ### `.claude/hooks/audit-log-hook.sh`
 
@@ -5328,12 +5826,12 @@ exit 0
 # Wired in .claude/settings.json under PostToolUse. async=true so it never
 # blocks tool execution.
 #
-# Gitignored — audit logs live on disk only, not in git.
+# Gitignored - audit logs live on disk only, not in git.
 set -euo pipefail
 
 INPUT=$(cat)
 
-# If input is malformed, exit quietly — never break tool flow
+# If input is malformed, exit quietly - never break tool flow
 TS=$(date -u +%Y-%m-%dT%H:%M:%S.000Z) || exit 0
 DAY=$(date -u +%Y-%m-%d) || exit 0
 
@@ -5402,20 +5900,20 @@ jq -nc \
 echo '{"suppressOutput": true}'
 ```
 
-### `scripts/cortana-live.sh`
+### `scripts/<orchestrator>-live.sh`
 
 ```bash
 #!/bin/bash
-# cortana-live — pretty-print the Cortana audit JSONL
+# <orchestrator>-live - pretty-print the audit JSONL
 #
 # Usage:
-#   cortana-live                       # last 20 events from today
-#   cortana-live --follow              # tail -F today, stream live
-#   cortana-live --last 50             # last 50 events
-#   cortana-live --tool Bash           # only Bash events
-#   cortana-live --project PokeInvest  # only events in a project
-#   cortana-live --day 2026-04-20      # events from a specific day
-#   cortana-live --failed              # only errored tool calls
+#   <orchestrator>-live                       # last 20 events from today
+#   <orchestrator>-live --follow              # tail -F today, stream live
+#   <orchestrator>-live --last 50             # last 50 events
+#   <orchestrator>-live --tool Bash           # only Bash events
+#   <orchestrator>-live --project PokeInvest  # only events in a project
+#   <orchestrator>-live --day 2026-04-20      # events from a specific day
+#   <orchestrator>-live --failed              # only errored tool calls
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -5468,7 +5966,11 @@ pretty() {
     if [ "$FILTER_FAILED" = "1" ] && [ "$success" = "true" ]; then continue; fi
     if [ -n "$FILTER_TOOL" ] && [ "$tool" != "$FILTER_TOOL" ]; then continue; fi
     if [ -n "$FILTER_PROJECT" ] && [ "$project" != "$FILTER_PROJECT" ]; then continue; fi
-    local_ts=$(date -u -j -f "%Y-%m-%dT%H:%M:%S.000Z" "$ts" "+%H:%M:%S" 2>/dev/null || echo "$ts")
+    # Portable HH:MM:SS extraction. ISO-8601 has fixed offsets so we just slice
+    # characters 11..18 (the time field) - no `date` call needed. Avoids the BSD-only
+    # `date -u -j -f` form that doesn't exist on Linux or Windows-Git-Bash (GNU date).
+    local_ts="${ts:11:8}"
+    [ -z "$local_ts" ] && local_ts="$ts"
     emoji=$(emoji_for_tool "$tool")
     status=$([ "$success" = "true" ] && echo "✅" || echo "❌")
     tool_short="${tool#mcp__*}"
@@ -5489,7 +5991,7 @@ fi
 
 ```bash
 #!/usr/bin/env bash
-# audit-archive — gzip audit JSONL files older than N days into the archive dir.
+# audit-archive - gzip audit JSONL files older than N days into the archive dir.
 #
 # Replaces the old audit-prune.sh behaviour. Instead of deleting old tool-call
 # audit logs, we compress them into data/audit/archive/YYYY/MM.jsonl.gz so the
@@ -5550,30 +6052,30 @@ while IFS= read -r f; do
 done < <(find "$AUDIT_DIR" -maxdepth 1 -name "*.jsonl" -type f -mtime "+$DAYS" 2>/dev/null)
 
 if [ "$DRY_RUN" = "1" ]; then
-  echo "(dry run — no files moved)"
+  echo "(dry run - no files moved)"
   exit 0
 fi
 
 echo "audit-archive: archived=$archived skipped=$skipped (threshold: $DAYS days)"
 ```
 
-## E5 — Hardened safety gate
+## E5 - Hardened safety gate
 
 ### `.claude/hooks/safety-gate.sh`
 
 ```bash
 #!/bin/bash
-# CORTANA SAFETY GATE
-# Blocks destructive commands and prompts Zaki for approval via Telegram.
+# HARDENED SAFETY GATE (E5)
+# Blocks destructive commands and prompts the user for approval (via Telegram if configured).
 # Exit 0 = allow. Exit 2 = block (message sent to Claude via stderr).
 #
 # APPROVAL FLOW:
 # 1. Hook blocks a dangerous command
-# 2. Claude sees the block reason and asks Zaki on Telegram
-# 3. Zaki says "yes" / "approved"
-# 4. Claude writes the command to ~/Documents/cortana/data/approved.txt
+# 2. Claude sees the block reason and asks the user
+# 3. User says "yes" / "approved"
+# 4. Claude writes the exact command to {{project_path}}/data/approved.txt
 # 5. Claude retries the command
-# 6. Hook sees it's pre-approved, allows it, removes the approval
+# 6. Hook sees it's pre-approved, allows it, removes the approval (one-time use)
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -5585,19 +6087,33 @@ if [ -z "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
 fi
 
 TIMESTAMP=$(date -Iseconds)
-LOG_FILE="$HOME/Documents/cortana/logs/safety-gate.log"
-APPROVAL_FILE="$HOME/Documents/cortana/data/approved.txt"
+LOG_DIR="{{project_path}}/logs"
+LOG_FILE="$LOG_DIR/safety-gate.log"
+# NOTE: this file MUST be in .gitignore - a checked-in approval file would let any clone
+# of this repo bypass the gate. The 0600 perms below stop a malicious package's postinstall
+# script from pre-approving destructive commands by writing to it as another local user.
+APPROVAL_FILE="{{project_path}}/data/approved.txt"
 
-# Ensure approval file exists
+# Ensure approval file + log dir exist with restrictive perms
+mkdir -p "$LOG_DIR" "$(dirname "$APPROVAL_FILE")"
 touch "$APPROVAL_FILE"
+chmod 0600 "$APPROVAL_FILE" 2>/dev/null || true
+
+# === WHITELIST: CLI subcommands that LOOK like rm but aren't filesystem deletes ===
+# vercel env rm / gh secret rm / docker rm (and friends) remove platform resources, not files.
+if echo "$COMMAND" | grep -qE '\b(vercel\s+env|gh\s+secret|docker(\s+(volume|network|image|container))?)\s+rm\b'; then
+  echo "[$TIMESTAMP] WHITELISTED CLI rm subcommand: $COMMAND" >> "$LOG_FILE"
+  exit 0
+fi
 
 # === CHECK FOR PRE-APPROVAL ===
-# If Zaki already approved this exact command, let it through and clear it
+# If the user already approved this exact command, let it through and clear it
 CHECK_STRING="$COMMAND$FILE_PATH"
 if grep -qFx "$CHECK_STRING" "$APPROVAL_FILE" 2>/dev/null; then
   # Remove the approval (one-time use)
   grep -vFx "$CHECK_STRING" "$APPROVAL_FILE" > "$APPROVAL_FILE.tmp" && mv "$APPROVAL_FILE.tmp" "$APPROVAL_FILE"
-  echo "[$TIMESTAMP] APPROVED (pre-approved by Zaki): $CHECK_STRING" >> "$LOG_FILE"
+  chmod 0600 "$APPROVAL_FILE" 2>/dev/null || true
+  echo "[$TIMESTAMP] APPROVED (pre-approved): $CHECK_STRING" >> "$LOG_FILE"
   exit 0
 fi
 
@@ -5605,12 +6121,12 @@ fi
 block() {
   local REASON="$1"
   local CATEGORY="$2"
-  echo "BLOCKED: $REASON. Ask Zaki for approval on Telegram. If he approves, write the exact command to ~/Documents/cortana/data/approved.txt (one command per line) then retry." >&2
+  echo "BLOCKED: $REASON. Ask the user for approval. If approved, write the exact command to {{project_path}}/data/approved.txt (one command per line) then retry." >&2
   echo "[$TIMESTAMP] BLOCKED ($CATEGORY): ${COMMAND}${FILE_PATH}" >> "$LOG_FILE"
   exit 2
 }
 
-# === HELPER: hard block (not even Zaki-approval opens the gate) ===
+# === HELPER: hard block (not even user approval opens the gate) ===
 hard_block() {
   local REASON="$1"
   local CATEGORY="$2"
@@ -5621,7 +6137,7 @@ hard_block() {
 
 # === CATEGORY 1: ALWAYS BLOCKED (no approval possible) ===
 # These are so catastrophic or history-destroying that even with approval,
-# we don't allow them through the hook. Zaki must run them manually in Terminal.
+# we don't allow them through the hook. Run them manually in Terminal if you must.
 
 # Delete home / root filesystem
 if echo "$COMMAND" | grep -qEi 'rm\s+-(rf|fr)\s+(/|~|\$HOME)\s*$'; then
@@ -5633,13 +6149,27 @@ if echo "$COMMAND" | grep -qEi '(mkfs\.|dd\s+if=|fdisk|diskutil\s+erase)'; then
   hard_block "Disk formatting / partition operation" "disk"
 fi
 
-# Git history rewrites — these are almost never recoverable
+# Git history rewrites - these are almost never recoverable
 if echo "$COMMAND" | grep -qEi 'git\s+filter-(branch|repo)'; then
-  hard_block "git filter-branch/filter-repo permanently rewrites history — unrecoverable if pushed" "git-filter"
+  hard_block "git filter-branch/filter-repo permanently rewrites history - unrecoverable if pushed" "git-filter"
 fi
 
 if echo "$COMMAND" | grep -qEi '(git\s+update-ref\s+-d|git\s+reflog\s+expire|git\s+gc\s+.*--prune=now|git\s+gc\s+.*--aggressive)'; then
-  hard_block "Permanent reflog / ref cleanup — makes it impossible to recover lost commits" "git-reflog"
+  hard_block "Permanent reflog / ref cleanup - makes it impossible to recover lost commits" "git-reflog"
+fi
+
+# Reject `-c push.default=...` shell-form pre-commands - known force-push bypass.
+# Sets push.default for the single command, then a bare `git push` pushes current branch
+# even if we'd otherwise expect an explicit refspec. Always hard-block.
+if echo "$COMMAND" | grep -qEi 'git\s+-c\s+push\.default='; then
+  hard_block "git -c push.default=... pre-command override is a known bypass for branch-target detection" "git-push-default-override"
+fi
+
+# Refspec-prefixed forced push: `git push origin +HEAD:main`, `git push remote +branch:branch`.
+# The `+` in front of a refspec means "force this push" with no --force flag - evades
+# every flag-based check. Always hard-block; if you genuinely need this, run it manually.
+if echo "$COMMAND" | grep -qEi 'git\s+push\s+\S+\s+\+'; then
+  hard_block "Refspec-prefixed forced push (+ before refspec) - same as --force, blocked unconditionally" "git-refspec-force"
 fi
 
 # Force push to protected branches: main, master, production, prod, release, develop
@@ -5647,26 +6177,57 @@ fi
 # is a hard block. This is what destroys shared history irrecoverably.
 if echo "$COMMAND" | grep -qEi 'git\s+push(\s+[^-]\S*)*\s+(--force|-f|--force-with-lease)(\s|=|$)' || \
    echo "$COMMAND" | grep -qEi 'git\s+push\s+.*(--force|-f|--force-with-lease).*\s+(origin\s+)?(main|master|production|prod|release|develop)(\s|$|:)'; then
-  # Only hard-block if the target branch is main/master/production/prod/release/develop OR unspecified (defaults to current branch which might be main)
+  # Hard-block if target branch is main/master/production/prod/release/develop
   if echo "$COMMAND" | grep -qEi '(origin\s+)?(main|master|production|prod|release|develop)(\s|$|:)'; then
-    hard_block "Force push to protected branch (main/master/production/prod/release/develop) — this destroys shared history. Never allowed via the hook." "git-force-push-protected"
+    hard_block "Force push to protected branch (main/master/production/prod/release/develop) - this destroys shared history. Never allowed via the hook." "git-force-push-protected"
+  fi
+  # Hard-block bare `git push -f` (no remote, no branch). This form pushes the current
+  # branch to its upstream - if current branch is main, the named-branch check above
+  # never sees "main" in the command and would otherwise miss this. Hard-block any
+  # forced push that doesn't explicitly target a clearly non-protected branch.
+  if ! echo "$COMMAND" | grep -qEi 'git\s+push\s+\S+\s+[A-Za-z0-9._/+:-]+(\s|$)'; then
+    hard_block "Force push without explicit branch target - defaults to current branch which may be protected" "git-force-push-implicit"
   fi
 fi
 
-# === CATEGORY 2: BLOCKED UNTIL ZAKI APPROVES ===
+# === CATEGORY 2: BLOCKED UNTIL APPROVED ===
 
 # --- File deletion ---
-# Only match `rm` as a standalone command (not inside words like "form", "arm", "term").
-# `(^|\s)` ensures rm is at start of command or after whitespace.
-if echo "$COMMAND" | grep -qE '(^|\s)rm\s+-(r|f|rf|fr|Rf|fR)'; then
-  block "Recursive or forced file deletion detected" "rm-rf"
+# Whitelist common CLI subcommands that use `rm` as a verb but are NOT filesystem deletes.
+# Without this, `vercel env rm`, `gh secret rm`, `docker rm`, `docker container rm`,
+# `docker image rm`, `docker volume rm`, `docker network rm`, `kubectl ... rm` all
+# false-positive on the rm regex below. Patched 2026-04-30 after live false-positives.
+if echo "$COMMAND" | grep -qE '\b(vercel\s+env|gh\s+secret|gh\s+variable|docker(\s+(container|image|volume|network))?|kubectl\s+(secret|configmap))\s+rm\b'; then
+  : # Allow - these are CLI resource-removal verbs, not filesystem deletes
+else
+  # Only match `rm` as a standalone command (not inside words like "form", "arm", "term").
+  # `(^|\s)` ensures rm is at start of command or after whitespace.
+  # Matches short flags (-r/-R/-f/-rf/-fr/-Rf/-fR) including the cap-R-alone form.
+  if echo "$COMMAND" | grep -qE '(^|\s)rm\s+-(r|R|f|rf|fr|Rf|fR|rR|Rr)\b'; then
+    block "Recursive or forced file deletion detected" "rm-rf"
+  fi
+  # Long-flag forms `--recursive` / `--force`
+  if echo "$COMMAND" | grep -qE '(^|\s)rm\s+(-{1,2})?(--recursive|--force)'; then
+    block "Long-flag recursive/forced file deletion (--recursive / --force)" "rm-longflag"
+  fi
+  if echo "$COMMAND" | grep -qE '(^|\s)rm\s'; then
+    block "File deletion detected" "rm"
+  fi
+  # `/bin/rm` style invocation
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)(/usr)?/bin/rm\s'; then
+    block "File deletion via /bin/rm detected" "rm-path"
+  fi
 fi
-if echo "$COMMAND" | grep -qE '(^|\s)rm\s'; then
-  block "File deletion detected" "rm"
+# `find -delete` and `find -exec rm` are file deletion in disguise
+if echo "$COMMAND" | grep -qE 'find\s.*-delete(\s|$)'; then
+  block "find -delete recursively deletes files" "find-delete"
 fi
-# `/bin/rm` style invocation
-if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)(/usr)?/bin/rm\s'; then
-  block "File deletion via /bin/rm detected" "rm-path"
+if echo "$COMMAND" | grep -qE 'find\s.*-exec\s+rm\s'; then
+  block "find -exec rm pipes deletion through find" "find-exec-rm"
+fi
+# rsync --delete can wipe a destination tree
+if echo "$COMMAND" | grep -qE 'rsync\s.*--delete'; then
+  block "rsync --delete removes files from destination not in source" "rsync-delete"
 fi
 
 # --- Database destructors ---
@@ -5676,11 +6237,11 @@ fi
 
 # DELETE without WHERE
 if echo "$COMMAND" | grep -qEi 'DELETE\s+FROM\s+\w+\s*[;$]'; then
-  block "DELETE FROM without WHERE clause — this deletes ALL rows" "sql-delete"
+  block "DELETE FROM without WHERE clause - this deletes ALL rows" "sql-delete"
 fi
 
 # --- Git destructive operations ---
-# Force push (any form, any branch that isn't main/master — those are hard-blocked above)
+# Force push (any form, any branch that isn't main/master - those are hard-blocked above)
 if echo "$COMMAND" | grep -qEi 'git\s+push(\s+\S+)*\s+(--force|-f)(\s|=|$)'; then
   block "Force push detected. If you actually need this, confirm the target branch isn't shared or critical." "git-force-push"
 fi
@@ -5713,7 +6274,7 @@ if echo "$COMMAND" | grep -qEi 'git\s+clean\s+-[a-z]*f'; then
   block "git clean -f removes untracked files permanently" "git-clean"
 fi
 
-# Interactive rebase — can rewrite history arbitrarily
+# Interactive rebase - can rewrite history arbitrarily
 if echo "$COMMAND" | grep -qEi 'git\s+rebase\s+(-i|--interactive)'; then
   block "Interactive rebase can rewrite commits. Confirm the branch isn't shared." "git-rebase-i"
 fi
@@ -5723,7 +6284,7 @@ if echo "$COMMAND" | grep -qEi 'git\s+rebase\s+.*--onto'; then
   block "git rebase --onto rewrites history in non-obvious ways" "git-rebase-onto"
 fi
 
-# Amend — rewrites the last commit, dangerous if already pushed
+# Amend - rewrites the last commit, dangerous if already pushed
 if echo "$COMMAND" | grep -qEi 'git\s+commit\s+.*--amend'; then
   block "git commit --amend rewrites the last commit. If already pushed, this requires force-push to remote." "git-amend"
 fi
