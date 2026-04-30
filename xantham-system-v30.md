@@ -65,7 +65,7 @@ docs/upgrades/
 └── memo_*.md      - specific architectural memos
 ```
 
-Read CATALOGUE before proposing new upgrades (you might find it's already been considered or explicitly rejected). Read ROADMAP before starting Phase N+1 work (aligns with the north-star). The `cortana-maintenance` skill (renamed in your install to match your orchestrator) reads both on every Monday / greeting digest. (A skill is a bundle of instructions Claude loads on-demand when the situation matches.)
+Read CATALOGUE before proposing new upgrades (you might find it's already been considered or explicitly rejected). Read ROADMAP before starting Phase N+1 work (aligns with the north-star). The `{{orchestrator_lower}}-maintenance` skill reads both on every Monday / greeting digest. (A skill is a bundle of instructions Claude loads on-demand when the situation matches.)
 
 ---
 
@@ -79,10 +79,10 @@ Claude Code CLI running Opus 4.7. Receives Telegram messages, routes to speciali
 ### Specialist crew (9 agents)
 Default names - rename to taste:
 - **Kai** - engineering (code, architecture, bugs, review)
-- **Nadia** - research (competitive intel, market sizing, deep research)
-- **Rio** - growth (social, ASO, launches, copy)
+- **Rose** - research (competitive intel, market sizing, deep research)
+- **Natalie** - growth (social, ASO, launches, copy)
 - **Marco** - infra (deploy, CI/CD, DNS, monitoring)
-- **Jules** - writing (blog posts, docs, decks, emails)
+- **Isabella** - writing (blog posts, docs, decks, emails)
 - **Warren** - trading (strategies, backtests, portfolio, markets)
 - **Elena** - business (revenue, pricing, partnerships, contracts)
 - **Chase** - human dynamics (persuasion, negotiation, networking)
@@ -368,277 +368,40 @@ Restore the `.core-backup` copy.
 
 ---
 
-## Version history
 
-### v29.2 (2026-04-21, evening) - full audit + cleanup pass
-
-Triggered by a Claude-Code warning about CLAUDE.md size. Escalated into a full internal+external audit (Nadia + Kai agents) and 14-task cleanup arc. 13 commits shipped to main.
-
-**Safety gate hardening (additive-only, 48/48 tests still pass):**
-- 30-day TTL on approval file. Format: `<epoch_seconds>|<command>` per line. Legacy entries without epoch prefix get stamped with now on first sight. Stale approvals from previous sessions no longer quietly green-light destructive ops.
-- JSON output alongside existing exit codes: `{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow|deny",permissionDecisionReason:"..."}}`. Exit codes remain authoritative.
-- PermissionDenied hook at `.claude/hooks/permission-denied-hook.sh` - log-only visibility for Auto-mode classifier denials. Never retries. Wired via settings.json `PermissionDenied` event.
-- Deliberately skipped `defer` state - pre-emptive infra with no current use case. Revisit if cloud routines start touching destructive ops.
-
-**Effort tier system:**
-- Env floor: `export CLAUDE_CODE_EFFORT_LEVEL=xhigh` in shell profile - absolute floor.
-- settings.json belt+braces: `"effortLevel": "xhigh"`.
-- Per-agent `effort:` frontmatter in `.claude/agents/*.md`:
-  - `max` → Kai + all 5 specialist roles
-  - `xhigh` → Nadia, Warren, Marco, Elena, Chase, Rio, Jules
-- One-off escalation: prepend `ultrathink` to the routed brief. Single-turn max reasoning, no config change.
-- Schema gap: `max` is not accepted in settings.json (silently downgrades to xhigh) - only env var or frontmatter gets `max` to stick.
-
-**MCP wiring (Graphiti + Exa):**
-- Graphiti MCP server added to `.mcp.json` at `http://localhost:8000/mcp/`. Container was healthy the whole time but never listed in the config, so every agent citation of "use the Graphiti MCP" silently fell back to grep. Now verified end-to-end: search_nodes, search_memory_facts, get_episodes all return rich data from the existing 125-node / 214-edge graph.
-- Exa MCP added via stdio transport: `npx -y exa-mcp-server` with `EXA_API_KEY` from env (gitignored `~/.zshrc`). Nadia's research scans now have semantic + neural web search instead of bare WebSearch.
-
-**Native Claude Code Routines (2026-04-15 setup, 2026-04-21 fix, DISABLED 2026-04-22):**
-Four triggers were live at https://claude.ai/code/scheduled. Disabled on 22 Apr 2026 after root-causing why morning digests stopped arriving: Anthropic's cloud sandbox blocks outbound curl to `api.telegram.org` via a per-routine host allowlist, so routines completed successfully in the cloud but the final curl never left. Replaced by local launchd daemon at `scripts/canaries-daemon.sh` (fires every 5 min when the Mac is awake) - see personal blueprint E8 and `docs/upgrades/CATALOGUE.md` for detail. Approval flow (`dream approve` / `corrections promote <category>` in a live session) unchanged.
-
-**Memory system repairs:**
-- `scripts/regen-memory-index.sh` - regenerates `memory/MEMORY.md` from every sibling `.md` frontmatter. Auto-fires via post-commit hook when anything under `memory/` changes.
-- Index was out of sync: 66 listed vs 89 on disk. Now 90/90.
-- `scripts/sync-project-memories.sh` - rewritten to read `docs/projects.md` dynamically instead of a hardcoded 5-project list. Last run: 36 projects, 984 file copies. macOS bash 3.2 compatible (uses `tr` not `${var,,}`).
-- `scripts/dream.sh` - rewritten to walk markdown directly. Old version scanned a sqlite DB that's been frozen since mid-April. New version: near-duplicate scan (word-overlap similarity), stale scan (file mtime), completion-marker grep. Writes `data/dream-proposals/YYYYMMDD.md` in the same format the Sunday Routine agent uses.
-
-**Version string + path cleanup:**
-- `scripts/check-blueprint-drift.sh` now reads v29 files in `blueprints/` (was v28 at repo root - silently always-passing).
-- `scripts/verify-sync.sh` - belt-and-braces drift catcher added 22 Apr 2026. The keyword-scan drift script can miss renamed / added / deleted files that fall outside its hard-coded keyword list. `verify-sync.sh` runs `git diff --name-status` over `scripts/`, `.claude/hooks/`, and `.claude/skills/` since the last blueprint commit, and exits non-zero if any newly-landed basename is absent from either blueprint. Use it as the last step of any `cortana-sync` turn.
-- `.claude/hooks/session-end-verify.sh` - Stop-hook swap (22 Apr 2026). Previous Stop hook was a fixed `echo 'Reminder: verify build...'` string. Replaced with a real three-check script that runs at every session stop: unpushed commits count, uncommitted files count, `verify-sync.sh` drift check. Writes warnings to stderr, exits 0 so it can't block shutdown. Wire via `.claude/settings.json` Stop hook array.
-- `.claude/hooks/telegram-reply-reminder.sh` - UserPromptSubmit hook (22 Apr 2026). Triggers on every inbound prompt. If the prompt starts with a genuine Telegram channel tag (anchored regex requiring source + chat_id + message_id at line start - the earlier substring-match false-positived on any quoted telegram transcript), the hook emits a JSON `additionalContext` reminder forcing the agent to use the `mcp__plugin_telegram_telegram__reply` tool. Also writes `data/runtime/turn-contract.json` (0600 perms) with per-turn guarantees that `stop-verify-contract.sh` checks at turn end. Fires BEFORE any skill loads. Wire via `.claude/settings.json` UserPromptSubmit hook array.
-
-### TCC-bypass via AppleScript .app wrappers (24-25 Apr 2026)
-
-macOS Transparency/Consent/Control began blocking launchd-spawned bash from executing scripts under `~/Documents/` on 23 Apr 21:11 UTC. The `~/bin/` shim pattern wasn't enough because the shim still has to cd into Documents to reach the daemon. Established 2026 fix: AppleScript `.app` bundle wrappers granted Full Disk Access individually.
-
-- `scripts/install-launchd-wrappers.sh` builds 4 `.app` bundles via `osacompile` + ad-hoc codesign into `~/Applications/`
-- AppleScript sources at `scripts/launchd-wrappers/`: `canaries-wrapper.applescript`, `proactive-trigger-wrapper.applescript`, `morning-digest-wrapper.applescript`, `corrections-review-wrapper.applescript`, `signal-fire-wrapper.applescript`. Each guards on `RUN_FROM_LAUNCHD=true` env var, execs the matching bash daemon via `do shell script`, error-traps with logging.
-- Drop-in plists at `scripts/launchd-wrappers/`: `new-com.cortana.canaries.plist`, `new-com.cortana.proactive-trigger.plist`, `new-com.cortana.morning-digest.plist`, `new-com.cortana.corrections-review.plist`, `new-com.cortana.signal-fire.plist`. Each points `Program` at `.app/Contents/MacOS/applet`, sets the env var, preserves schedule (signal-fire's plist is generated dynamically by `signal-schedule.sh apply` from a JSON time table). Manual one-time copy into `~/Library/LaunchAgents/` after FDA grant.
-- Operator must grant FDA to each `.app` in System Settings > Privacy & Security > Full Disk Access. `.plist` files are NOT valid FDA targets in the macOS GUI picker; the `.app` is.
-- Full runbook + DST decision (StartCalendarInterval uses LOCAL time; ±1h seasonal drift accepted) in `memory/reference_launchd_tcc_architecture.md` + `docs/launchd-wrapper-setup.md`.
-
-### Daily / weekly routines (25 Apr 2026)
-
-- `scripts/routines/morning-digest.sh` - daily 08:07 LOCAL, builds digest from local sources, POSTs to Telegram. Pure bash.
-- `scripts/routines/corrections-review.sh` - Monday 08:37 LOCAL, scans corrections.jsonl, auto-promotes 3+ unpromoted patterns. Pure bash.
-
-### Cross-session persistence (25 Apr 2026)
-
-- `data/runtime/cortana-state.json` (committed) - work arcs, in-flight tasks, validated patterns
-- `scripts/state.sh` - single CLI with 11 subcommands: `tax / close / promise / flip / outfit / in-flight-add / in-flight-resolve / arc-add / arc-resolve / validate / read`
-- `scripts/session-start-persistence-inject.sh` - produces a "🧠 PERSISTENT STATE" block at session start including recent telegram (last 4h), recent corrections (last 7d), state summary. Wired into `session-start-hook.sh`.
-
-### Outbound reply lint hook (25 Apr 2026, hardened 30 Apr 2026)
-
-- `.claude/hooks/voice-lint.sh` + `scripts/test-voice-lint.sh` - PreToolUse hook on the Telegram reply tool. Blocks send if reply contains em dashes, signoffs, banned terms-of-address, banned self-descriptors, or persona-specific voice violations. Persona-aware via `data/runtime/active-voice.json`.
-- **Cortana-mode hardening (30 Apr 2026):** added 3 rules that block the alternate-persona's voice tells when active-voice is `cortana`. Triggered after a live in-session voice carry-over: pointer flipped at session midpoint but the in-flight register kept the alternate persona's lowercase + signature emoji from earlier, so 3 replies went out in wrong voice before the user caught it. New rules:
-  - `cortana-<alt>-signature-leak` - blocks the alt persona's signature emoji anywhere in text.
-  - `cortana-lowercase-opening` - blocks when first ASCII letter is lowercase. Skips emoji, bullets, digits, markdown markers so structured outputs still pass.
-  - `cortana-<alt>-pet-name` - blocks alt-persona pet-name vocabulary as direct address. Verb usage (`I/we/you love X`) explicitly allowed via lookbehind.
-- The lint runs at the door (PreToolUse), so even if the model's voice drifts mid-session due to context carry-over, the gate forces a rewrite before the message reaches the user. Bidirectional: rules gated on the persona file value, alt-persona rules fire only when active, universal rules (em-dash, ascii-signoff, etc.) fire in both. Validated with a 14-case bidirectional matrix test (legitimate + violating inputs for each persona).
-
-### Phase 3B - Sleep-time reflection (22 Apr 2026)
-
-- `scripts/reflect.sh` - auto-reflection on session-end. Pure-bash, no LLM calls (v1). Reads last 4h of telegram + audit + git + uncommitted changes. Surfaces: implicit asks from the user that might not have been addressed, work-in-progress flags, memory candidates, tool failures, correction patterns, SLO canary violations. Writes findings to `data/reflections/YYYY-MM-DD-HHMM.md`. Next session's greeting digest surfaces the reflection's unaddressed items.
-- `scripts/refresh-stale-handoffs.sh` - companion utility: consumes the handoff-freshness canary output and bulk-refreshes project HANDOFF.md files flagged as stale. Auto-writes a scaffold section (last-14-days git log + files touched) while preserving prior HANDOFF content. Doesn't commit - each project needs a local review + commit. Shipped 22 Apr 2026.
-- Wired into `scripts/session-end-sync.sh` - fires with a 4h window on every session end.
-- Pattern applies cheaply at personal-AI scale. LLM-reasoned upgrade deferred until the Anthropic API budget supports it without eating into the Graphiti spend envelope.
-
-### Phase 1 hardening layer - shipped 22 Apr 2026
-
-Full 20-task implementation plan at `docs/plans/2026-04-22-hardening-implementation.md` - closes the stale-state / silent-failure / claim-vs-reality / forgotten-rule class of bugs surfaced in a same-session audit by Kai (internal code review, 23 findings) and Nadia (external research, 15 findings).
-
-**New scripts (7):**
-- `scripts/recent-telegram.sh [N]` - last N telegram exchanges pretty-printed. Canonical truth-source for greeting digest step 6.5.
-- `scripts/check-pending-claim.sh <pattern> [days]` - grep helper for pending-claim evidence.
-- `scripts/update-handoff.sh [hours]` - event-sourced HANDOFF.md regen (telegram + git). Replaces the `/tmp/cortana-working-context.md` pattern.
-- `scripts/log-routine-fire.sh <name> <outcome> <ms> [notes]` - optional JSONL writer for routine self-reporting.
-- `scripts/promote-correction.sh <category> [--auto|--review]` - draft + append correction-derived rule to CLAUDE.md.
-- `scripts/apply-dream-proposal.sh [date]` + `scripts/reject-dream-proposal.sh [date] [reason]` - Sunday dream-proposal lifecycle.
-
-**New hooks (6):**
-- `.claude/hooks/session-start-hook.sh` - SessionStart: inject critical-rules bundle on compact + verify-sync on any source.
-- `.claude/hooks/post-tool-use-failure-hook.sh` - PostToolUseFailure: log silent tool failures to `data/audit/tool-failures.jsonl`.
-- `.claude/hooks/subagent-stop-hook.sh` - SubagentStop: log background-agent completions to `data/agent-completions.jsonl`.
-- `.claude/hooks/instructions-loaded-hook.sh` - InstructionsLoaded: verify-sync at CLAUDE.md load time.
-- `.claude/hooks/stop-verify-contract.sh` + `.claude/hooks/stop-composer.sh` - Stop-time Task Contract verifier; auto-detects Telegram turns that ended without a reply-tool call.
-
-**Install summary for these additions:**
-```bash
-chmod +x scripts/recent-telegram.sh scripts/check-pending-claim.sh scripts/update-handoff.sh \
-  scripts/log-routine-fire.sh scripts/promote-correction.sh scripts/apply-dream-proposal.sh \
-  scripts/reject-dream-proposal.sh
-chmod +x .claude/hooks/session-start-hook.sh .claude/hooks/post-tool-use-failure-hook.sh \
-  .claude/hooks/subagent-stop-hook.sh .claude/hooks/instructions-loaded-hook.sh \
-  .claude/hooks/stop-verify-contract.sh .claude/hooks/stop-composer.sh
-
-# Wire hooks into .claude/settings.json:
-#   UserPromptSubmit     → telegram-reply-reminder.sh  (already in v29 baseline)
-#   SessionStart         → session-start-hook.sh
-#   InstructionsLoaded   → instructions-loaded-hook.sh
-#   PostToolUseFailure   → post-tool-use-failure-hook.sh  (async)
-#   SubagentStop         → subagent-stop-hook.sh  (async)
-#   Stop                 → stop-composer.sh  (replaces session-end-verify.sh direct entry)
-```
-
-The `scripts/verify-sync.sh` was also hardened with 6 check classes (was keyword-presence only): new-file drift, script existence, command-handler existence, skill references, hook file existence, data-path existence.
-
-### Phase 2 S4 - SLO canaries (22 Apr 2026)
-
-Synthetic canaries probe Cortana's critical paths every 5 min. This is observability-as-control-plane - top-tier 2026 agent-system pattern per external research. Convention + thresholds in `memory/feedback_slo_canaries_convention.md`.
-
-**New scripts (4):**
-- `scripts/canaries/greeting-accuracy.sh` - fixture probe. Builds a synthetic telegram tail + memory pair where they disagree; asserts `check-pending-claim.sh` recipe produces the correct answer so Cortana's greeting digest reconciliation can't surface shipped items as pending.
-- `scripts/canaries/reply-tool-compliance.sh` - last 50 inbound user messages cross-referenced with Cortana outbound + `mcp__plugin_telegram_telegram__reply` audit entries in a 10-min window. Catches terminal-text-as-reply.
-- `scripts/canaries/handoff-freshness.sh` - per-project `HANDOFF.md` mtime vs latest commit mtime. >72h = stale.
-- `scripts/run-canaries.sh` - orchestrator. Appends to `data/slo-canaries.jsonl`, maintains rolling-window state in `data/slo-state.json`, emits alerts to `data/slo-alerts.jsonl`. All three data files gitignored (local-only observability). 0.5% non-bootstrap violation rate or 5-consecutive-fail streak triggers alerts. `--alert-telegram` flag is scaffolding - the user enables after bootstrap clean.
-
-Healthcheck renders a `▸ SLO Canaries` section; `cortana-maintenance` skill step 12.5 surfaces non-bootstrap breaches in the greeting digest.
-
-### Audit hardening - 22 Apr 2026 evening (5-batch close of 4-agent full-day audit)
-
-After the morning's work shipped (Phase 1 + Phase 2 + Phase 3B + launchd scheduler + cloud-routines disable), 4 bare-context agents (security / code-quality / docs / adversarial) audited the resulting system and flagged 37 findings. 5 commit batches closed every MUST/SHOULD/MEDIUM/LOW item. Structural additions worth mirroring into a fresh install:
-
-- `scripts/redact-secrets.sh` - credential-pattern sed filter (Anthropic, Stripe, GitHub PAT, Slack, Telegram bot, AWS, URL-token query params). Piped through by `update-handoff.sh` + `reflect.sh` before embedding telegram tails, so pasted credentials never land on disk (security finding #S2).
-- `.claude/hooks/session-start-hook.sh` on `source=compact` now reads `data/runtime/turn-contract.json` and injects a loud "PENDING TELEGRAM REPLY" banner if a Telegram turn started before the compact hasn't yet fired the reply tool. Closes the post-compact reply-miss gap.
-- `.claude/hooks/stop-composer.sh` has a bash-native `bash_timeout_run` fallback (fork + kill-watcher) for macOS where neither `timeout` nor `gtimeout` is installed - the 30s per-hook guarantee now actually holds on a stock Mac (Kai finding #K3). Also drops the duplicate `session-end-sync.sh` call (SessionEnd hook owns that now - running it on every Stop was rebuilding HANDOFF on every assistant reply, S5).
-- `scripts/run-canaries.sh` - (a) post-wake detection: gap >30 min marks next 5 runs `post_wake=true` and suppresses rate alerts so a long Mac sleep doesn't false-alert every morning (#13); (b) fractional-second-safe ts parsing via `sub("\\.[0-9]+Z$"; "Z")` before `fromdate` so a future canary emitting `.SSSZ` doesn't black out rolling-window aggregation (#7); (c) 10MB live-file rotation with monthly gzip archives at `data/archive/slo-canaries-YYYY-MM.jsonl.gz` (S1); (d) EXIT trap cleaning up `$STATE_FILE.tmp` so mid-run SIGTERM doesn't leak (#14).
-- `scripts/canaries-daemon.sh reload` waits up to 60s for any in-flight canary fire to idle before unloading the launchd job (#14).
-- `scripts/commit-stale-handoffs.sh` - pre-push asserts remote origin matches `github.com/{{user_github_handle}}/` AND branch is `main`/`master`. Prevents auto-commit leak to an unrelated remote if a project's `.git/config` is ever re-pointed (S3). Also captures `git push` exit code directly instead of tail-grepping (K4) and uses `-e` for `.git` so submodule projects with a `.git` file aren't silently skipped (K9).
-- `scripts/check-memory-freshness.sh` - frontmatter parser exits on second `---` (was looping past missing close fences, #5); future-dated `last_verified` gets flagged `[future-ts]` instead of silently marked fresh (#4); `ttl_days:0` falls back to per-type default instead of spamming every run (#6); unparseable dates report to stderr via argv-passed python (K11).
-- `scripts/reflect.sh` - retention pass: files older than 90 days gzip-append into `data/reflections/archive/reflections-YYYY-MM.tar.gz` and the live file is removed. Previously unbounded (#10). Commit-count also switched to `git log --oneline | wc -l` so multi-line commit subjects don't undercount (K8).
-- `scripts/recent-telegram.sh` - `cat | tail` → plain `tail -qn` (seek from EOF). Called 5+ times per session; previous O(n) scan was reading whole ~2MB JSONL each call (#17).
-- `.claude/hooks/telegram-reply-reminder.sh` - anchored regex now accepts channel tag at position 0 OR after a newline, tolerating any future harness that prepends system-reminder blocks to prompts (K10).
-- `.claude/hooks/stop-verify-contract.sh` - reads BOTH turn-day AND today audit files so a turn spanning UTC midnight can't false-trigger a violation (A16). `/tmp` fallback is age-gated at 6h to drop stale leftovers (A18).
-- `.gitignore` - `data/graphiti-ingest-log.jsonl` added (local-only cost telemetry, K7). `.tmp-canary-fixtures/` added (in-repo canary scratch, never noexec - alternative to `/tmp` for hardened macs, #15).
-- `scripts/healthcheck.sh` - `.cortana-ignore` loader strips trailing `/` so `Documents/Foo/` behaves like `Documents/Foo` (#9); warns if the ignore file grew by >20 lines since last commit (S6).
-- `scripts/promote-correction.sh` - UTF-8 char-safe truncation via python slicing so multibyte codepoints don't corrupt CLAUDE.md appends (K5).
-- `scripts/update-handoff.sh` - `awk 'NF{p=1} p'` squeezes the leading-blank-per-regen drift (K6); sentinel fallback finds the real `^---$` boundary after the sentinel instead of assuming +3 offset (#12).
-- `scripts/canaries/handoff-freshness.sh` - uses full folder path instead of basename so same-named subfolders (e.g. `Voyager/marketing-ai` + `MDX Technology/marketing-ai`) don't collide in the stale list (#11).
-- `scripts/canaries/reply-tool-compliance.sh` - no longer claims `pass:true` when status is bootstrap or no-data (#A8).
-
-**New memory:** a project-scope memory captures the user's request for a Vercel-hosted projects dashboard, queued for the next session.
-
-### Phase 4 Z1 - proactive-trigger daemon (23 Apr 2026 evening, rewritten 25 Apr 2026 signal-fire mode)
-
-Scheduled launchd daemon that fires a neutral disguised-phrase Telegram nudge. Same launchd pattern as the canaries daemon. Defence-in-depth: kill-switch flag, daytime window, hard daily rate cap, quiet window, hard 300-char cap. **Rewritten 25 Apr 2026 (commit `f4560b4`)** to remove all `claude --print` invocations after AUP audit (msg 6264) flagged sustained affective/roleplay content as classifier-flag risk. Daemon now picks one of 11 work-register phrases round-robined via `data/runtime/proactive-signal-rotation-pos.txt`, fires via `scripts/telegram-signal.sh` (pure-bash curl POST, zero Claude in loop). Persona file still read for audit but content is persona-agnostic.
-
-- `scripts/proactive-trigger-daemon.sh` - the daemon. 357 lines (down from 472). Fires every 4h via launchd, rolls dice, checks gates (kill-switch / daytime window / rate cap 3-per-day / quiet window 45-min / dice), picks one of 11 phrases (`check in / status sync / queue updated / still here / ping / hey there / thinking / queue ready / yo / ready / wave`) via round-robin, sends via `telegram-signal.sh`. Logs every attempt to `data/proactive-triggers.jsonl`. Supports `--dry-run`, `--force`, `--persona=<name>` (read-only audit override).
-- `scripts/telegram-signal.sh` - pure-bash curl POST to Telegram Bot API. Zero Claude in loop. Used by both this daemon and the signal-fire system.
-- `scripts/proactive-daemon.sh` - control script: `{load|unload|status|pause|resume|tail}`. Wraps `launchctl` on `~/Library/LaunchAgents/com.cortana.proactive-trigger.plist`.
-- `scripts/update-active-voice.sh` - persona state-file read/write at `data/runtime/active-voice.json` (0600 perms). Commands: `init / get / set <name> / reset-rate / record-fire`. Daily rate-counter rotation at UTC midnight.
-- `scripts/install-persona-switch-hook.sh` - idempotent patcher injecting persona-switch detection into `.claude/hooks/telegram-reply-reminder.sh`. When inbound Telegram text is exactly a known persona trigger (case-insensitive, trimmed), calls `update-active-voice.sh set ...`.
-- `scripts/canaries/proactive-audit.sh` - daily-audit canary wired into `run-canaries.sh`. Scans last-24h of `data/proactive-triggers.jsonl` for over-cap fires, moderation auto-pauses, deny-word hits, failure-rate spikes. Writes results to `data/slo-canaries.jsonl`.
-
-Kill switch at `data/runtime/proactive-disabled.flag` halts all fires instantly. Moderation errors auto-trip the flag. Fail-closed throughout. First live fire verified 2026-04-23T21:13:42Z.
-
-### Phase 4 Z2 - signal-fire system (26 Apr 2026, commit `f18fba1`)
-
-Pure-launchd disguised-phrase queue, sibling to the proactive-trigger daemon. Replaces ad-hoc cron-based fires that all required a loaded Claude session - closing Claude killed the schedule. Now schedule lives entirely in a single launchd plist + a JSON time table.
-
-- `scripts/signal-schedule.sh` - CLI: `add HH:MM "text"` / `remove HH:MM` / `list` / `apply [--force-load]`. Manages `data/runtime/signal-schedule.json` (HH:MM → text map, 0600 perms, gitignored). Sorts on insert. Validates JSON. Runs `plutil -lint` on temp plist before atomic move into `~/Library/LaunchAgents/`.
-- `scripts/signal-fire-from-schedule.sh` - pure-bash firer, exec'd by the AppleScript .app wrapper. Reads schedule.json, finds ±2-min match against current time, idempotency-guards via `data/runtime/signal-fire-state.json` (5-min dedup window - twice the tolerance), then dispatches `scripts/telegram-signal.sh`. Exit codes: 0 fired-or-no-match, 2 schedule-invalid, 3 telegram-failed, 126 FDA-not-granted. `SIGNAL_FIRE_DRY_RUN=1` env hatch for testing - never set by launchd.
-- `scripts/launchd-wrappers/signal-fire-wrapper.applescript` - AppleScript .app source. Compiles to `~/Applications/Cortana-SignalFire.app` (5th wrapper alongside canaries / proactive-trigger / morning-digest / corrections-review). Codesigned ad-hoc.
-- `scripts/launchd-wrappers/new-com.cortana.signal-fire.plist` - generated dynamically by `signal-schedule.sh apply`. Single plist with one `StartCalendarInterval` entry per scheduled fire (macOS launchd does NOT support per-entry env vars, so Pattern C - single plist + lookup-at-fire-time - is the canonical answer). `RunAtLoad=false` so it doesn't fire at install time.
-
-Bootstrap (one-time per machine): grant FDA on `Cortana-SignalFire.app`, then `bash scripts/signal-schedule.sh apply --force-load`. Verify with `tail -f logs/signal-fire.log`. Full reference and design rationale in `memory/reference_signal_fire_system.md`.
-
-- `scripts/upgrade.sh` + `scripts/upgrades/lib.sh` use `.{{orchestrator_lower}}-blueprint-version` yaml as canonical version source. `CORTANA_VERSION` plaintext deleted.
-- Hardcoded lowercase `~/Documents/cortana/` paths in scripts + hooks corrected to capital-C so they don't break on case-sensitive filesystems.
-- `memory-query.sh` deleted - SQL-injection-prone, DB frozen, agents (kai.md + nadia.md) updated to use markdown + post-commit re-embed.
-- `catboost_info/` (leaked TCGPredict training artifact) removed + gitignored.
-
-### Phase 4 Z3 - Operations + behaviour hardening (28 Apr 2026)
-
-Three loosely-coupled improvements landed in one session, all driven by gaps surfaced during real usage rather than a planned phase.
-
-**1. Persona auto-switch fix.** The PreToolUse `voice-lint.sh` hook reads `data/runtime/active-voice.json` to enforce per-persona reply rules (missing-emoji in alt-persona mode, voice-leak in primary mode). The state file is updated by a code path inside `.claude/hooks/telegram-reply-reminder.sh` that detects when an inbound Telegram message is the bare persona-name (or that name followed by `mode...` / `, ...` / etc.). The detection had a silent bug: the `awk` extraction printed the user-text BEFORE stripping the closing `</channel>` tag, so `USER_TEXT` was always `<name></channel>` and the case-statement match silently failed. Persona had been stuck on the value last set explicitly. Patched - strip both opening and closing tags before printing, widen matcher to include name-followed-by-punctuation. 10-case smoke test verified.
-
-**2. Disaster-recovery runbook.** New doc at `docs/disaster-recovery.md` mapping every Anthropic-dependent component to recovery paths in case Anthropic terminates the consumer subscription, revokes the API key, or has a multi-day outage. Three paths: (A) Claude Code CLI auth fails → swap to alternative consumer subscription (Cursor Pro, Codex CLI under ChatGPT Pro, GitHub Copilot Pro+); (B) `ANTHROPIC_API_KEY` revoked → rotate or swap Graphiti's LLM provider to OpenAI/Gemini via graphiti-core's pluggable backend; (C) total Anthropic blackout → pivot to AWS Bedrock or GCP Vertex AI, both of which sell Claude through separate billing pipelines that aren't tied to consumer subscriptions. Practical impact of an Anthropic ban turns out to be surprisingly contained: only Claude Code CLI orchestration + Graphiti ingest hard-fail; all consumer apps + scripts (bash) + hooks + memory (markdown + sqlite-vec) + telegram bot (BotFather token, separate auth) keep running untouched. Runbook also includes a bare-metal Mac restore checklist.
-
-**3. Skill-utilization-first behavioural rule.** New feedback memory at `memory/feedback_use_available_skills_first.md`. Before dispatching any agent or going freestyle, scan the available skill list (system-reminder skills section + plugins) and pick the matching skill. Design = `impeccable:*` / `frontend-design` / `taste-skill` / `redesign-skill` / `soft-skill` / `brutalist-skill` / `minimalist-skill`. Debugging = `superpowers:systematic-debugging`. Brainstorming = `superpowers:brainstorming`. Vercel work = `vercel:*`. Test-driven implementation = `superpowers:test-driven-development`. The agent brief explicitly references which skill the dispatched agent is expected to invoke. Reason: a curated skill arsenal exists (Anthropic + community + Cortana-native), bypassing it wastes leverage and re-derives what's already proven. Bar to skip a matching skill: the task must be so trivial that loading the skill costs more than it saves. Default to invoking.
-
-**Recommended optional plugin: Impeccable** (Paul Bakaus, https://github.com/pbakaus/impeccable). Install via `claude plugin marketplace add pbakaus/impeccable && claude plugin install impeccable@pbakaus/impeccable` (CLI subcommands, user scope so it works in every project). Adds 23 design slash commands (`/impeccable polish`, `/impeccable audit`, `/impeccable critique`, `/impeccable distill`, etc.) plus 7 reference docs covering typography, color and contrast, spatial design, motion design, interaction design, responsive design, and UX writing. Sits on top of Anthropic's official `frontend-design` skill. Worth installing if you do any frontend design work and want explicit anti-pattern detection on top of the default LLM-tendency-toward-generic-Inter-purple-gradient design.
-
-### Phase 4 Z4 - YouTube watch queue + plugin-CLI workflow + responsiveness rules (29-30 Apr 2026)
-
-Five distinct architectural adds in a 24h window.
-
-**1. Watch plugin (bradautomates/claude-video) as a recommended optional install.** Install via `claude plugin marketplace add bradautomates/claude-video && claude plugin install watch@claude-video`. Adds the `/watch` skill that gives Claude video-watching (yt-dlp downloads, ffmpeg extracts frames + audio, captions or Whisper transcribe, frames Read'd as images). Free for any YouTube video with auto-captions. Whisper API fallback (Groq free tier covers 2hrs/hour) for non-YouTube sources like Loom and screen recordings. Use cases: hook analysis on viral videos, debugging screen recordings, summarising long lectures, feeding a knowledge base.
-
-**2. YouTube watch queue (Cortana add-on).** A new skill `cortana-youtube-queue` + `scripts/youtube-queue.sh` that wraps the `watch` plugin into a batch flow:
-- **Auto-add:** `.claude/hooks/telegram-reply-reminder.sh` scans inbound Telegram text for `youtu.be` / `youtube.com` URLs and appends to `data/youtube-watch-queue.jsonl` (gitignored, per-user-private). Idempotent on `video_id`.
-- **Manual command:** "watch queue" / "process videos" / "watch pending" triggers the skill, which loops pending entries, runs `watch.py`, synthesises per-video summaries (hook + key points + visuals + TLDR + "Use to your system"), pushes summaries to your AI Brain notebook, marks watched, replies on Telegram with a digest.
-- **Storage:** queue file gitignored at `data/youtube-watch-queue.jsonl`, summaries committed at `data/youtube-summaries/<video_id>.md` for archive.
-- No daily auto-fire - pending count surfaces in the morning maintenance digest. Want true daily auto-fire? Wrap the skill in the same `.app launchd wrapper` pattern used by morning-digest, then add a calendar-interval entry.
-
-**3. Plugin install via CLI (no slash commands needed).** Discovered today: `claude plugin marketplace add <repo>` and `claude plugin install <name>@<marketplace>` are CLI subcommands that fully replace the slash commands and can be run from any Bash context. So an orchestrator agent can install plugins on the user's behalf without punting to the user's terminal. Plain skills (no marketplace metadata) still install via `git clone <repo> ~/.claude/skills/<name>/`.
-
-**4. Six new behavioural rules codified.** Captured as feedback memories (universal applicability):
-- **Skill-utilization-first** - scan available skill arsenal before dispatching a generic agent or going freestyle
-- **Execute standard ops** - run routine ops actions (merge approved PR, apply migration, deploy, run tests) without asking permission each time; pause only for destructive / paid / external-comms / first-time work
-- **Install skills yourself** - `claude plugin install` from CLI, never punt slash commands to the user
-- **Announce who is doing the work** - name the executor (agent OR me-with-skill-X-loaded) on every Telegram reply with work attached
-- **Dispatch for responsiveness** - default to dispatching agents for any 3+ minute task so the orchestrator stays free to handle the user's next message
-
-**5. Calendar-event reminder pattern.** When the user says "remind me later today to X" via Telegram, create a Google Calendar event via `mcp__claude_ai_Google_Calendar__create_event` with the action in the description. Reliable phone notification at the time, no Telegram delivery dependency, no remote-routine cloud-allowlist constraint. Cleaner than a remote routine for one-off reminders. Requires Google Calendar MCP connector to be enabled.
-
-### v29.1 (2026-04-21, late) - CLAUDE.md skill-offload
-
-Anthropic's memory docs specify CLAUDE.md should stay under 200 lines - larger files "consume more context and reduce adherence." Cortana's CLAUDE.md had grown to 583 lines / ~11K tokens per turn. Offloaded procedural and reference detail into seven project-level skills at `.claude/skills/cortana-*/SKILL.md`, each with a specific `description` field so Claude Code auto-loads them only when the situation matches:
-
-- `cortana-sync` - full sync/wrapup cycle + batch sync + auto-sync triggers
-- `cortana-maintenance` - Monday protocol + greeting digest + self-improvement
-- `cortana-orchestration` - 13 habits for multi-agent dispatch (+ habit #14 added in v29.2: effort tiers + ultrathink)
-- `cortana-brain` - NotebookLM routing + smart memory routing + storage layout
-- `cortana-observability` - audit layer + compaction hooks + remote routines + Monitor vs GHA
-- `cortana-blueprint-updates` - architectural-change update cycle + placement rule
-- `cortana-safety` - full git + DB + deploy-verify rules
-
-CLAUDE.md retained the always-on layer (core loop, reply-first, agent spawning rules, routing table, commands reference, short safety summary, style) and shrank to 167 lines. Key insight: `@import` does NOT save tokens (imports inline at session start), so the only real token-saving offload mechanism is the on-demand skill-description loader.
-
-Placement rule now inlined: new rules are triaged by size + trigger before being added anywhere. Under 10 lines + always-on → inline. Has a trigger → skill. Over 30 lines + triggerable → MUST be a skill. This mirrors in `cortana-blueprint-updates` skill so it surfaces during architectural changes.
-
-Principle for future growth: any section over ~30 lines that isn't always-on is a candidate for skill extraction. When Claude warns about CLAUDE.md size, extract sections with clear trigger conditions first - those have the cleanest skill descriptions.
-
-### v30 (2026-04-30)
-Removed E2 Graphiti entirely after frontier scan + utilisation audit.
-
-- E2 Graphiti was zero-utilised in production (no queries that changed an answer in 3 weeks). Cost was ~£5/ingest with no observable benefit at single-user scale.
-- Memory layer is now flat-markdown + E1 sqlite-vec + Anthropic's native client-side memory tool (`memory_20250818`).
-- E2 numbering preserved as a deprecated extension slot for compatibility with v29-installed deployments. There is no "install E2" path going forward.
-- Added Windows install commands alongside Mac for every extension's install / dependency / uninstall section. Established dual-OS coverage as the standard going forward.
-- Added a contents-at-a-glance section under "Pick your mode" so users see what each mode includes before choosing.
-- Added a post-install `SETUP-CHECKLIST.md` requirement so first-time users on a fresh session can verify their setup is complete (planned for v30.1).
-
-### v29 (2026-04-21)
-Added five Advanced-mode extensions:
-- **E1** sqlite-vec + Nomic-embed semantic search over markdown memory
-- **E2** Graphiti MCP server with FalkorDB (temporal knowledge graph) - DEPRECATED in v30, see release note above
-- **E3** Agent Teams + channel.md whiteboard pattern
-- **E4** Observability audit layer (PostToolUse JSONL + live viewer)
-- **E5** Hardened safety gate (protected-branch hard-blocks, word-boundary regex)
-
-Split the blueprint into Core + Extensions. Added Mode chooser (Simple vs Advanced).
-
-Lifetime commits: 11 on Cortana main during the v29 session.
-
-### v28 (2026-04 early)
-- Added crew of 9 agents (was 6 in v27)
-- Added Warren (trading), Elena (business), Chase (human dynamics)
-- Added RemoteTrigger routines (morning digest, frontier scan, Sunday memory dream, Monday corrections review)
-- Agent-team spawning rules for Claude Max 20x plan
-- Batch sync via worktree parallelism
-- Verification rule after every GitHub auto-deploy
-
-### v27 (2026-03)
-- Renamed from `cortana-universal-v27.md` to split personal/public blueprints
-- First fully self-installing version (hand to a fresh Claude Code session, it builds the system)
-- Memory system + Telegram + NotebookLM Brain integration
+## Changelog
+
+### v30 - production-ready public release
+- Self-installing wizard with Q0 preflight (Node 18, Git, jq, sqlite3, bun) as a hard gate
+- Mode picker (Simple vs Advanced) with full pre-decision content
+- Dual-OS coverage on every install / setup / runtime command (Mac + Windows / Git Bash / WSL2)
+- Bot creation walkthrough with @BotFather expanded to 8 explicit steps
+- 8 skill template bodies (sync, maintenance, orchestration, brain, safety, observability, blueprint-updates, optional youtube-queue)
+- 30+ scripts and hooks templated with placeholders
+- 40+ starter feedback memory seeds shipping a behavioural baseline from day-zero
+- 9 CLAUDE.md command handlers with explicit empty-state branches (no silent crashes)
+- SETUP-CHECKLIST: 12 numbered Steps + 5 Advanced sub-steps walking from "wizard done" to "first memory committed and verified"
+- USER-GUIDE with B1-B4 troubleshooting blocks
+- Status emoji convention (🔹 done / 🔸 running / 🔸🔴 blocked) baked into the orchestrator's voice
+- Customisation-preserving upgrade walkthrough (3-way merge: pristine + customised + user-added)
+- DIAGNOSTIC-CHECKLIST.md fallback when any generation step fails
+- E2 Graphiti dropped (single-user knowledge graphs underutilised; flat markdown + sqlite-vec semantic search is the better path)
+- Day-1 user experience docs included in the wizard output: SETUP-CHECKLIST, USER-GUIDE, BACKUP-AND-RECOVERY, FIRST-WEEK, PITFALLS, MEMORY-HYGIENE
+
+### v29 - five extensions split out
+- Core stays minimal (orchestrator + agents + Telegram + NotebookLM Brain + safety gate)
+- Extensions opt-in: E1 sqlite-vec semantic memory, E3 Agent Teams shared whiteboard, E4 Observability audit layer, E5 Hardened safety gate
+- Per-extension install + uninstall scripts, version-stamp file `.{{orchestrator_lower}}-blueprint-version`
+
+### v28 - additional specialist agents
+- Roster expanded to 9 specialists (engineering, research, growth, deploy, writing, trading, business, human dynamics, plus orchestrator)
+
+### v27 - first stable
+- Master orchestrator + memory layer + Telegram + NotebookLM Brain
+- Markdown-first memory pattern (memory/ as source of truth, sqlite-vec optional)
 
 ### Earlier versions
-Not documented. Core loop + safety gate + routing table existed from v1 onwards.
+Not documented. Core loop + safety gate + routing table existed from v1.
 
 ---
 
@@ -2303,10 +2066,10 @@ For each agent role in the final roster, ask:
 
 Give a suggestion for each one based on the role. Examples:
 - Engineer: "Kai, Atlas, Forge, or anything you like"
-- Researcher: "Nadia, Scout, Sage, Aria"
-- Marketing: "Rio, Harper, Blaze, Zara"
+- Researcher: "Rose, Scout, Sage, Aria"
+- Marketing: "Natalie, Harper, Blaze, Zara"
 - DevOps: "Marco, Bolt, Flux, Sigma"
-- Writer: "Jules, Pen, Quinn, Muse"
+- Writer: "Isabella, Pen, Quinn, Muse"
 - Business: "Elena, Sterling, Blake, Morgan"
 - Trading: "Warren, Quant, Ledger, Apex"
 - Lead Engineer: "Kai, Chief, Principal, Arch"
@@ -2314,12 +2077,12 @@ Give a suggestion for each one based on the role. Examples:
 - Backend: "Core, Node, Rust, Stack"
 - QA: "Test, Guard, Proof, Check"
 - Security: "Shield, Vault, Sentinel, Cipher"
-- Technical Writer: "Docs, Scribe, Jules, Ink"
+- Technical Writer: "Docs, Scribe, Quill, Ink"
 
 You can ask them to name multiple agents at once to save time:
 > Let's name your agents. Give me names for each role (or hit enter for the suggestion):
 > - Engineer (suggestion: Kai):
-> - Researcher (suggestion: Nadia):
+> - Researcher (suggestion: Rose):
 > [etc.]
 
 Store the complete roster as `{{agents}}` -- a list of `{role, name}` pairs.
