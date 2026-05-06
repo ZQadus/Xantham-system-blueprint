@@ -55,7 +55,7 @@ If you see references to `your orchestrator` or `cortana` inside the blueprint -
 2. Paste this single line into the Claude prompt:
 
    ```
-   Read the Xantham System v30 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v30.md and run the full setup wizard. Walk me through every step, ask me one question at a time, and don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
+   Read the Xantham System v31 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v31.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-templates-v31.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
    ```
 
 3. The wizard handles everything interactively from there. It will:
@@ -74,14 +74,16 @@ If you see references to `your orchestrator` or `cortana` inside the blueprint -
 
 ## Files in this repo
 
-- **`xantham-system-v30.md`** — the canonical blueprint (~5800 lines). Includes the install wizard, every template file, day-1 user experience docs, customisation-preserving upgrade walkthrough, and the architecture reference.
+- **`xantham-system-v31.md`** (~4900 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
+- **`xantham-templates-v31.md`** (~9100 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
+- **`archive/xantham-system-v30.md`** is the previous monolithic version (kept for upgrade-from-v30 reference).
 
-Future versions ship as `xantham-system-v31.md`, `v32.md`, etc. — never overwrite an existing version. The latest is whatever has the highest version number on `main`.
+Versions ship cumulatively. The latest pair on `main` is what the wizard install command points at.
 
 ## Modes
 
-- **Simple mode** — orchestrator + 9 agents + Telegram + NotebookLM Brain + basic safety gate. Set up in ~20 minutes. £0/month plus your Claude Max subscription.
-- **Advanced mode** — Simple plus four extensions: E1 semantic memory (sqlite-vec), E3 Agent Teams, E4 Observability audit, E5 Hardened safety gate. ~45-60 minutes. Still £0/month — all extensions are local + free.
+- **Simple mode.** Orchestrator + 9 agents + Telegram + NotebookLM Brain + basic safety gate. Set up in ~20 minutes. £0/month plus your Claude.ai subscription.
+- **Advanced mode.** Simple plus the v31 power-user stack: E1 semantic memory (sqlite-vec + Ollama), E3 Agent Teams (live shared whiteboard), E4 Observability (per-tool-call audit JSONL + live viewer), E5 Hardened safety gate, plus the Amazing Memory layer (cognitive overlay with episodic + semantic + procedural memory, Profile bucket, dream consolidation pass, active-recall pre-turn entity lookup), plus auth failover (the canary that flips your Claude Code over to a paid API key if your Max OAuth ever suspends). ~45-60 minutes setup. £0/month for the local stack. ~$4/month if you enable the optional `dream` consolidation pass (~$1 per weekly run on Anthropic API).
 
 ## Both Mac and Windows are supported
 
@@ -89,7 +91,15 @@ Every install command in the blueprint has both Mac and Windows versions side by
 
 ## Versioning
 
-The repo name doesn't include a version. The file inside does. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-xantham.sh` from your repo and the customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
+The repo name doesn't include a version. The files inside do. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-xantham.sh` from your installed orchestrator. The customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
+
+## What's new in v31
+
+- **Amazing Memory layer.** Cognitive overlay (episodic / semantic / procedural buckets, Karpathy three-bucket pattern with the Profile bucket as a first-class third leg), dream consolidation pass with hard $1 cost cap and dry-run default, pre-turn active-recall entity lookup with sub-50ms warm cache.
+- **Auth failover.** A 4th SLO canary watches your Claude Code OAuth health. If it degrades 3 times running, the system flips you over to a separately-billed API key without losing the session. Caps any future Anthropic OAuth outage from days to minutes.
+- **Wizard split.** v31 ships as two files. Landing (what humans read) plus templates appendix (what the install consumes). The single-monolith pattern is archived at `archive/xantham-system-v30.md`.
+- **Pre-hoc reflection skill.** Cortana now runs a 6-stage chain-pattern-interrupt before dispatching agents on fuzzy briefs or first-time multi-agent fan-outs. Catches wrong-direction dispatches before tokens are spent.
+- **Hardened safety gate.** Force-push to protected branches becomes physically impossible, no approval can unlock it. CLI-rm whitelist covers npm rm, yarn remove, pnpm rm, brew uninstall, vercel env rm, etc.
 
 ## Sharing
 
