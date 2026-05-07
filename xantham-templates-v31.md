@@ -3612,7 +3612,7 @@ File path: `.claude/skills/{{orchestrator_lower}}-orchestration/SKILL.md`
 ````markdown
 ---
 name: {{orchestrator_lower}}-orchestration
-description: Use BEFORE dispatching 2+ agents in parallel, creating Agent Teams, handling multi-file work (3+ files), adding new features, new dependencies, forking many subagents from one parent task, or any complex orchestration task. Loads 18 orchestration habits that prevent under-specified briefs, watchdog kills, plan-less feature sprints, missed security reviews, and blank-dispatched fan-outs. Also covers the Council pattern (3-agent anonymised peer-ranked debate, orchestrator-invoked only, never exposed as a slash command) for high-stakes ambiguous decisions, plus temporal / cross-entity graph queries, semantic memory retrieval, and multi-agent channel coordination, plus the pre-hoc reflection cross-link (habit 18) for fuzzy briefs and first-time multi-agent fan-outs.
+description: Use BEFORE dispatching 2+ agents in parallel, creating Agent Teams, handling multi-file work (3+ files), adding new features, new dependencies, forking many subagents from one parent task, or any complex orchestration task. Loads 18 orchestration habits that prevent under-specified briefs, watchdog kills, plan-less feature sprints, missed security reviews, and blank-dispatched fan-outs. Also covers the Council pattern (3-member or 4-member anonymised peer-ranked debate, orchestrator-invoked only, never exposed as a slash command, 4-member fires when the question is product / market / customer-facing with mandatory competitor-scan evidence base) for high-stakes ambiguous decisions, plus temporal / cross-entity graph queries, semantic memory retrieval, and multi-agent channel coordination, plus the pre-hoc reflection cross-link (habit 18) for fuzzy briefs and first-time multi-agent fan-outs.
 ---
 
 # Orchestration habits
@@ -3690,18 +3690,26 @@ The pattern fails most often on research fan-outs. "Each agent take one competit
 
 ## 17. Council pattern: invoke for high-stakes ambiguous decisions
 
-The orchestrator can spin up a 3-agent council for a single high-stakes ambiguous decision. Each council member writes its position independently against the same brief, then receives the other two positions anonymised (no agent attribution) and ranks them. The orchestrator merges the rankings into a final position. Per Karpathy's llm-council pattern (November 2025) and the Claude Code plugin ecosystem.
+The orchestrator can spin up a council (3 OR 4 members depending on question type) for a single high-stakes ambiguous decision. Each council member writes its position independently against the same brief. Their identities are stripped before peer review. A Chairman synthesises a single recommendation with dissent surfaced. Per Karpathy's llm-council pattern (November 2025) adapted to Claude Code parallel dispatch.
+
+Two council shapes:
+
+- **3-member (default)** for pure-internal questions: architecture choice, security posture, naming, deprecation timing, internal tool design. Slots A, B, C are 3 specialist opinions, ranked head-to-head.
+- **4-member (product councils)** for product / market / customer-facing questions: build vs don't, ship to public, customer pricing, market positioning, App Store / Play / Web target, B2C / B2B, public copy, GTM. Slots A, B, C are 3 opinion lenses (e.g. market / technical / business). Slot D is a MANDATORY competitive-scan EVIDENCE base, run by a research-capable agent. D is NOT ranked, it is the ground truth A / B / C must reconcile against. Skipping D when the question is product-flavoured is a bug, not an option.
+
+Product-trigger keywords that force 4-member: build vs don't, ship to public, customer pricing, market positioning, "is this a good idea", App Store / Play / Web target, B2C / B2B, monetise, niche, audience, public repo, GTM, externally-shipped copy.
 
 Trigger conditions:
 - Architectural choice with hard-to-reverse consequences (database schema, auth model, public API surface).
 - The user is split between two paths and asks for a recommendation.
 - The brief is ambiguous AND the action is irreversible.
+- The user explicitly asks "council it" / "get the council on it" / "second opinion" / "another angle".
 
 Anti-triggers:
 - Routine implementation work where best practice is already known.
 - Anything where the cost of being wrong is a 5-minute rewrite.
 
-The council pattern is INTERNAL to the orchestrator. It is not exposed as a slash command. Public installs should not surface a `/council` command for the user. The orchestrator decides when to invoke based on the situation, runs the council in the background, and reports back with a single recommendation that includes the dissenting views.
+The council pattern is INTERNAL to the orchestrator. It is not exposed as a slash command. Public installs should not surface a `/council` command for the user. The orchestrator decides when to invoke based on the situation, runs the council in the background, and reports back with a single recommendation that includes the dissenting views. For 4-member councils, the orchestrator names the council shape in the reply ("Convened a 4-member council on this because [product trigger]. Three opinion lenses + competitive scan.") so the user knows what coverage they got.
 
 ## 18. Pre-hoc reflection on fuzzy briefs and first-time multi-agent fan-outs
 
