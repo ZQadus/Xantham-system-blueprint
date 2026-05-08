@@ -953,7 +953,7 @@ echo "=== $passed/$total checks passed ==="
 
 ## Template: scripts/verify-runtime-perms.sh
 
-`data/runtime/*` files hold secrets (Telegram bot token, persona state) and per-turn contracts. They MUST be mode 0600 - world-readable runtime files mean any local user can lift the bot token. This script audits them.
+`data/runtime/*` files hold secrets (Telegram bot token, session state) and per-turn contracts. They MUST be mode 0600 - world-readable runtime files mean any local user can lift the bot token. This script audits them.
 
 ```bash
 #!/usr/bin/env bash
@@ -4196,7 +4196,7 @@ User-facing triggers:
 - Summaries: `data/youtube-summaries/<video_id>.md` (one per watched video, committed for archive).
 - Auto-add hook: any messaging-channel message containing a `youtu.be/` or `youtube.com/` URL → appended to the queue automatically by `.claude/hooks/messaging-reply-reminder.sh`. Idempotent on `video_id`.
   - **Single video URL** → calls `add`.
-  - **Playlist URL** (contains `list=`) → calls `add-playlist`, pulls latest 15 via `yt-dlp --flat-playlist --playlist-end=15`, dedups, saves the playlist URL for future `drain`.
+  - **Playlist URL** (contains `list=`) → calls `add-playlist`, pulls latest 30 via `yt-dlp --flat-playlist --playlist-end=30`, dedups, saves the playlist URL for future `drain`. If more than 30 new videos have been added since last drain, raise the limit on the spot to cover them all. Better to over-fetch than miss any.
 - Manual single video: `bash scripts/youtube-queue.sh add "<url>" [--source <label>]`.
 - Manual playlist add: `bash scripts/youtube-queue.sh add-playlist "<url>" [--limit N] [--source <label>]`.
 - Refresh saved playlists: `bash scripts/youtube-queue.sh drain [--limit N]` re-pulls the latest N from every saved playlist.
@@ -6665,7 +6665,7 @@ exit 0
 #   - TTL: 3600s (1 hour). Stale entries checked on-read, not pruned proactively.
 #   - awk-based lookup for speed (no new dependencies).
 #
-# The persona carveout invariant holds because memory-search uses sqlite-vec which
+# The dot-dir carveout invariant holds because memory-search uses sqlite-vec which
 # inherits the dot-prune from embed-memories.py walk_markdown. Cached payloads
 # come from sqlite-vec, so the carveout transitively holds.
 set -euo pipefail
@@ -7052,7 +7052,7 @@ mkdir -p "$PROPOSAL_DIR"
 PROPOSAL_FILE="$PROPOSAL_DIR/${TODAY_COMPACT}.md"
 
 # --- Collect files --------------------------------------
-# Persona carveout: skip any dot-prefixed dir (memory/.<persona>/)
+# Private dot-dir carveout: skip any dot-prefixed dir (memory/.<name>/)
 # so persona-scoped content never participates in dream consolidation.
 declare -a FILES
 while IFS= read -r f; do
@@ -7247,7 +7247,7 @@ fi
 
 ## Template: scripts/dream/phase1-orient.sh
 
-`Phase 1 of dream consolidation. Reads memory/ tree state and emits a compact JSON state map for downstream phases. Counts memory files per semantic type (feedback / project / reference / note / user), episodic, agent-memory, sqlite-vec chunks, profile last_updated, recent reflections list, and corrections-promoted count. Output is one line of JSON via python3 for safe escaping. EXCLUDES dot-prefixed dirs under memory/ for the persona carveout. Designed to pipe into phase2-gather.sh.`
+`Phase 1 of dream consolidation. Reads memory/ tree state and emits a compact JSON state map for downstream phases. Counts memory files per semantic type (feedback / project / reference / note / user), episodic, agent-memory, sqlite-vec chunks, profile last_updated, recent reflections list, and corrections-promoted count. Output is one line of JSON via python3 for safe escaping. EXCLUDES dot-prefixed dirs under memory/ for the dot-dir carveout. Designed to pipe into phase2-gather.sh.`
 
 ```bash
 #!/usr/bin/env bash
@@ -7259,13 +7259,13 @@ fi
 # Output: JSON map on stdout. Designed to be piped to phase2-gather.sh or
 # stored at data/dream-runs/<turn-id>/orient.json.
 #
-# Counts EXCLUDE memory/.<persona>/ (persona carveout). Uses find -prune dot-pattern.
+# Counts EXCLUDE memory/.<name>/ (dot-dir carveout). Uses find -prune dot-pattern.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-# Total memory files (recursive, dot-pruned per persona carveout)
+# Total memory files (recursive, dot-pruned per dot-dir carveout)
 MEM_FILES=$(find memory -type d -name '.*' -prune -o -type f -name "*.md" -print 2>/dev/null | wc -l | tr -d ' ')
 
 # Per-type counts. Semantic types live under memory/semantic/<type>/
@@ -7525,7 +7525,7 @@ echo "End Phase 2 signal."
 
 ## Template: scripts/dream/phase3-consolidate.sh
 
-`Phase 3 of dream consolidation. Reads PHASE1_JSON + PHASE2_MD env vars set by the orchestrator, builds an LLM prompt with hard rules embedded (carveouts: never propose changes to memory/.<persona>/ or memory/profile_<user>.md), POSTs to api.anthropic.com/v1/messages with claude-haiku-4-5-20251001 by default, parses the response, post-hoc filters any line referencing the carveouts (defense-in-depth), reports actual cost. Modes: --dry-run (default, stub output unless DREAM_DRYRUN_USE_API=1) and --apply (real LLM call but does NOT auto-write, output gated through a separate apply-dream-proposal.sh reviewer). Cost cap refuses any input over 100K tokens.`
+`Phase 3 of dream consolidation. Reads PHASE1_JSON + PHASE2_MD env vars set by the orchestrator, builds an LLM prompt with hard rules embedded (carveouts: never propose changes to memory/.<name>/ or memory/profile_<user>.md), POSTs to api.anthropic.com/v1/messages with claude-haiku-4-5-20251001 by default, parses the response, post-hoc filters any line referencing the carveouts (defense-in-depth), reports actual cost. Modes: --dry-run (default, stub output unless DREAM_DRYRUN_USE_API=1) and --apply (real LLM call but does NOT auto-write, output gated through a separate apply-dream-proposal.sh reviewer). Cost cap refuses any input over 100K tokens.`
 
 ```bash
 #!/usr/bin/env bash
@@ -7543,7 +7543,7 @@ echo "End Phase 2 signal."
 #            is gated through a separate apply-dream-proposal.sh reviewer.
 #
 # Hard rules:
-#   - NEVER touches memory/.<persona>/ (persona carveout)
+#   - NEVER touches memory/.<name>/ (dot-dir carveout)
 #   - NEVER touches memory/profile_<user>.md (Profile bucket; managed by
 #     update-profile.sh)
 #   - Cost cap: refuse if estimated input > 100K tokens
@@ -7634,7 +7634,7 @@ Output ONLY markdown with these sections (each can be empty if nothing applies):
 - One per line: "PROMOTE-TO-PROCEDURAL memory/path/X.md - reason"
 
 Hard rules (the reviewer will reject any output that violates these):
-- NEVER propose changes to memory/.{{persona_name_lower}}/ (gitignored persona carveout)
+- NEVER propose changes to memory/.{{private_dir_name}}/ (gitignored dot-dir carveout)
 - NEVER propose changes to memory/profile_{{user_name_lower}}.md (Profile bucket, managed by update-profile.sh)
 - Be conservative: only propose changes you are confident about
 - Cite specific evidence from the signal report or memory files
@@ -7685,10 +7685,10 @@ except Exception as e:
 
   # Post-hoc carveout enforcement: filter any line that mentions the
   # forbidden paths. This is the second line of defense (the prompt is
-  # the first). If the model proposes anything in .<persona>/ or profile_<user>.md
+  # the first). If the model proposes anything in .<name>/ or profile_<user>.md
   # we drop the line + emit a warning at the bottom.
-  FILTERED=$(echo "$CONTENT" | grep -v 'memory/\.{{persona_name_lower}}/' | grep -v 'profile_{{user_name_lower}}\.md' || true)
-  DROPPED=$(echo "$CONTENT" | grep -cE "memory/\\.{{persona_name_lower}}/|profile_{{user_name_lower}}\\.md" || true)
+  FILTERED=$(echo "$CONTENT" | grep -v 'memory/\.{{private_dir_name}}/' | grep -v 'profile_{{user_name_lower}}\.md' || true)
+  DROPPED=$(echo "$CONTENT" | grep -cE "memory/\\.{{private_dir_name}}/|profile_{{user_name_lower}}\\.md" || true)
 
   echo "$FILTERED"
 
@@ -7696,7 +7696,7 @@ except Exception as e:
     echo
     echo "## Carveout enforcement"
     echo
-    echo "Dropped $DROPPED proposal line(s) that referenced memory/.{{persona_name_lower}}/ or profile_{{user_name_lower}}.md (out of scope for phase 3)."
+    echo "Dropped $DROPPED proposal line(s) that referenced memory/.{{private_dir_name}}/ or profile_{{user_name_lower}}.md (out of scope for phase 3)."
   fi
 
   # Cost (rough estimate)
@@ -7759,14 +7759,14 @@ if [ "$MODE" = "apply" ]; then
 fi
 ```
 
-Note: this template uses `{{persona_name_lower}}` for the persona-carveout dot-dir token. If the install does not configure a persona alias, set `{{persona_name_lower}}` to a sentinel like `nopersona` so the grep filters never match a real path. The wizard substitutes this from Q-block answers.
+Note: this template uses `{{private_dir_name}}` for the user-private dot-dir carveout token. If the install does not configure a private dot-dir, leave the value as the sentinel `noprivatedir` so the grep filters never match a real path. The wizard substitutes this from Q-block answers.
 
 ---
 
 
 ## Template: scripts/dream/phase4-prune.sh
 
-`Phase 4 of dream consolidation. Regenerates memory/MEMORY.md as a flat-line index from the cognitive overlay (Profile + semantic types + episodic + agent-memory + procedural pointer), capped at 200 lines. Hard-strips any line referencing the persona-carveout dot-dir before cap. Writes a per-run changes.md log to data/dream-runs/<TURN_ID>/ containing the phase 3 proposal verbatim for audit. Modes: --dry-run (default, no commit) and --commit (regen + commit + push, post-commit hook re-embeds via embed-memories.py).`
+`Phase 4 of dream consolidation. Regenerates memory/MEMORY.md as a flat-line index from the cognitive overlay (Profile + semantic types + episodic + agent-memory + procedural pointer), capped at 200 lines. Hard-strips any line referencing the dot-dir-carveout dot-dir before cap. Writes a per-run changes.md log to data/dream-runs/<TURN_ID>/ containing the phase 3 proposal verbatim for audit. Modes: --dry-run (default, no commit) and --commit (regen + commit + push, post-commit hook re-embeds via embed-memories.py).`
 
 ```bash
 #!/usr/bin/env bash
@@ -7782,7 +7782,7 @@ Note: this template uses `{{persona_name_lower}}` for the persona-carveout dot-d
 #   --commit: regenerate + write + commit + push (post-commit hook re-embeds)
 #
 # Hard rules:
-#   - MEMORY.md MUST exclude memory/.<persona>/ (persona carveout)
+#   - MEMORY.md MUST exclude memory/.<name>/ (dot-dir carveout)
 #   - MEMORY.md cap: 200 lines including the header
 #   - changes.md MUST contain phase 3 proposal verbatim for audit trail
 set -euo pipefail
@@ -7813,7 +7813,7 @@ cat > "$TMP_MEM" <<HEADER
 <!-- Auto-generated by scripts/dream/phase4-prune.sh on $DATE.
      Hand-edits will be overwritten on the next dream run. Source of truth
      is the individual memory files under memory/{semantic,episodic,procedural,agent-memory}/.
-     Cap: 200 lines. Excludes memory/.{{persona_name_lower}}/ (persona carveout). -->
+     Cap: 200 lines. Excludes memory/.{{private_dir_name}}/ (dot-dir carveout). -->
 # {{orchestrator_name}} Memory Index
 
 HEADER
@@ -7832,7 +7832,7 @@ for type in feedback project reference note user; do
   [ "$count" -eq 0 ] && continue
   printf '## Semantic: %s (%d)\n\n' "$type" "$count" >> "$TMP_MEM"
   find "$dir" -type f -name "*.md" 2>/dev/null | sort | while IFS= read -r f; do
-    case "$f" in *"/.{{persona_name_lower}}/"*) continue ;; esac
+    case "$f" in *"/.{{private_dir_name}}/"*) continue ;; esac
     desc=$(awk '/^description:/ {sub(/^description:[[:space:]]*/,""); print; exit}' "$f" | head -c 80)
     name=$(basename "$f" .md)
     printf -- '- %s. %s\n' "$name" "${desc:-(no desc)}" >> "$TMP_MEM"
@@ -7846,7 +7846,7 @@ if [ -d memory/episodic ]; then
   if [ "$count" -gt 0 ]; then
     printf '## Episodic (%d, showing 10 most recent)\n\n' "$count" >> "$TMP_MEM"
     find memory/episodic -type f -name "*.md" 2>/dev/null | sort -r | head -10 | while IFS= read -r f; do
-      case "$f" in *"/.{{persona_name_lower}}/"*) continue ;; esac
+      case "$f" in *"/.{{private_dir_name}}/"*) continue ;; esac
       name=$(basename "$f" .md)
       printf -- '- %s\n' "$name" >> "$TMP_MEM"
     done
@@ -7860,7 +7860,7 @@ if [ -d memory/agent-memory ]; then
   printf '## Agent memory (%d)\n\n' "$count" >> "$TMP_MEM"
   for d in memory/agent-memory/*/; do
     [ -d "$d" ] || continue
-    case "$d" in *"/.{{persona_name_lower}}/"*) continue ;; esac
+    case "$d" in *"/.{{private_dir_name}}/"*) continue ;; esac
     agent=$(basename "$d")
     afiles=$(find "$d" -type f -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
     printf -- '- %s (%d files)\n' "$agent" "$afiles" >> "$TMP_MEM"
@@ -7876,8 +7876,8 @@ if [ -f memory/procedural/README.md ]; then
   echo "" >> "$TMP_MEM"
 fi
 
-# Defense-in-depth: strip any line referencing memory/.<persona>/ before cap
-grep -v "memory/\\.{{persona_name_lower}}/\|memory/.{{persona_name_lower}}/" "$TMP_MEM" > "$TMP_MEM.clean" && mv "$TMP_MEM.clean" "$TMP_MEM"
+# Defense-in-depth: strip any line referencing memory/.<name>/ before cap
+grep -v "memory/\\.{{private_dir_name}}/\|memory/.{{private_dir_name}}/" "$TMP_MEM" > "$TMP_MEM.clean" && mv "$TMP_MEM.clean" "$TMP_MEM"
 
 # Cap at 200 lines (truncate if over)
 LINES=$(wc -l < "$TMP_MEM" | tr -d ' ')
@@ -8024,11 +8024,11 @@ fi
 # Files now live under memory/semantic/<type>/ post-cognitive-overlay-rollout.
 # Top-level pathspecs kept alongside for the transition window where some
 # memories may still exist at memory/<type>_*.md.
-# Persona carveout enforced via :(exclude).
+# Private dot-dir carveout enforced via :(exclude).
 new_feedback=$(git -C "$ORCH_DIR" log --since='24 hours ago' --name-only --pretty=format: -- \
   ':(glob)memory/**/feedback_*.md' ':(glob)memory/**/user_*.md' ':(glob)memory/**/profile_*.md' \
   'memory/feedback_*.md' 'memory/user_*.md' 'memory/profile_*.md' \
-  ':(exclude)memory/.{{persona_name_lower}}/**' \
+  ':(exclude)memory/.{{private_dir_name}}/**' \
   2>/dev/null | sort -u | grep -v '^$' || true)
 
 # Section 4. explicit self-statements heuristic (very simple regex; narrative judgment lives in the orchestrator)

@@ -136,7 +136,7 @@ bash scripts/update-profile.sh
 
 Mid-session updates are inline edits when the user states something profile-shaped: a new role, a new constraint, a new preference. Don't update on every minor signal, only when the change matters cross-session.
 
-Carveout: any persona-modeed subdirectory under `memory/.<alias>/` is gitignored AND dot-pruned by every iterator. Personas the user runs in private mode never surface in public exports, never feed the semantic index, never appear in MEMORY.md.
+Carveout: any dot-prefixed subdirectory under `memory/.<name>/` (e.g. `memory/.private/`) is gitignored AND dot-pruned by every iterator. Files the user keeps in such a private subdirectory never surface in public exports, never feed the semantic index, never appear in MEMORY.md.
 
 ### Telegram integration
 - `claude-plugins-official/telegram` MCP plugin (a plugin is a bundle of skills + commands installed through the Claude Code app; an MCP server is a pre-built connector that lets your agents talk to outside services like Telegram, Gmail, your database, Vercel, and so on)
@@ -754,7 +754,7 @@ A schtasks one-liner does the same thing if you prefer the CLI:
 schtasks /Create /SC WEEKLY /D SUN /ST 09:00 /TN "xantham-maintain-weekly" /TR "\"C:\Program Files\Git\bin\bash.exe\" -c \"cd C:/Users/<you>/Documents/MyAgent && bash scripts/maintain.sh\""
 ```
 
-Subdir-recursion + dot-prune are baked into every iterator. `find memory/ -name "*.md" -not -path "*/.*"` is the canonical pattern. Any new script that reads memory MUST follow it, otherwise persona carveouts and gitignored subdirectories leak into the index.
+Subdir-recursion + dot-prune are baked into every iterator. `find memory/ -name "*.md" -not -path "*/.*"` is the canonical pattern. Any new script that reads memory MUST follow it, otherwise dot-dir carveouts and gitignored subdirectories leak into the index.
 
 **Uninstall**
 - Remove `.claude/skills/{{orchestrator_lower}}-memory/`
@@ -1613,7 +1613,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 
 ## What is NOT in git (must be backed up separately)
 
-- `data/runtime/` (Telegram bot token, persona state, lock files) - gitignored, contains secrets
+- `data/runtime/` (Telegram bot token, session state, lock files) - gitignored, contains secrets
 - `data/vector-memory.db` (sqlite-vec semantic index) - gitignored, regenerable but takes minutes
 - `~/.claude/` (Claude Code CLI auth, hook installs at user scope) - never in any repo
 - Shell profile (`~/.zshrc` / `~/.bashrc` / PowerShell `$PROFILE`) - terminal aliases live here
@@ -1622,7 +1622,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 ## Recommended backup approach
 
 1. **Push the repo to GitHub on every meaningful change** (the post-commit hook + your sync rhythm handle this if you stay disciplined)
-2. **Each Sunday:** ask your agent: "back up my runtime folder." It zips `data/runtime/` (which holds your Telegram bot token, persona state, lock files) and drops a date-stamped copy at `~/Documents/<your-orchestrator>-backups/`. To restore, ask: "restore runtime from last Sunday's backup." If you'd rather hold the backup off-machine, copy the dated zip to an encrypted external drive or a password manager attachment.
+2. **Each Sunday:** ask your agent: "back up my runtime folder." It zips `data/runtime/` (which holds your Telegram bot token, session state, lock files) and drops a date-stamped copy at `~/Documents/<your-orchestrator>-backups/`. To restore, ask: "restore runtime from last Sunday's backup." If you'd rather hold the backup off-machine, copy the dated zip to an encrypted external drive or a password manager attachment.
 3. **Document your shell aliases** in this file so you can recreate them on a fresh machine.
 
 ## Restoring on a new Mac
@@ -1957,7 +1957,7 @@ Every box matters. The Windows alias quirk is the most common silently-broken it
 
 ## Do not delete `data/runtime/`
 
-That directory has your Telegram bot token, persona state, and lock files. Losing it forces you to re-pair everything. Back it up weekly per BACKUP-AND-RECOVERY.md.
+That directory has your Telegram bot token, session state, and lock files. Losing it forces you to re-pair everything. Back it up weekly per BACKUP-AND-RECOVERY.md.
 
 ## Do not run `git push --force` on main
 
@@ -1995,7 +1995,7 @@ The agent saves memory automatically. You usually don't need to think about it. 
 ## What is gitignored (locally only)
 
 - `data/vector-memory.db` (regenerable from `bash scripts/embed-memories.sh`)
-- `data/runtime/*` (secrets, persona state, lock files)
+- `data/runtime/*` (secrets, session state, lock files)
 - `data/audit/*.jsonl` (you can archive these via `bash scripts/audit-archive.sh 30` to push older ones into git)
 - `data/youtube-watch-queue.jsonl` and `data/youtube-playlists.jsonl` (local ops state)
 - `infra/*/.env` (API keys)
@@ -2158,7 +2158,7 @@ These are the variables you will collect. Every template in the companion file `
 | `{{project_root}}` | string (absolute path to the repo root, may differ from project_path if Claude is run from a subdir) | Derived: `git rev-parse --show-toplevel`, fall back to `{{project_path}}` |
 | `{{telegram_chat_id}}` | string (the user's Telegram chat ID) | Q6 (conditional, captured on first /start to the bot) |
 | `{{notebook_id}}` | string (Google NotebookLM notebook ID for the Brain) | Q10 (conditional, if brain=yes; user pastes from notebooklm.google.com URL) |
-| `{{persona_name_lower}}` | string (persona alias for the off-books carveout, e.g. `voice`) | Default `nopersona` if no persona alias configured. Used as the dot-dir basename in `memory/.<persona>/` and as a grep filter in dream phase 3 + 4. Defaulting to `nopersona` ensures the filter never matches by accident when no alias exists. |
+| `{{private_dir_name}}` | string (basename for a user-private dot-prefixed subdirectory under `memory/`) | Default `noprivatedir` if not configured. Used as the dot-dir basename in `memory/.<name>/` and as a grep filter in dream phase 3 + 4. Defaulting to `noprivatedir` ensures the filter never matches by accident when no private dir exists. |
 | `{{person_1}}` through `{{person_5}}` | string (named persons to extract during active-recall, e.g. spouse, partner, key colleagues) | Substituted from a structured `## People` section in `profile_<user>.md` if present. Empty slots are skipped by the loop, so unused tokens stay benign. |
 | `{{user_email_literal}}` | string (real email for export-blueprint sed source) | Empty at install. User fills in once post-install when they first run `scripts/export-blueprint.sh`. |
 | `{{user_name_literal}}` | string (real full name for export-blueprint sed source) | Empty at install. Same one-time fill-in pattern. |
@@ -4811,7 +4811,7 @@ rm memory/MEMORY.md.pre-regen
 
 **Time:** under 1 minute regardless of corpus size. The index regen reads frontmatter only, not bodies.
 
-**If the regenerated index still misses files:** confirm the iterator is honoring subdir-recursion + dot-prune (`find memory/ -name "*.md" -not -path "*/.*"`). Files under gitignored subdirs (e.g. persona carveouts) are correctly excluded. Files under `memory/episodic/` and `memory/semantic/<type>/` SHOULD be included.
+**If the regenerated index still misses files:** confirm the iterator is honoring subdir-recursion + dot-prune (`find memory/ -name "*.md" -not -path "*/.*"`). Files under gitignored subdirs (e.g. dot-dir carveouts) are correctly excluded. Files under `memory/episodic/` and `memory/semantic/<type>/` SHOULD be included.
 
 #### B15.3 Partial-wizard-install reset
 
