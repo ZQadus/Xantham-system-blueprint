@@ -810,6 +810,54 @@ Run all with `for t in tests/memory/test_*.sh; do bash "$t" || echo "FAIL: $t"; 
 ---
 
 
+## Optional companion app: Obsidian
+
+Obsidian is a free local markdown editor + knowledge-graph viewer. Your `memory/`, `Library/`, `agent-memory/`, and `docs/` directories are all interconnected markdown, which is the exact format Obsidian was built for. Pointing an Obsidian vault at the project root gives you a graph view, backlinks, full-text search, and (with the Smart Connections plugin) semantic search over the whole knowledge base, all without writing a single line of code.
+
+Obsidian does NOT replace anything Cortana already does. It is a viewer for the same files Cortana reads + writes. Two interfaces over one source of truth.
+
+### Why install it
+
+- **Graph view.** Visual representation of your knowledge base. Each file is a node, each markdown link is an edge. Color groups for the major directories (feedback / project / reference / Library / agent-memory / episodic). Reveals the structure of your system in one glance.
+- **Backlinks per file.** Open any file, the right panel shows every other file that references it. Useful when refactoring memories or hunting connected concepts.
+- **Full-text search with rich previews.** Faster than `grep -r` for human reading. sqlite-vec is for agent recall; Obsidian search is for your browsing.
+- **Smart Connections plugin.** Local semantic search over the vault using Ollama. Different from sqlite-vec because it surfaces relations as you browse (right panel, real-time), not via command-line query. Two semantic-search systems on the same files: one for the orchestrator, one for you.
+- **Mobile editing (optional).** Obsidian Mobile lets you edit memory files from your phone. Not recommended for read-write if Cortana is also writing the same files (sync conflicts). View-only on mobile is fine.
+
+### What Obsidian does NOT need
+
+- Obsidian Sync (paid £4/mo). Skip it. Your vault is already in git, pushed to your private repo. Git history covers most of what Sync's version-history feature gives you.
+- Cloud accounts. Local-only is the cleanest privacy posture.
+- Always-on. Obsidian is launched on demand, not a daemon. Closing it doesn't break Cortana.
+- A separate MCP server. Cortana already has direct file access to the vault; an Obsidian MCP would couple two interfaces that work better as independent layers over the same files.
+
+### Installation (~5 min)
+
+1. **Install:** `brew install --cask obsidian` on Mac, `winget install Obsidian.Obsidian` on Windows, or download from https://obsidian.md.
+2. **Open vault:** launch Obsidian, click "Open folder as vault," navigate to your orchestrator project root (`~/Documents/{{orchestrator_name}}` or wherever you installed). Click Open. Trust the vault when prompted.
+3. **Pre-baked config (already in this repo):** the wizard ships a `.obsidian/` directory with sensible defaults (excluded files for noisy dirs, graph color groups by directory, core plugins enabled). First launch picks these up automatically. No manual settings walk needed.
+4. **Smart Connections (recommended):** Settings → Community plugins → Turn on → Browse → search "Smart Connections" → Install + Enable. On first run it'll ask which embedder. Pick **Ollama** + the `nomic-embed-text` model (matches what Cortana's E1 sqlite-vec uses, so the two semantic-search systems share an embedding space). If you don't have the model pulled yet: `ollama pull nomic-embed-text`. First-vault indexing takes 2-5 minutes.
+5. **Try it:** Cmd+G opens graph view. Cmd+Shift+F opens full-text search. Cmd+O jumps to any file by name. Click any file and the right panel shows backlinks.
+
+### Pre-baked vault config (`.obsidian/` directory)
+
+Files committed in the repo:
+- `app.json` - excluded files list (data/runtime, data/audit, telegram-history, youtube-summaries, dream-runs, node_modules, .next, plugin caches, archived agent channels). Markdown link format set to shortest. Frontmatter visible.
+- `core-plugins.json` - graph view, backlinks, outgoing-links, page-preview, outline, tag-pane, properties, file-recovery on. Templates off.
+- `community-plugins.json` - smart-connections enabled (still requires the Settings → Community plugins → Browse install on first launch; this flag just toggles activation post-install).
+- `graph.json` - color groups per directory (feedback purple, project teal, reference orange, Library coral, agent-memory green, episodic grey).
+
+Workspace state (`workspace.json`, plugin caches) is gitignored per-machine.
+
+### Why graph view sometimes looks sparse
+
+Most individual feedback / project memories are STANDALONE. They don't reference each other. The connections concentrate around hub files: `memory/MEMORY.md` (the index), `Library/<domain>/README.md` routers, `memory/profile_{{user_name_lower}}.md`. Filter the graph to one hub to see the proper hub-and-spoke. The orphan-looking nodes are real, they're just standalone rules.
+
+To see more edges: graph view's settings panel → turn on "Show unresolved links" + "Show orphans." Faded edges appear for links Obsidian's path resolver can't fully match (Cortana writes standard markdown links, not Obsidian wikilinks; resolution depends on path-from-current-file).
+
+---
+
+
 ## Changelog
 
 ### v31 - memory and meta-cognition cut
