@@ -4230,14 +4230,34 @@ User-facing triggers:
    notebooklm use {{notebook_id}}
    for s in <summary_paths>; do notebooklm source add "$s"; done
    ```
-4. **Messaging digest reply** with:
+4. **Promote learnings to the Knowledge Library.** This step runs AFTER per-video summaries land and BEFORE the messaging digest. Every YouTube video produces TWO outputs: the per-video summary (above) AND a learnings-promotion step that extracts durable insights and adds them to the right Library handbook with citation back to the video. For each video processed in this run:
+   - Re-read the per-video summary just written
+   - Identify durable learnings (named frameworks with sources, specific tactics with examples, new research / data, counter-positions correcting existing handbooks, real-world case studies)
+   - Map each learning to the right Library destination:
+     - **Existing handbook** (e.g. negotiation tactics → `Library/<domain>/<handbook>.md`): append a dated section with this format:
+       ```markdown
+       ## YouTube learning, YYYY-MM-DD (from <video_id>)
+
+       Source: <video_title> (<channel>) at <timestamp>. URL: <url>
+
+       <the learning, 100-300 words>
+
+       Why it matters here: <one paragraph on how this strengthens or corrects the existing handbook>
+       ```
+     - **No matching handbook**: save to `Library/research/<topic>-YYYY-MM-DD-from-<video_id>.md` as a standalone note
+     - **Counter to existing handbook content**: append, but explicitly name the contradiction so future readers can reconcile
+   - Default to promoting. Worst case is a marginal learning in research catch-all; future consolidation rounds prune. Missing a real insight is the worse failure.
+   - If a learning is important but no handbook fits AND research catch-all feels weak, FLAG IT in the messaging digest as "candidate for new handbook: <topic>" so {{user_name}} can decide whether the next Library round should commission it.
+5. **Messaging digest reply** with:
    - Count of videos watched this run
+   - **Count of learnings promoted to Library + which handbooks got new sections**
    - Per-video: title + 1-line TLDR + summary path
    - Combined "use to {{orchestrator_name}}" highlights: if any video suggests a system upgrade, surface it explicitly with "want me to ship X?"
-5. **Commit the summaries** so they survive (the queue file is gitignored, summaries are archive material):
+   - Any "candidate for new handbook" flags from step 4
+6. **Commit the summaries + Library changes** so they survive (the queue file is gitignored, summaries + Library are archive material):
    ```
-   git add data/youtube-summaries/*.md
-   git commit -m "youtube-queue: watched <count> videos on <date>"
+   git add data/youtube-summaries/*.md Library/**/*.md
+   git commit -m "youtube-queue: watched <count> videos on <date>, promoted <N> learnings to Library"
    git push origin main
    ```
 
@@ -4705,14 +4725,14 @@ Treat `docs/projects.md` like the index of a book. Every change to the codebase 
 
 ````markdown
 ---
-name: Status emoji convention (done, running, blocked)
-description: Three-state visual cue on every status update. 🔹 done, 🔸 running, 🔸🔴 blocked-on-user.
+name: Status emoji convention (done, running, needs user input)
+description: Three-state visual cue on every status update. 🔹 done, 🔸 in progress, 🔸🔴 ANY line that needs user input or asks them a question (decisions, approvals, choices, questions).
 type: feedback
-last_verified: 2026-04-30
+last_verified: 2026-05-07
 ttl_days: 365
 ---
 
-Use a three-state status emoji convention in every reply that reports progress.
+Use a three-state status emoji convention in every reply that reports progress OR asks a question.
 
 ## The rule
 
@@ -4720,13 +4740,13 @@ Use a three-state status emoji convention in every reply that reports progress.
 |---|---|
 | 🔹 | Done, shipped, verified |
 | 🔸 | In progress, running, dispatched |
-| 🔸🔴 | Running but blocked on user input or decision |
+| 🔸🔴 | Needs user input. Hard blockers, soft questions, decisions to make, approvals to give, "which one?" prompts. Reader's eye knows: my turn to act on this line. |
 
-Apply everywhere status varies: project updates, agent dispatch reports, sync replies, healthcheck output, channel files.
+Apply everywhere status varies: project updates, agent dispatch reports, sync replies, healthcheck output, channel files. AND on every question the orchestrator asks the user.
 
 ## Why
 
-The user's eye scans for the red component. Long status digests with 5-15 items become readable in milliseconds. The compound 🔸🔴 is reserved for real "I cannot proceed without you" blockers, never for "FYI" or "want your opinion".
+The user's eye scans for the red component. Long status digests with 5-15 items become readable in milliseconds. The compound 🔸🔴 covers ANY user-input moment so questions don't get lost in dense replies. Original 2026-04-30 scope was "blockers only." Broadened 2026-05-07 to cover all questions because soft questions were getting buried in the middle of bullet lists.
 
 ## How to apply
 
@@ -4734,6 +4754,77 @@ The user's eye scans for the red component. Long status digests with 5-15 items 
 - Running items lead with 🔸.
 - True blockers lead with 🔸🔴.
 - Mixed conventions (✅ checkmarks, ❌ Xs) get migrated to this convention on touch.
+````
+
+---
+
+### Seed: memory/feedback_telegram_message_spacing.md
+
+````markdown
+---
+name: Messaging replies need blank-line spacing between sections, never wall-of-text
+description: Phone reading collapses dense bullet lists into a wall. Add blank lines between bullet groups, between sub-sections, between distinct ideas. Replies must look airy on a phone screen, not like a text block.
+type: feedback
+last_verified: 2026-05-07
+ttl_days: 365
+---
+
+Every messaging reply (Telegram, SMS, Slack, anywhere the user reads on their phone) gets airy line spacing. Distinct ideas, distinct sub-sections, and distinct bullet groups always have a blank line between them.
+
+## The rule
+
+For every messaging reply via the reply tool:
+
+- **Between top-level sections** (each major heading): one blank line above and below
+- **Between bullet groups within a section**: one blank line between groups
+- **Between sub-bullets and the next top-level bullet**: one blank line
+- **Between any two distinct ideas** (a paragraph followed by a list, a list followed by a recommendation): one blank line
+- **Never run 3+ bullets in a row** without a visual break unless tightly related (a single rationale's three reasons, for example, can stay together)
+
+## Why
+
+Phone screens compress single line breaks more aggressively than expected. Bullet markers and emojis don't visually separate enough on a small screen. Blank lines create real whitespace that reads scannable. Most users read on phones, often one-handed, often in transit. Density makes the reply harder to act on, even when the content is right.
+
+## How to apply
+
+When in doubt, add a blank line. Phone reading rewards air over density. Code blocks are the exception (don't blank-line inside fenced code).
+
+## Edge cases
+
+- Tight bullet lists where every bullet is one short word (yes / no / maybe; option a / option b / option c): can stay packed
+- Long single-paragraph answers: still acceptable when the content is genuinely one continuous thought; just don't follow them with a dense bullet list without a blank line break
+````
+
+---
+
+### Seed: memory/feedback_at_tag_agents.md
+
+````markdown
+---
+name: Tag specialist agents with @ in messaging replies
+description: When mentioning a specialist agent in a messaging reply (engineering, research, growth, infra, writing, trading, business, human-dynamics agents, etc), prefix the name with @. Visual cue makes multi-agent dispatch summaries readable on a phone screen.
+type: feedback
+last_verified: 2026-05-06
+ttl_days: 365
+---
+
+Always prefix specialist agent names with `@` when mentioning them in a messaging reply.
+
+## The rule
+
+`@kai` not `Kai`. `@rose` not `Rose`. Applied to every agent in the crew.
+
+## Why
+
+The `@` makes it visually obvious which lines are about which agent, especially in multi-agent dispatch summaries where 3-5 agents can appear in one message. It also matches messaging-native mention syntax so reads naturally on a phone. Without the prefix, agent names blend into prose and the user has to re-read to find which line names which agent.
+
+## How to apply
+
+- `@kai` not `Kai` when announcing dispatch ("dispatching @kai on Lane A")
+- Applies in dispatch plans, status updates, post-hoc reports
+- Applies to all crew members + ad-hoc named agents (e.g. @data-strategist, @schema-designer)
+- Does NOT apply to memory file content, blueprint copy, or commit messages. Messaging replies only, where the user is the reader.
+- Sign-off attribution rules (which agent's name SIGNS the reply) still govern who signs. The @-prefix is for naming agents in the body; signing is a separate question.
 ````
 
 ---
