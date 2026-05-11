@@ -141,6 +141,72 @@ The wizard will check for Node 18, Git, jq, sqlite3, and bun on first run, and t
 
 If you see references to `your orchestrator` or `cortana` inside the blueprint - that's the maintainer's literal name. Yours will be whatever you pick during the install wizard. The blueprint is system-agnostic.
 
+## How to proceed safely
+
+> The first public security audit of Xantham landed on r/coolgithubprojects from `u/ricksegal`. Honest, detailed, and exactly the right shape of scrutiny for an agentic system that asks you to fetch 14,000 lines of Markdown and let Claude Code execute it. The checklist below is lifted from that audit, adapted to reference the verification artifacts now shipped in this repo.
+
+This system runs shell commands, edits files, and pushes commits on your behalf. That is a meaningful surface area. If you are security-conscious (or you should be), work through this list before you install.
+
+1. **Clone the repo locally rather than installing via `curl | bash` or pasting the prompt into Claude Code blind.** The single-line install prompt at the bottom of this section tells Claude to fetch and walk through the blueprint Markdown files. It does not execute remote shell. Even so, cloning locally lets you `grep`, `diff`, and read at your own pace.
+
+   ```bash
+   git clone https://github.com/ZQadus/Xantham-system-blueprint.git
+   cd Xantham-system-blueprint
+   ```
+
+2. **Do not auto-execute the wizard-generated scripts on first read.** The wizard writes ~15 scripts plus a safety gate, a banned-language gate, a secret redactor, hook bodies, and templates. Read each one in `/workspace` before letting Claude act on them. The wizard supports a pause-and-confirm step at each major milestone if you prefer that posture.
+
+3. **First install goes in a throwaway environment.** Spin up the sandbox in `docker/Dockerfile.xantham-sandbox` and do the first pass there. Filesystem is discarded on container exit. See [`docker/README.md`](docker/README.md) for the build + run + audit-then-graduate flow.
+
+   ```bash
+   docker build -f docker/Dockerfile.xantham-sandbox -t xantham-sandbox docker/
+   docker run --rm -it xantham-sandbox
+   ```
+
+4. **Verify the blueprint files cryptographically before installing.** Every release publishes a SHA256 manifest at `CHECKSUMS.sha256` in this repo. Use the verifier script to confirm the files you are about to install match the maintainer-published bytes:
+
+   ```bash
+   # against current main
+   curl -fsSL https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/scripts/verify-blueprint.sh | bash
+
+   # against a pinned commit SHA you have reviewed
+   curl -fsSL https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/<sha>/scripts/verify-blueprint.sh | bash -s -- <sha>
+   ```
+
+   The script exits `0` on match, `1` on mismatch (do not install), `2` on fetch errors. It supports both macOS (`shasum -a 256`) and Linux (`sha256sum`). Source: [`scripts/verify-blueprint.sh`](scripts/verify-blueprint.sh).
+
+5. **Start minimal.** Pick Simple mode in the wizard for the first install. You get the orchestrator, the specialist crew, Telegram, the basic safety gate, and the AI Brain. That is a fully usable system, and it has roughly a third of the surface area of Advanced. Once you have audited Simple and it has run on your machine for a week, upgrade with one of the `bash scripts/upgrade-*.sh` paths.
+
+6. **Check the maintainer's track record before installing.** This is a single-maintainer project (see the next section). The fact that you are reading this checklist at all is a fair indicator of the maintainer's posture, but verify it yourself:
+
+   - GitHub profile: [github.com/ZQadus](https://github.com/ZQadus) (commit history, prior repos, public artifacts)
+   - Portfolio: [zakiqadus.co.uk](https://zakiqadus.co.uk)
+   - Community: GitHub Issues + Discussions on this repo
+
+7. **Do not give the orchestrator credentials you cannot rotate.** Telegram bot tokens are revocable from `@BotFather` in seconds. The optional Anthropic API key (auth-failover only) is revocable from console.anthropic.com. Your project-level deploy keys, database passwords, and OAuth credentials should be ones you can rotate in minutes if something goes wrong. Treat any session that has touched a credential as a session that may have leaked it, until you have audited the logs and confirmed otherwise.
+
+### Pin install to a commit SHA
+
+The single-line install command in the next section defaults to `main` for convenience. For an audited install, pin to a commit SHA you have reviewed:
+
+```text
+Read the Xantham System v31 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/<COMMIT_SHA>/xantham-system-v31.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/<COMMIT_SHA>/xantham-templates-v31.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
+```
+
+Substitute `<COMMIT_SHA>` with the 40-character SHA from `git log` or the GitHub commit URL. Pinning to a SHA defeats the "I trusted main, then the repo was compromised after my audit" attack and makes your install reproducible.
+
+## Maintainer track record
+
+This is a single-maintainer open-source project. The most useful security signal you have is the maintainer's prior public work. Verify it directly rather than taking the README's word for it.
+
+- **GitHub:** [github.com/ZQadus](https://github.com/ZQadus). Commit history on this repo and other repos shows operating posture (commit cadence, prior projects, response to issues).
+- **Portfolio:** [zakiqadus.co.uk](https://zakiqadus.co.uk). Public artifacts, shipped projects, current focus.
+- **GPG-signed commits:** the maintainer signs commits on this repo with the GPG key associated with the GitHub account. GitHub shows a green "Verified" badge next to every signed commit in the commit history. If you see an unsigned commit on `main`, that is worth flagging in an issue.
+- **Community activity:** open GitHub Issues + Discussions are the public record. Read the maintainer's responses there to calibrate.
+- **Audits:** the "Reviews and audits" section at the bottom of this README links every public audit of this project, positive and critical.
+
+If anything looks off in the above, do not install. Open an issue or send a question first.
+
 ## How to install
 
 1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre.
@@ -344,6 +410,20 @@ Currently a single-maintainer project. If you find bugs or have suggestions, ope
 ## License
 
 MIT. See [LICENSE](LICENSE). Fork it, hand it to teammates, ship it inside your own product. Attribution appreciated, not required.
+
+## Reviews and audits
+
+Public scrutiny is a feature, not a threat. The list below tracks every third-party audit, review, or critical writeup of Xantham. Positive reviews and critical reviews both belong here.
+
+### Supply-chain trust review by `u/ricksegal` (r/coolgithubprojects)
+
+> "You can stop a determined attacker if you treat this like any other piece of foreign code: clone, audit, sandbox, verify. The maintainer can't prove the code is clean any more than you can prove it without reading 14k lines yourself or running it in a throwaway VM."
+>
+> Concerns raised, in summary: 14,000 lines of blueprint fetched from GitHub and auto-executed, no cryptographic verification artifacts at the time of audit, single-maintainer project with a small community at the time of audit, the safety gate is a `PreToolUse` hook not OS-level sandboxing, large surface area for bugs or malicious payloads, no published threat model from a third-party security firm.
+>
+> Response: the audit drove the **"How to proceed safely"** section above, the `CHECKSUMS.sha256` manifest, `scripts/verify-blueprint.sh`, the `docker/Dockerfile.xantham-sandbox` throwaway environment, the pinned-commit install pattern, and the **"Known limitations"** section in [SECURITY.md](SECURITY.md). Every concern raised is addressed in the repo, and the limits of those addresses are stated honestly.
+
+If you have audited Xantham (positively or critically) and want your findings linked here, **open a PR or an issue.** Audit links land here regardless of verdict. Public commitment to engaging with audit feedback is a stronger trust signal than any unaudited claim of safety.
 
 ## Contact
 

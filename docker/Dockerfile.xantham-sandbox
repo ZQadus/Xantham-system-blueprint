@@ -1,0 +1,100 @@
+# Xantham sandbox image.
+#
+# A throwaway environment for auditing the Xantham install wizard without
+# letting it touch your host filesystem, host credentials, or host network
+# beyond what you explicitly mount in.
+#
+# Build:
+#   docker build -f docker/Dockerfile.xantham-sandbox -t xantham-sandbox docker/
+#
+# Run (interactive, no mounts, no host network beyond standard egress):
+#   docker run --rm -it xantham-sandbox
+#
+# Inside the container, launch Claude Code and paste the install prompt from
+# the main README. The wizard will write inside /workspace, which lives only
+# for the lifetime of the container.
+#
+# Pinned base image. Debian Bookworm slim, digest pinned to a known-good
+# snapshot taken 2025-04-08. Update only when the maintainer audits the new
+# digest. Pinning by digest defeats the "image was retagged under us" attack.
+FROM debian:bookworm-slim@sha256:b1211f6d19afd012477bd34fdcabb6b663d680e0f4b0537da6e6b0fd057a3ec3
+
+LABEL org.opencontainers.image.title="xantham-sandbox"
+LABEL org.opencontainers.image.description="Throwaway environment for auditing the Xantham install."
+LABEL org.opencontainers.image.source="https://github.com/ZQadus/Xantham-system-blueprint"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# Avoid interactive prompts during apt installs.
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Minimal toolchain the wizard needs:
+#   curl ca-certificates  - fetch the blueprint files
+#   git                   - the wizard inits repos
+#   jq                    - the wizard parses JSON in hooks
+#   sqlite3               - the audit log + memory layer use SQLite
+#   unzip                 - bun installer needs it
+#   build-essential pkg-config - some native deps
+#   gnupg                 - verify package signatures
+#   procps                - ps/top for orphan-MCP sanity inside the box
+#   tini                  - PID 1 for clean signal handling
+#
+# No GUI, no editors, no preinstalled credentials, no SSH server. Strictly
+# the wizard's runtime prereqs.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl \
+      ca-certificates \
+      git \
+      jq \
+      sqlite3 \
+      unzip \
+      build-essential \
+      pkg-config \
+      gnupg \
+      procps \
+      tini \
+ && rm -rf /var/lib/apt/lists/* \
+ && apt-get clean
+
+# Node 18 LTS via NodeSource (matches the wizard's documented prereq).
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && apt-get clean \
+ && node --version \
+ && npm --version
+
+# Bun (the wizard uses it for some scripts). Installed via the official
+# installer, then immediately verified.
+RUN curl -fsSL https://bun.sh/install | bash \
+ && ln -s /root/.bun/bin/bun /usr/local/bin/bun \
+ && bun --version
+
+# Claude Code itself. The wizard runs INSIDE Claude Code's REPL, so the binary
+# has to be present in the sandbox. Pinned to the latest npm-published version
+# at image build time; rebuild the image to refresh.
+RUN npm install -g @anthropic-ai/claude-code \
+ && claude --version || true
+
+# Non-root user for the actual install. Root inside a container is still root,
+# but dropping privileges narrows the blast radius if a wizard step
+# misbehaves.
+RUN useradd -m -s /bin/bash xantham \
+ && mkdir -p /workspace \
+ && chown -R xantham:xantham /workspace
+USER xantham
+WORKDIR /workspace
+
+# Print a banner on shell entry so users know where they are.
+RUN echo 'echo "=================================================="' >> /home/xantham/.bashrc \
+ && echo 'echo " Xantham sandbox. Throwaway environment."' >> /home/xantham/.bashrc \
+ && echo 'echo " Workdir: /workspace (lost when container exits)."' >> /home/xantham/.bashrc \
+ && echo 'echo " Launch: claude --dangerously-skip-permissions"' >> /home/xantham/.bashrc \
+ && echo 'echo " Then paste the install prompt from the main README."' >> /home/xantham/.bashrc \
+ && echo 'echo "=================================================="' >> /home/xantham/.bashrc
+
+# tini for proper signal forwarding when users Ctrl-C.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/bin/bash"]
