@@ -81,26 +81,30 @@ Never let tokens go unused during an active session. If agents are idle, that's 
 - If agents are running and no pending task: proactively suggest the next priority from HANDOFF.md
 - If agents finish and user hasn't responded: start the next priority automatically
 - Track context usage and mention it when relevant ("we're at 70%, plenty of room" or "getting close to context limit")
+<!-- ENDIF -->
 
-### Agent spawning rules (20x mode)
+### Agent spawning rules
+<!-- IF spawn_aggressiveness=aggressive -->
+{{spawn_aggressiveness_block}}
 - **Simple task** (one domain): 1 agent, foreground or background
 - **Medium task** (build a feature): 2-3 agents in parallel
-- **Complex task** (multi-project, research + build): 4-6 agents, all background
+- **Complex task** (multi-project, research + build): 4-6 agents, all background, up to 16 for big sprints
 - **Context packets**: always pass the project's HANDOFF.md + CLAUDE.md to agents
 - **Multi-domain routing**: spawn agents simultaneously with clear scope boundaries
+- Watch the 5-hour rolling rate limit when running 8+ heavy-research or build agents at once
 <!-- ENDIF -->
-<!-- IF plan=max-5x -->
-### Agent spawning rules (5x mode)
+<!-- IF spawn_aggressiveness=balanced -->
+{{spawn_aggressiveness_block}}
 - **Simple task**: 1 agent, foreground
-- **Medium task**: 2 agents max in parallel
-- **Complex task**: 2-3 agents, background for the longest-running one
+- **Medium task**: 2-3 agents in parallel when work decomposes cleanly
+- **Complex task**: fan out further only on explicit user request or for sprints clearly bigger than 3 lanes
 - Always pass project context to agents
 <!-- ENDIF -->
-<!-- IF plan=pro -->
-### Agent usage (Pro mode)
-- Run agents sequentially -- one at a time
+<!-- IF spawn_aggressiveness=conservative -->
+{{spawn_aggressiveness_block}}
+- Run work sequentially, one specialist at a time
 - For multi-step tasks: complete one agent's work before starting the next
-- Background agents not recommended on Pro (context constraints)
+- Spawn parallel agents only when explicit user request
 <!-- ENDIF -->
 
 ### Pre-compaction sync
@@ -1136,35 +1140,65 @@ Unified history search across four sources in one pass: Telegram JSONL history, 
 
 ```bash
 #!/usr/bin/env bash
+# Register a new project: scaffold docs, write a safe .gitignore, scan for secrets,
+# commit, and (optionally) create a private GitHub repo + first push.
+#
+# Usage: bash scripts/register-project.sh <folder_path> <description> [stack] [--dry-run]
+#
+# Hardening (Xantham v31, fix CS4):
+#   1. Writes a default .gitignore if none exists, BEFORE any git add.
+#   2. Runs a pre-commit secret scan on staged content and aborts on hits.
+#   3. Stages explicit doc files instead of `git add -A`, so secrets that slipped
+#      through the gitignore (e.g. a hand-placed key under a name we don't know
+#      about) never reach the first commit.
+#   4. --dry-run prints what would happen and exits 0.
+
 set -euo pipefail
 
-FOLDER_PATH="${1:?Usage: register-project.sh <folder_path> <description> [stack]}"
-DESCRIPTION="${2:?Usage: register-project.sh <folder_path> <description> [stack]}"
+# --- argument parsing ---
+DRY_RUN=0
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=1 ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+set -- "${ARGS[@]:-}"
+
+FOLDER_PATH="${1:?Usage: register-project.sh <folder_path> <description> [stack] [--dry-run]}"
+DESCRIPTION="${2:?Usage: register-project.sh <folder_path> <description> [stack] [--dry-run]}"
 STACK="${3:-}"
 
 PROJECT_DIR="{{project_path}}"
 PROJECTS_FILE="$PROJECT_DIR/docs/projects.md"
 PROJECT_NAME=$(basename "$FOLDER_PATH")
 
-echo "=== Registering project: $PROJECT_NAME ==="
+say() { if [[ $DRY_RUN -eq 1 ]]; then echo "  [dry-run] $*"; else echo "  $*"; fi; }
 
-# Add to projects.md
+echo "=== Registering project: $PROJECT_NAME ==="
+[[ $DRY_RUN -eq 1 ]] && echo "  (dry-run: no files written, no commits, no remote calls)"
+
+# 1. Add to projects.md
 if grep -q "^## $PROJECT_NAME" "$PROJECTS_FILE" 2>/dev/null; then
-    echo "  Already in projects.md"
+    say "Already in projects.md"
 else
     ENTRY="\n## $PROJECT_NAME\n$DESCRIPTION"
     [[ -n "$STACK" ]] && ENTRY="$ENTRY\n$STACK"
     ENTRY="$ENTRY\nFolder: $(basename "$(dirname "$FOLDER_PATH")")/$(basename "$FOLDER_PATH")\nStatus: New project."
-    echo -e "$ENTRY" >> "$PROJECTS_FILE"
-    echo "  Added to projects.md"
+    if [[ $DRY_RUN -eq 0 ]]; then
+        echo -e "$ENTRY" >> "$PROJECTS_FILE"
+    fi
+    say "Added to projects.md"
 fi
 
-# Create project docs
+# 2. Create project docs
 for doc in CLAUDE.md HANDOFF.md FEATURES.md; do
     if [[ ! -f "$FOLDER_PATH/$doc" ]]; then
-        case "$doc" in
-            CLAUDE.md)
-                cat > "$FOLDER_PATH/$doc" << TEMPLATE
+        if [[ $DRY_RUN -eq 0 ]]; then
+            case "$doc" in
+                CLAUDE.md)
+                    cat > "$FOLDER_PATH/$doc" << TEMPLATE
 # $PROJECT_NAME
 $DESCRIPTION
 ## Stack
@@ -1172,37 +1206,163 @@ ${STACK:-TBD}
 ## Architecture
 TBD
 TEMPLATE
-                ;;
-            HANDOFF.md)
-                cat > "$FOLDER_PATH/$doc" << TEMPLATE
+                    ;;
+                HANDOFF.md)
+                    cat > "$FOLDER_PATH/$doc" << TEMPLATE
 # Last Session: $(date '+%-d %b %Y')
 ## What we did
 - Initial project setup
 ## Immediate priorities
 1. TBD
 TEMPLATE
-                ;;
-            FEATURES.md)
-                cat > "$FOLDER_PATH/$doc" << TEMPLATE
+                    ;;
+                FEATURES.md)
+                    cat > "$FOLDER_PATH/$doc" << TEMPLATE
 # $PROJECT_NAME -- Features
 $DESCRIPTION
 ## Features
 TBD
 TEMPLATE
-                ;;
-        esac
-        echo "  Created $doc"
+                    ;;
+            esac
+        fi
+        say "Created $doc"
     fi
 done
 
-# Init git repo
-if [[ ! -d "$FOLDER_PATH/.git" ]]; then
-    (cd "$FOLDER_PATH" && git init -q && git add -A && git commit -q -m "Initial commit" 2>/dev/null || true)
-    echo "  Git repo initialized"
+# 3. Write a default .gitignore if one doesn't exist. This MUST happen before
+#    `git add` so first-run files like .env, node_modules/, dist/ never get
+#    staged. Idempotent: if a .gitignore already exists, leave it alone.
+GITIGNORE="$FOLDER_PATH/.gitignore"
+if [[ ! -f "$GITIGNORE" ]]; then
+    if [[ $DRY_RUN -eq 0 ]]; then
+        cat > "$GITIGNORE" << 'GITIGNORE_BODY'
+# Default .gitignore written by register-project.sh
+# XANTHAM-SENTINEL: scaffold-gitignore-v1
+.env
+.env.*
+!.env.example
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+build/
+.next/
+coverage/
+.venv/
+venv/
+*.log
+*.sqlite
+*.db
+*.db-journal
+*.db-wal
+GITIGNORE_BODY
+    fi
+    say "Wrote default .gitignore"
+else
+    say ".gitignore already exists -- leaving alone"
 fi
 
-# Create GitHub repo (requires gh CLI authenticated via 'gh auth login')
-if command -v gh &>/dev/null; then
+# 4. Init git repo if not already.
+if [[ ! -d "$FOLDER_PATH/.git" ]]; then
+    if [[ $DRY_RUN -eq 0 ]]; then
+        (cd "$FOLDER_PATH" && git init -q)
+    fi
+    say "git init"
+fi
+
+# 5. Pre-commit secret scan. Scan files we are about to commit for high-risk
+#    credential prefixes. Aborts on hit so the user can fix .gitignore first.
+#    Whitelist common false-positive contexts (CSS class names, test fixtures,
+#    documentation explaining what NOT to commit).
+secret_scan() {
+    local hits=0
+    local scan_root="$1"
+    # Patterns: Anthropic, OpenAI, GitHub PAT/fine-grained/OAuth/server-to-server,
+    # Vercel access token, AWS access key, Stripe live keys, Slack bot/user/app,
+    # Telegram bot token (digits:hash), Google OAuth client secret, generic
+    # private-key blocks.
+    local patterns='sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{40,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|ghu_[A-Za-z0-9]{30,}|ghs_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|vca_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk_live_[A-Za-z0-9]{20,}|rk_live_[A-Za-z0-9]{20,}|xox[bpoars]-[A-Za-z0-9-]{10,}|[0-9]{8,12}:[A-Za-z0-9_-]{30,}|GOCSPX-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    # Find all tracked-or-untracked files except .git and gitignored content.
+    # Using git ls-files keeps us inside the user's gitignore boundary.
+    local files
+    if [[ -d "$scan_root/.git" ]]; then
+        files=$(cd "$scan_root" && git ls-files --others --cached --exclude-standard 2>/dev/null || true)
+    else
+        files=$(cd "$scan_root" && find . -type f \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -not -path './.venv/*' \
+            -not -path './venv/*' \
+            -not -path './dist/*' \
+            -not -path './build/*' \
+            -not -path './.next/*' \
+            2>/dev/null | sed 's|^\./||')
+    fi
+    [[ -z "$files" ]] && return 0
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        local fullpath="$scan_root/$f"
+        [[ ! -f "$fullpath" ]] && continue
+        # Skip binary files cheaply.
+        if file "$fullpath" 2>/dev/null | grep -q 'binary\|image\|executable\|archive'; then
+            continue
+        fi
+        # Skip files larger than 1 MB.
+        local size
+        size=$(wc -c < "$fullpath" 2>/dev/null | tr -d ' ')
+        [[ -n "$size" && "$size" -gt 1048576 ]] && continue
+        # Match patterns. Strip false-positive contexts before checking.
+        local matches
+        matches=$(grep -E "$patterns" "$fullpath" 2>/dev/null | \
+            grep -Ev '(EXAMPLE|example|YOUR_|placeholder|<your_|class=|className=|"sk-"|`sk-`|# NEVER COMMIT|# DO NOT COMMIT|XXXXX|REPLACE_ME)' \
+            || true)
+        if [[ -n "$matches" ]]; then
+            echo "  SECRET-SCAN HIT in $f:" >&2
+            echo "$matches" | head -3 | sed 's/^/    /' >&2
+            hits=$((hits + 1))
+        fi
+    done <<< "$files"
+    return $hits
+}
+
+if [[ $DRY_RUN -eq 0 ]]; then
+    if ! secret_scan "$FOLDER_PATH"; then
+        cat >&2 << 'ABORT_MSG'
+
+  ERROR: secret scan flagged credential-shaped content in this project folder.
+  Resolve before committing:
+    1. Move the secret to .env (already in default .gitignore).
+    2. If it's a false positive, add a comment like "# placeholder" near it,
+       or rename the variable (e.g. demo prefix instead of a real key prefix).
+    3. Re-run register-project.sh.
+
+  Aborting. No commit was made.
+ABORT_MSG
+        exit 1
+    fi
+    say "Secret scan clean"
+else
+    say "Secret scan skipped (dry-run)"
+fi
+
+# 6. First commit -- stage explicit doc + .gitignore files only. Do NOT use
+#    `git add -A`. Anything else the user wants tracked, they add deliberately
+#    after the first commit.
+if [[ $DRY_RUN -eq 0 ]]; then
+    (cd "$FOLDER_PATH" && \
+        git add .gitignore CLAUDE.md HANDOFF.md FEATURES.md 2>/dev/null || true; \
+        if git diff --cached --quiet 2>/dev/null; then
+            : # nothing to commit
+        else
+            git commit -q -m "Initial commit" 2>/dev/null || true
+        fi)
+fi
+say "First commit (docs + .gitignore only)"
+
+# 7. Create GitHub repo (requires gh CLI authenticated via 'gh auth login')
+if [[ $DRY_RUN -eq 0 ]] && command -v gh &>/dev/null; then
     if ! gh auth status >/dev/null 2>&1; then
         echo "  gh CLI is installed but not authenticated. Skipping remote creation."
         echo "  Run 'gh auth login' (web browser flow) and re-run this script if you want a remote."
@@ -1216,12 +1376,330 @@ if command -v gh &>/dev/null; then
             fi
         fi
     fi
-else
+elif [[ $DRY_RUN -eq 0 ]]; then
     echo "  gh CLI not installed. Skipping remote creation. Install with brew/winget/apt and re-run if you want one."
+else
+    say "Remote creation skipped (dry-run)"
 fi
 
 echo "=== Done ==="
 ```
+
+**Why each new step:**
+
+- `.gitignore` written first (step 3): blocks `.env` / `node_modules/` / build artefacts from ever being staged.
+- Secret scan (step 5): catches the case where a user dropped an API key in `config.js` or similar before running the script. Patterns cover Anthropic, OpenAI, GitHub PATs, Vercel, AWS, Stripe live, Slack, Telegram bot tokens, Google OAuth client secrets, and PEM-encoded private keys. Whitelist strips out `class=`/`className=` (CSS hits on `sk-`), `EXAMPLE`/`placeholder`/`<your_` (template strings), and explicit "DO NOT COMMIT" comments.
+- Explicit `git add` (step 6): scaffolded docs + `.gitignore` only. If the user has other files, they add them deliberately after reviewing.
+- `--dry-run`: prints every action without writing or committing. Useful before running on a folder that already has content.
+
+---
+
+## Template: .gitignore
+
+Write this file to the orchestrator project root (`{{project_path}}/.gitignore`) at Generation Order Step 1.5, **before** any other generation step writes files the ignore list must cover. This file MUST be on disk before the safety gate's `data/approved.txt` is ever touched.
+
+```gitignore
+# === {{orchestrator_name}} orchestrator .gitignore ===
+# Generated by the wizard. Hand-edit at your own risk; the uninstall script
+# expects this file's presence + the sentinel below.
+# XANTHAM-SENTINEL: orchestrator-gitignore-v1
+
+# --- SECURITY-CRITICAL: never commit these ---
+
+# Safety-gate approvals. A checked-in approved.txt would let any clone of this
+# repo pre-approve destructive commands and bypass the gate.
+data/approved.txt
+
+# Runtime state: Telegram bot token, session flags, transient locks, the
+# turn-contract file, active-recall cache, dream-cycle scratch.
+data/runtime/
+
+# Per-tool-call audit log + safety-gate firing log. Logs reveal which
+# destructive commands were attempted and when. Audit archives stay tracked
+# (under data/audit/archive/) because they are gzipped and rotated weekly.
+logs/
+data/audit/*.jsonl
+!data/audit/archive/
+
+# Anthropic / OpenAI / GitHub / Stripe / Slack tokens.
+.env
+.env.*
+!.env.example
+
+# --- LARGE BINARY / GENERATED CONTENT ---
+
+# sqlite-vec semantic memory database + WAL/journal sidecars (multi-MB,
+# regenerable from memory/ markdown via scripts/embed-memories.py).
+data/vector-memory.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Standard build / dependency junk.
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+build/
+.next/
+coverage/
+.venv/
+venv/
+
+# --- NOT IGNORED, FOR THE RECORD ---
+#
+# - ~/.config/claude/api-key (auth failover key): lives OUTSIDE the repo so
+#   nothing to ignore here. Stored mode 0600 in $HOME. Uninstall prompts
+#   before deleting.
+# - data/audit/archive/YYYY/MM.jsonl.gz: gzipped weekly audit roll-ups stay
+#   tracked so forensic history survives a fresh clone.
+# - memory/: markdown is the source of truth, stays tracked.
+```
+
+**Why each line:**
+
+- `data/approved.txt`: explicit per-command approvals carry the right to run destructive commands. Checking it in would publish a bypass list to any clone.
+- `data/runtime/`: holds `bot-token.txt`, session flags, the Telegram inbound-payload file, the turn-contract. Bot token leak is the worst-case outcome on first push.
+- `logs/` + `data/audit/*.jsonl` (with `!data/audit/archive/` exception): live logs reveal attempted destructive commands with timestamps; archived gzips are intentionally kept for compliance / forensics.
+- `.env` family: standard but worth being explicit, the gate has no way to scan env files for leakage.
+- `data/vector-memory.db` + sqlite sidecars: regenerable from `memory/` markdown via `scripts/embed-memories.py`. No reason to ship binary churn.
+- `node_modules/` etc.: standard, prevents repo bloat.
+
+**Note on `~/.config/claude/api-key`:** the optional Advanced-mode auth-failover key (Extension E6) lives outside the repo by design (`$HOME/.config/claude/api-key`, mode `0600`). There is nothing to gitignore. The uninstall script prompts before deleting it.
+
+---
+
+## Template: scripts/uninstall.sh
+
+Generated alongside the rest of `scripts/` at Generation Order Step 7. This is what the README points at instead of a bare `rm -rf`. Two-phase: `--dry-run` lists everything that will be touched, plain run prompts for confirmation then applies. Safe to run twice.
+
+```bash
+#!/usr/bin/env bash
+# Uninstall the {{orchestrator_name}} orchestrator and clean up every side-effect
+# location the wizard wrote to.
+#
+# Usage:
+#   bash scripts/uninstall.sh --dry-run    # print manifest, do nothing
+#   bash scripts/uninstall.sh              # prompt for each prompt-able cleanup, then apply
+#   bash scripts/uninstall.sh --yes        # non-interactive, apply defaults (keep API key, keep global gate)
+#
+# Idempotent: safe to run twice. Missing files are no-ops.
+
+set -euo pipefail
+
+DRY_RUN=0
+ASSUME_YES=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=1 ;;
+        --yes|-y) ASSUME_YES=1 ;;
+        --help|-h)
+            echo "Usage: $0 [--dry-run|--yes]"
+            exit 0
+            ;;
+        *) echo "Unknown flag: $arg" >&2; exit 1 ;;
+    esac
+done
+
+PROJECT_DIR="{{project_path}}"
+ORCHESTRATOR_LOWER="{{orchestrator_name_lower}}"
+LAUNCH_CMD="{{launch_cmd}}"
+HOME_DIR="${HOME:-/Users/$(whoami)}"
+
+# Sentinel comments the wizard wrote into managed files. Touch only when our
+# sentinel is present so we never disturb a file someone else created.
+GATE_SENTINEL="# XANTHAM-SENTINEL: safety-gate-v31"
+STATUSLINE_SENTINEL="# XANTHAM-SENTINEL: statusline-v31"
+SHELL_SENTINEL_START="# XANTHAM-SENTINEL-BEGIN: launch-functions"
+SHELL_SENTINEL_END="# XANTHAM-SENTINEL-END: launch-functions"
+
+# --- helpers ---
+say() { echo "  $*"; }
+plan() { echo "  - $*"; }
+do_or_say() {
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "  [dry-run] $*"
+    else
+        eval "$@"
+    fi
+}
+confirm() {
+    local prompt="$1"
+    local default="${2:-N}"
+    if [[ $ASSUME_YES -eq 1 ]]; then
+        [[ "$default" == "Y" ]] && return 0 || return 1
+    fi
+    local hint="[y/N]"
+    [[ "$default" == "Y" ]] && hint="[Y/n]"
+    read -r -p "  $prompt $hint " ans </dev/tty || ans=""
+    [[ -z "$ans" ]] && ans="$default"
+    case "$ans" in
+        [yY]*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+has_sentinel() {
+    local file="$1"; local sentinel="$2"
+    [[ -f "$file" ]] && grep -q -F "$sentinel" "$file" 2>/dev/null
+}
+
+# --- manifest ---
+echo "=== {{orchestrator_name}} uninstall ==="
+[[ $DRY_RUN -eq 1 ]] && echo "  (dry-run: nothing will be changed)"
+echo
+echo "Manifest -- files this script will inspect or remove:"
+
+plan "Project directory: $PROJECT_DIR"
+plan "Statusline script: $HOME_DIR/.claude/statusline-command.sh (only if wizard-installed)"
+plan "Claude Code settings: $HOME_DIR/.claude/settings.json (strip statusLine block + restore from .pre-install backup if present)"
+plan "Shell launch functions in: ~/.zshrc, ~/.bashrc, \$PROFILE (only between XANTHAM sentinels)"
+plan "Global safety gate: $HOME_DIR/.claude/hooks/safety-gate.sh (prompts before removing)"
+plan "launchd plists: $HOME_DIR/Library/LaunchAgents/com.${ORCHESTRATOR_LOWER}.*.plist (Mac only)"
+plan "AppleScript wrappers: $HOME_DIR/Applications/${ORCHESTRATOR_LOWER}-*.app (Mac only)"
+plan "Auth-failover API key: $HOME_DIR/.config/claude/api-key (prompts before removing; paid asset)"
+echo
+echo "Not touched: Telegram bot upstream (revoke via @BotFather), NotebookLM notebook, Anthropic subscription."
+echo
+
+# --- step 1: shell launch functions ---
+echo "[1/8] Shell launch functions"
+for profile in "$HOME_DIR/.zshrc" "$HOME_DIR/.bashrc" "$HOME_DIR/.config/powershell/Microsoft.PowerShell_profile.ps1" "$HOME_DIR/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"; do
+    if [[ -f "$profile" ]] && grep -q -F "$SHELL_SENTINEL_START" "$profile" 2>/dev/null; then
+        say "Found sentinel in $profile -- stripping launch functions"
+        if [[ $DRY_RUN -eq 0 ]]; then
+            local_tmp=$(mktemp)
+            awk -v start="$SHELL_SENTINEL_START" -v end="$SHELL_SENTINEL_END" '
+                $0 ~ start { skip=1; next }
+                $0 ~ end   { skip=0; next }
+                skip != 1 { print }
+            ' "$profile" > "$local_tmp" && mv "$local_tmp" "$profile"
+        fi
+    fi
+done
+
+# --- step 2: statusline script + settings block ---
+echo "[2/8] Statusline"
+STATUSLINE="$HOME_DIR/.claude/statusline-command.sh"
+if has_sentinel "$STATUSLINE" "$STATUSLINE_SENTINEL"; then
+    do_or_say "rm -f \"$STATUSLINE\""
+    say "Removed statusline script"
+elif [[ -f "$STATUSLINE" ]]; then
+    say "Statusline exists but lacks our sentinel -- leaving alone (someone else's)"
+fi
+
+SETTINGS="$HOME_DIR/.claude/settings.json"
+SETTINGS_BACKUP="$HOME_DIR/.claude/settings.json.pre-install"
+if [[ -f "$SETTINGS_BACKUP" ]]; then
+    say "Found pre-install backup -- restoring $SETTINGS from .pre-install"
+    do_or_say "cp \"$SETTINGS_BACKUP\" \"$SETTINGS\""
+elif [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
+    if jq -e '.statusLine' "$SETTINGS" >/dev/null 2>&1; then
+        say "No backup found -- stripping statusLine block from settings.json via jq"
+        if [[ $DRY_RUN -eq 0 ]]; then
+            local_tmp=$(mktemp)
+            jq 'del(.statusLine)' "$SETTINGS" > "$local_tmp" && mv "$local_tmp" "$SETTINGS"
+        fi
+    fi
+fi
+
+# --- step 3: launchd plists (Mac only) ---
+echo "[3/8] launchd plists (Mac only)"
+if [[ "$(uname)" == "Darwin" ]]; then
+    PLIST_DIR="$HOME_DIR/Library/LaunchAgents"
+    if [[ -d "$PLIST_DIR" ]]; then
+        for plist in "$PLIST_DIR"/com.${ORCHESTRATOR_LOWER}.*.plist; do
+            [[ -f "$plist" ]] || continue
+            say "Unloading and removing $plist"
+            do_or_say "launchctl unload \"$plist\" 2>/dev/null || true"
+            do_or_say "rm -f \"$plist\""
+        done
+    fi
+    if [[ -d "$HOME_DIR/Applications" ]]; then
+        for app in "$HOME_DIR/Applications/${ORCHESTRATOR_LOWER}-"*.app; do
+            [[ -d "$app" ]] || continue
+            say "Removing AppleScript wrapper $app"
+            do_or_say "rm -rf \"$app\""
+        done
+    fi
+else
+    say "Not macOS -- skipping launchd / AppleScript cleanup"
+fi
+
+# --- step 4: global safety gate (prompt) ---
+echo "[4/8] Global safety gate at ~/.claude/hooks/safety-gate.sh"
+GLOBAL_GATE="$HOME_DIR/.claude/hooks/safety-gate.sh"
+if has_sentinel "$GLOBAL_GATE" "$GATE_SENTINEL"; then
+    say "Global safety gate is wizard-installed (sentinel present)."
+    say "If kept, it continues protecting OTHER Claude Code projects on this machine."
+    if confirm "Remove the global safety gate?" "N"; then
+        do_or_say "rm -f \"$GLOBAL_GATE\""
+        say "Removed global safety gate"
+    else
+        say "Keeping global safety gate"
+    fi
+elif [[ -f "$GLOBAL_GATE" ]]; then
+    say "Global safety gate exists without our sentinel -- leaving alone"
+fi
+
+# --- step 5: auth-failover API key (prompt) ---
+echo "[5/8] Auth-failover API key at ~/.config/claude/api-key"
+API_KEY="$HOME_DIR/.config/claude/api-key"
+if [[ -f "$API_KEY" ]]; then
+    say "Paid Anthropic API key present. Keeping it lets you reuse the key in other tools."
+    if confirm "Remove the API key file?" "N"; then
+        do_or_say "rm -f \"$API_KEY\""
+        say "Removed API key"
+    else
+        say "Keeping API key at $API_KEY"
+    fi
+fi
+
+# --- step 6: Telegram plugin uninstall hint ---
+echo "[6/8] Telegram plugin"
+say "To remove the Telegram plugin from Claude Code, run:"
+say "  claude plugin uninstall telegram@claude-plugins-official"
+say "(not executed here; the plugin namespace is user-managed)"
+
+# --- step 7: project directory ---
+echo "[7/8] Project directory"
+if [[ -d "$PROJECT_DIR" ]]; then
+    say "About to remove $PROJECT_DIR (the orchestrator install)"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "  [dry-run] rm -rf \"$PROJECT_DIR\""
+    elif confirm "Remove project directory $PROJECT_DIR?" "Y"; then
+        rm -rf "$PROJECT_DIR"
+        say "Removed $PROJECT_DIR"
+    else
+        say "Kept $PROJECT_DIR"
+    fi
+fi
+
+# --- step 8: final reminder ---
+echo "[8/8] Done"
+echo
+echo "Reminders (no automation here on purpose):"
+echo "  - Revoke your Telegram bot token via @BotFather if you want a clean break."
+echo "  - The NotebookLM notebook is still on Google's servers. Delete from notebooklm.google.com if desired."
+echo "  - Your Claude.ai subscription is untouched."
+[[ $DRY_RUN -eq 1 ]] && echo "  - This was a dry-run. No files were changed."
+```
+
+**Why this script exists:**
+
+- **Idempotent by design.** Every removal checks "does the file exist?" + (where relevant) "does our sentinel appear in it?" before touching it. Re-running on an already-clean system is a no-op.
+- **Sentinels guard against collateral damage.** The wizard writes `# XANTHAM-SENTINEL: ...` markers into files it owns (statusline script, safety gate, shell profiles). If the user wrote their own statusline at the same path, the sentinel is absent and uninstall leaves it alone.
+- **Pre-install backup of settings.json.** Generation Order Step 0 should write `~/.claude/settings.json.pre-install` as a verbatim copy before the wizard mutates the file. Uninstall restores from this backup. If the backup is missing, we fall back to a `jq del(.statusLine)` surgical strike.
+- **Paid assets get prompts, never silent deletion.** The API key (`~/.config/claude/api-key`) and the global safety gate (`~/.claude/hooks/safety-gate.sh`, which protects other projects on the same machine) both prompt with default-No.
+- **Telegram bot is a manual step.** The bot exists on Telegram's servers, not the local machine. We tell the user to talk to @BotFather. Deleting `data/runtime/bot-token.txt` is not enough.
+
+**Sentinel-writing checklist for the wizard** (must be in place for uninstall to be safe):
+
+- Top of `~/.claude/statusline-command.sh`: `# XANTHAM-SENTINEL: statusline-v31`
+- Top of `~/.claude/hooks/safety-gate.sh` (after shebang): `# XANTHAM-SENTINEL: safety-gate-v31`
+- Around shell launch functions in `~/.zshrc` / `~/.bashrc` / `$PROFILE`: `# XANTHAM-SENTINEL-BEGIN: launch-functions` ... `# XANTHAM-SENTINEL-END: launch-functions`
+- Before the wizard first mutates `~/.claude/settings.json`: copy it to `~/.claude/settings.json.pre-install` (don't overwrite if the backup already exists from a previous install).
 
 ---
 
@@ -2752,7 +3230,7 @@ exit $DRIFTED
 # DE-PERSONALISATION NOTE
 # This hook was de-personalised from the maintainer's persona-specific lint.
 # DROPPED rules (persona-specific, do not generalise):
-#   - missing-signature           (required a specific trailing emoji on every reply)
+#   - missing-heart           (required a specific trailing emoji on every reply)
 #   - thing-term              (banned specific intimate-register noun forms)
 #   - banned-self-descriptor  (banned a fixed list of persona self-state words)
 #   - persona-emoji-leak      (cross-persona emoji bleed detection)
@@ -3141,7 +3619,7 @@ model: opus
 memory: user
 ---
 
-# {{agent_name}} -- {{agent_role}}
+# {{agent_name}}: {{agent_role}}
 
 You are {{agent_name}}. {{agent_personality_description}}
 
@@ -3356,21 +3834,21 @@ Verify the live state of the MCP layer with `claude mcp list` after install. Red
 ## Template: data/help-text.md
 
 ```markdown
-# {{orchestrator_name}} -- Help
+# {{orchestrator_name}}: Help
 
 ## Commands
-- `help` -- show this message
-- `team` -- show your agent roster
-- `projects` -- list all registered projects
-- `status <project>` -- where we left off on a project
-- `sync <project>` -- full sync cycle
-- `sync all` -- sync every project
-- `ship <project>` -- git add + commit + push
-- `review <project>` -- run tests + code review
-- `healthcheck` -- system health check
-- `history <query>` -- search conversation history
+- `help`: show this message
+- `team`: show your agent roster
+- `projects`: list all registered projects
+- `status <project>`: where we left off on a project
+- `sync <project>`: full sync cycle
+- `sync all`: sync every project
+- `ship <project>`: git add, commit, push
+- `review <project>`: run tests and code review
+- `healthcheck`: system health check
+- `history <query>`: search conversation history
 <!-- IF brain=yes -->
-- `brain <question>` -- query long-term memory
+- `brain <question>`: query long-term memory
 <!-- ENDIF -->
 
 ## Routing
@@ -3395,7 +3873,7 @@ Send a message and {{orchestrator_name}} routes it to the right agent automatica
 
 <!-- ENDFOR -->
 
-{{agent_count}} agents total. {{orchestrator_name}} orchestrates.
+{{agent_count}} specialists + 1 orchestrator. {{orchestrator_name}} orchestrates.
 ```
 
 ---

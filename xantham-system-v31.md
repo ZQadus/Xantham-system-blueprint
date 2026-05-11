@@ -42,12 +42,12 @@ Before install, pick one. You can upgrade later, but the fresh-install path diff
 | Multi-agent coordination | Sequential via the Task tool | Live shared context via Agent Teams + whiteboard |
 | Observability | Telegram history log | Everything above + per-tool-call audit JSONL + live viewer |
 | Safety gate | Basic (file deletion / sudo / force-push) | Hardened (protected-branch hard-blocks, word-boundary regex, history-rewriting blocks) |
-| Includes | Core orchestrator + 10 specialist agents + Telegram + Brain + safety | Same + E1 sqlite-vec + E3 Agent Teams + E4 Observability + E5 Hardened safety |
+| Includes | Core orchestrator + 9 specialist agents + Telegram + Brain + safety | Same + E1 sqlite-vec + E3 Agent Teams + E4 Observability + E5 Hardened safety |
 | Good for | Getting started fast, low-overhead daily use, beginner-friendly | Power users running 5+ projects, multi-agent workflows, long-horizon memory recall, audit-trail compliance |
 
 ### Mode contents at a glance
 
-**Simple mode includes:** Orchestrator (your AI), Specialist crew (10 agents), Markdown memory, Telegram channel, NotebookLM Brain integration, Session cron, Compaction defence, Basic safety gate.
+**Simple mode includes:** Orchestrator (your AI), Specialist crew (9 specialists), Markdown memory, Telegram channel, NotebookLM Brain integration, Session cron, Compaction defence, Basic safety gate.
 
 **Advanced mode includes everything in Simple, plus:**
 - **E1 Semantic memory** (sqlite-vec + Ollama Nomic-embed) - semantic search across your memory files. "Find the rule about timezones" works even when you don't remember the file name.
@@ -79,11 +79,12 @@ Both modes get:
 ### Orchestrator (your AI itself)
 Claude Code CLI running Opus 4.7. Receives Telegram messages, routes to specialist sub-agents, replies. Lives in `CLAUDE.md` in your project root.
 
-### Specialist crew (9 agents)
-Default names - rename to taste:
+### Specialist crew (9 specialists)
+Default names - rename to taste. Total team is 9 specialists + 1 orchestrator = 10 agents:
 - **Kai** - engineering (code, architecture, bugs, review)
 - **Rose** - research (competitive intel, market sizing, deep research)
-- **Natalie** - growth (social, ASO, launches, copy)
+- **Natalie** - growth (ASO, launches, paid + organic strategy, brand positioning)
+- **Maya** - social (platform-tactical content for TikTok / IG / X / YouTube / Reddit, algorithm play, viral hooks, creator economy, community management)
 - **Marco** - infra (deploy, CI/CD, DNS, monitoring)
 - **Isabella** - writing (blog posts, docs, decks, emails)
 - **Warren** - trading (strategies, backtests, portfolio, markets)
@@ -126,7 +127,7 @@ The Profile bucket is the third leg of the Karpathy three-bucket pattern: Memory
 
 There is exactly one profile file per user: `memory/profile_<user>.md`. Read at session start. Updated mid-session on explicit signals ("call me Sam", "I'm now working on X full-time"). Drafted at session end by `scripts/update-profile.sh` based on observed changes during the session. Lifecycle is `update_frequency: per-session` and `ttl_days: 7` in the frontmatter so it stays fresh.
 
-In v31, the Profile bucket is user-side only. The 10 specialist agents have `agent-memory/<name>/MEMORY.md` indexes plus topic files, no per-agent profile narrative. Per-agent profiles are a v32+ candidate, not v31.
+In v31, the Profile bucket is user-side only. The 9 specialist agents have `agent-memory/<name>/MEMORY.md` indexes plus topic files, no per-agent profile narrative. Per-agent profiles are a v32+ candidate, not v31.
 
 Update flow on session end:
 
@@ -745,7 +746,7 @@ Windows: same Stop hook for daily, same `maintain.sh` for weekly and monthly. If
 
 ```powershell
 # Open Task Scheduler, Create Basic Task
-# Name: xantham-maintain-weekly
+# Name: {{orchestrator_lower}}-maintain-weekly
 # Trigger: Weekly, Sundays, 09:00
 # Action: Start a program
 #   Program: C:\Program Files\Git\bin\bash.exe
@@ -755,7 +756,7 @@ Windows: same Stop hook for daily, same `maintain.sh` for weekly and monthly. If
 A schtasks one-liner does the same thing if you prefer the CLI:
 
 ```powershell
-schtasks /Create /SC WEEKLY /D SUN /ST 09:00 /TN "xantham-maintain-weekly" /TR "\"C:\Program Files\Git\bin\bash.exe\" -c \"cd C:/Users/<you>/Documents/MyAgent && bash scripts/maintain.sh\""
+schtasks /Create /SC WEEKLY /D SUN /ST 09:00 /TN "{{orchestrator_lower}}-maintain-weekly" /TR "\"C:\Program Files\Git\bin\bash.exe\" -c \"cd C:/Users/<you>/Documents/MyAgent && bash scripts/maintain.sh\""
 ```
 
 Subdir-recursion + dot-prune are baked into every iterator. `find memory/ -name "*.md" -not -path "*/.*"` is the canonical pattern. Any new script that reads memory MUST follow it, otherwise dot-dir carveouts and gitignored subdirectories leak into the index.
@@ -934,10 +935,10 @@ To see more edges: graph view's settings panel → turn on "Show unresolved link
   - Rule 11 spec-kit on greenfield + >4h: plan-first escalates to the full spec-kit pipeline (constitution -> spec -> plan -> tasks -> analyze) before engineering agent dispatch.
 
 ### v31.1 - platform-tactical social specialist added
-- Roster expanded to 10 specialists by splitting Natalie's growth role: Natalie keeps strategy + ASO + paid + brand, new Maya specialist takes platform-tactical execution (TikTok / IG / X / YouTube / Reddit content + algorithm + viral hooks + creator-economy + community management)
+- Roster expanded to 9 specialists by splitting Natalie's growth role: Natalie keeps strategy + ASO + paid + brand, new Maya specialist takes platform-tactical execution (TikTok / IG / X / YouTube / Reddit content + algorithm + viral hooks + creator-economy + community management). Total team is 9 specialists + 1 orchestrator = 10 agents.
 
 ### v28 - additional specialist agents
-- Roster expanded to 9 specialists (engineering, research, growth, deploy, writing, trading, business, human dynamics, plus orchestrator)
+- Roster expanded to 8 specialists (engineering, research, growth, deploy, writing, trading, business, human dynamics) plus orchestrator = 9 agents total. The social split came later in v31.1.
 
 ### v27 - first stable
 - Master orchestrator + memory layer + Telegram + NotebookLM Brain
@@ -2226,6 +2227,7 @@ These are the variables you will collect. Every template in the companion file `
 | `{{telegram_token}}` | string | Q6 (conditional, if telegram) |
 | `{{agent_preset}}` | solo-dev / full-team / dev-team / custom | Q7 |
 | `{{agents}}` | list of {role, name} | Q7 |
+| `{{spawn_aggressiveness}}` | conservative / balanced / aggressive | Q7.5 |
 | `{{security}}` | standard / enterprise | Q8 |
 | `{{library}}` | yes / no | Q9 |
 | `{{brain}}` | yes / no | Q10 |
@@ -2263,10 +2265,16 @@ After collecting answers, compute these before generating files:
 - `{{package_manager}}` = `brew` on Mac, `apt` on Linux, `winget` on Windows
 - `{{project_path}}` = the absolute path of the current working directory (where the user is running Claude Code)
 - `{{db_name}}` = `{{orchestrator_name_lower}}.db`
-- `{{agent_count}}` = length of `{{agents}}` list + 1 (the orchestrator)
+- `{{agent_count}}` = length of `{{agents}}` list (specialist count only, does NOT include the orchestrator). Templates that say "crew of N specialist agents" use this directly. Templates that need the team total (orchestrator + specialists) compute it inline as `{{agent_count}}+1`.
 - For each agent in `{{agents}}`: `{{agent_<role>_name}}` = the name the user chose for that role
 - `{{user_name}}` = `git config --global user.name` if set; otherwise the wizard asks once: "What name should the orchestrator use when addressing you?" Stored for templates that need to greet the user by name (greeting digests, telegram replies, profile narratives)
 - `{{user_name_lower}}` = lowercase version of `{{user_name}}`, used for matching their Telegram handle in audit-log filtering
+- `{{plan_name}}` = human-readable plan label derived from `{{plan}}`: `Claude Max 20x` if `{{plan}}=max-20x`, `Claude Max 5x` if `{{plan}}=max-5x`, `Claude Pro` if `{{plan}}=pro`. Used in Q7.5 warning text + any other template that wants a friendly plan label.
+- `{{context_warning_threshold}}` = pre-compaction sync trigger percentage derived from `{{plan}}`: `85` if `{{plan}}=max-20x`, `75` if `{{plan}}=max-5x`, `60` if `{{plan}}=pro`. Used in the CLAUDE.md pre-compaction sync section so the trigger matches the plan's 1M / 200k / smaller context window respectively.
+- `{{spawn_aggressiveness_block}}` = the literal habit text the wizard writes into the CLAUDE.md "Agent spawning rules" section, picked by `{{spawn_aggressiveness}}`:
+  - `conservative`: "Run work sequentially, one specialist at a time. Spawn parallel agents only when explicit user request."
+  - `balanced`: "Default to 2-3 parallel specialists when work decomposes cleanly. Fan out further only on explicit user request or for sprints clearly bigger than 3 lanes."
+  - `aggressive`: "Default to aggressive parallel dispatch. Spawn 5-16 specialists for big sprints. Use Agent Teams channel pattern when work has cross-talk. Watch the 5-hour rolling rate limit on Max 20x."
 
 ---
 
@@ -2367,7 +2375,7 @@ Tell the user:
 >
 > Includes:
 > - Orchestrator (your AI itself, named at the next question)
-> - Specialist crew (9 agents - engineering, research, growth, infra, writing, trading, business, human dynamics)
+> - Specialist crew (9 specialists - engineering, research, growth, social, infra, writing, trading, business, human dynamics)
 > - Markdown memory system (memory/*.md, semantic-grep is enough at this scale)
 > - Telegram channel (control the system from your phone)
 > - NotebookLM Brain integration (optional cross-session search via Google's NotebookLM)
@@ -2572,22 +2580,24 @@ This is a multi-step question. First, show the preset based on their earlier ans
 Ask:
 > Time to build your team. Based on what you told me, I'd suggest the **[suggested preset]** lineup. Here are all the options:
 >
-> **Solo Dev** (3 agents) -- lean and fast
+> **Solo Dev** (2 specialists, 3 agents total) -- lean and fast
 > - Orchestrator (that's {{orchestrator_name}})
 > - Engineer -- code, architecture, debugging, reviews
 > - Researcher -- analysis, market research, tech evaluation
 >
-> **Full Team** (8 agents) -- covers everything
+> **Full Team** (9 specialists, 10 agents total) -- covers everything
 > - Orchestrator
 > - Engineer -- code, architecture, debugging
 > - Researcher -- analysis, market research, intel
-> - Marketing -- growth, social media, ASO, launches
+> - Growth -- ASO, launch playbooks, paid + organic strategy, brand positioning
+> - Social -- platform-tactical content for TikTok / IG / X / YouTube / Reddit, algorithm play, viral hooks
 > - DevOps -- deploy, CI/CD, infra, monitoring
 > - Writer -- blog posts, docs, emails, presentations
 > - Business -- revenue, pricing, partnerships, contracts
 > - Trading -- strategies, backtesting, portfolio, markets
+> - Human dynamics -- negotiation, persuasion, networking, cold outreach
 >
-> **Dev Team** (9 agents) -- built for software shops
+> **Dev Team** (8 specialists, 9 agents total) -- built for software shops
 > - Orchestrator
 > - Lead Engineer -- architecture, system design, code reviews
 > - Frontend Engineer -- UI/UX, React/Vue/Angular, CSS, accessibility
@@ -3140,6 +3150,7 @@ After all questions are answered, generate files in this order. Each file comes 
    │   ├── log-correction.sh
    │   ├── history.sh
    │   ├── register-project.sh
+   │   ├── uninstall.sh
    │   ├── check-blueprint-drift.sh
    │   ├── blueprint-drift-check.sh
    │   ├── sync-project-memories.sh
@@ -3161,9 +3172,11 @@ After all questions are answered, generate files in this order. Each file comes 
    └── CLAUDE.md
    ```
 
+   **Step 1.5 -- write `.gitignore` BEFORE any other generation step.** Use the body in **`blueprints/xantham-templates-v31.md` § Template: .gitignore**. This file must exist at `{{project_path}}/.gitignore` before Step 2 creates the sqlite DB or any subsequent step touches `data/approved.txt`, `data/runtime/`, `data/vector-memory.db`, or `logs/safety-gate.log`. Writing the gitignore here closes a real first-push leak window: the safety-gate template comment at line 497 in the templates file (`# NOTE: this file MUST be in .gitignore`) had no companion gitignore until now. Fixes Marco audit CS3.
+
 2. **Create the SQLite database:** run `setup-db.sh` which creates `data/{{db_name}}` with the full schema (memories table with FTS5, corrections table, patterns table).
 
-3. **Generate CLAUDE.md** from the master template in **`blueprints/xantham-templates-v31.md` § Template: CLAUDE.md**. This is the largest file - it defines the orchestrator's identity, core loop, routing table, commands, agent spawning rules, safety rules, and everything else. Substitute every `{{placeholder}}` (orchestrator name, agent roster, plan, security tier, mode, etc.).
+3. **Generate CLAUDE.md** from the master template in **`blueprints/xantham-templates-v31.md` § Template: CLAUDE.md**. This is the largest file - it defines the orchestrator's identity, core loop, routing table, commands, agent spawning rules, safety rules, and everything else. Substitute every `{{placeholder}}` (orchestrator name, agent roster, plan, security tier, mode, etc.). Honour both kinds of conditional in the template: `<!-- IF plan=... -->` blocks (driven by `{{plan}}` for the plan-label header) AND `<!-- IF spawn_aggressiveness=... -->` blocks (driven by `{{spawn_aggressiveness}}` from Q7.5 for the agent-spawning-rules section). The two conditionals are intentionally independent so a Max-20x user who picked Conservative gets the right rules (sequential dispatch) instead of inheriting plan-derived aggressive defaults. Also substitute the derived `{{spawn_aggressiveness_block}}` literal text inside whichever spawn-rules block ends up active, and the derived `{{context_warning_threshold}}` + `{{plan_name}}` values in the pre-compaction sync section.
 
 4. **Generate .claude/settings.json** from **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Standard Security)** OR **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
 
@@ -3171,7 +3184,18 @@ After all questions are answered, generate files in this order. Each file comes 
 
 6. **Generate skill bodies.** For each skill in **`blueprints/xantham-templates-v31.md` § Skill Templates**, write the literal body to `.claude/skills/<skill-name>/SKILL.md`. Substitute `{{orchestrator_name}}` / `{{orchestrator_lower}}` placeholders. Skills to generate: `<orchestrator_lower>-sync`, `<orchestrator_lower>-maintenance`, `<orchestrator_lower>-orchestration`, `<orchestrator_lower>-brain`, `<orchestrator_lower>-safety`, `<orchestrator_lower>-observability`, `<orchestrator_lower>-blueprint-updates`, plus any others in the Skill Templates section. <!-- TODO: cross-reference Kai-1's skill template section once it lands - skill list above is the contract; bodies come from blueprints/xantham-templates-v31.md. -->
 
-7. **Generate script bodies.** For each script in **`blueprints/xantham-templates-v31.md` § Script Templates**, write the literal body to its indicated path under `scripts/`, then `chmod +x` shell scripts. Mac/Linux/Git Bash: `chmod +x scripts/*.sh scripts/**/*.sh`. Plain PowerShell: skip the chmod (Git Bash handles execution). <!-- TODO: cross-reference Kai-2's script template section once it lands - paths and contents come from blueprints/xantham-templates-v31.md. -->
+7. **Generate script bodies.** Walk every script-bearing section in `blueprints/xantham-templates-v31.md` and write each literal body to its indicated path under `scripts/`. Script bodies live in FOUR distinct sections of the templates appendix and the wizard MUST pull from all four, not just the first one:
+
+   1. **`## Script Templates`** (the always-installed core: healthcheck, verify-runtime-perms, load-context, commit-watcher, log-correction, history, register-project, pre-compaction-sync, post-compaction-reload, recent-telegram, redact-secrets, memory-search, embed-memories.py, check-memory-freshness, session-end-sync, update-handoff, reflect, promote-correction, log-telegram, batch-sync, sync-project-memories, check-blueprint-drift, telegram-signal).
+   2. **`## Common Templates (referenced earlier in this blueprint)`** (setup-db.sh, sync-safety-gates.sh, restore-memory-symlinks.sh). Always installed.
+   3. **`## E1 - sqlite-vec + Nomic-embed`** (embed-memories.sh, memory-search.sh, install-git-hooks.sh, scripts/hooks/post-commit). Install only if `{{install_mode}}=advanced` AND E1 was selected at Q18.
+   4. **`## E4 - Observability`** ({{orchestrator_lower}}-live.sh, audit-archive.sh). Install only if `{{install_mode}}=advanced` AND E4 was selected at Q18.
+
+   Additional cognitive-memory + auth scripts live as their own top-level `## Template: scripts/<name>.sh` headings further down (active-recall, active-recall-entities, dream, dream/phase1-orient, dream/phase2-gather, dream/phase3-consolidate, dream/phase4-prune, update-profile, roll-episodic, weekly-memory-compile, monthly-memory-retrospective, auth-fallback, check-auth-status, export-blueprint, install-launchd-wrappers, regenerate-setup-checklist). Walk those too.
+
+   After writing, `chmod +x` shell scripts. Mac/Linux/Git Bash: `chmod +x scripts/*.sh scripts/**/*.sh`. Plain PowerShell: skip the chmod (Git Bash handles execution).
+
+   Verification: after generating all scripts, list `scripts/` and confirm the four-section contract is honoured. A missing `setup-db.sh` means section 2 was skipped. A missing `install-git-hooks.sh` means section 3 was skipped. A missing `audit-archive.sh` (when E4 selected) means section 4 was skipped.
 
 8. **Generate starter memory seeds.** For each seed in **`blueprints/xantham-templates-v31.md` § Starter Memory Seeds**, write the literal body to its indicated path under `memory/`. Then write `memory/MEMORY.md` as the index pointing at every seed. <!-- TODO: cross-reference Isabella's starter memory seeds section once it lands - seed list comes from blueprints/xantham-templates-v31.md. -->
 
@@ -3305,7 +3329,7 @@ System:
 - Security: {{security}}
 - Messaging: {{messaging}}
 
-Team ({{agent_count}} agents):
+Team ({{agent_count}} specialists + orchestrator):
 - {{orchestrator_name}} (Orchestrator)
 - [for each agent: {{name}} ({{role}})]
 

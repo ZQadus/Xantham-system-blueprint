@@ -319,12 +319,23 @@ The personal-state version (with bot tokens, project names, agent personalities,
 
 ## Don't like it? Uninstall in 2 minutes
 
+The wizard ships a real uninstall script that cleans up every side-effect location it wrote to (statusline, safety gate, shell profile launch functions, launchd plists, AppleScript wrappers, the project dir itself). Run it in two phases.
+
 ```bash
-rm -rf ~/Documents/MyAgent
+# Phase 1: dry-run -- prints the manifest, changes nothing
+bash ~/Documents/MyAgent/scripts/uninstall.sh --dry-run
+
+# Phase 2: apply -- prompts before touching paid assets (the auth-failover
+# API key, the global safety gate that protects other Claude Code projects)
+bash ~/Documents/MyAgent/scripts/uninstall.sh
+
+# Then remove the Telegram plugin from Claude Code
 claude plugin uninstall telegram@claude-plugins-official
 ```
 
-That removes everything. Your Claude.ai subscription, Telegram bot, and NotebookLM notebook stay where they are - delete those manually if desired.
+The uninstall is **idempotent** (safe to run twice) and uses sentinel comments inside the files it owns, so it never touches a statusline or safety gate you wrote yourself. Default behaviour keeps the global safety gate (it protects other Claude Code projects on this machine) and the optional auth-failover API key (paid asset). Pass `--yes` if you want non-interactive defaults.
+
+Things the script does NOT touch on purpose: your Claude.ai subscription, the Telegram bot on Telegram's servers (revoke via @BotFather for a clean break), the NotebookLM notebook on Google's servers.
 
 ## Contributing
 
