@@ -142,11 +142,15 @@ If you see references to `your orchestrator` or `cortana` inside the blueprint -
 
    > **About `--dangerously-skip-permissions`**: the wizard runs hundreds of tool calls (file writes, Bash commands, hook installs) over ~30 minutes. Without this flag you'd be hitting "Allow" every few seconds for the whole install, which is painful and error-prone.
    >
-   > Reasonable concern: **isn't that unsafe?** Yes if you're letting a random Claude session run wild. No once the safety gate is installed, because the safety gate **physically blocks destructive commands at the OS level regardless of permission state** (force-push to main, `rm -rf`, `DROP TABLE`, etc).
+   > **Honest about the trade-off**: there is a window of unprotected execution during the early install steps. Q0 preflight runs Bash commands before the safety gate is generated. Q1 through Q5 collect answers but write minimal files. The safety gate gets generated and activated around Q6-Q9 depending on the mode you pick.
    >
-   > The wizard installs the safety gate in **Step 0** of the install (before any other work happens). Within the first 90 seconds of the wizard running, the hard-blocks are already enforcing. Every step after that (the agent installs, MCP wiring, hook setup, the lot) runs under the safety net. By the time you're answering Q5 the system is fully protected, even with `--dangerously-skip-permissions` still on for the rest of the install.
+   > Once the gate is active, it blocks destructive commands via Claude Code's PreToolUse hook layer (force-push to protected branches, recursive home-directory deletes, filter-branch, disk-format ops, etc) regardless of whether `--dangerously-skip-permissions` is on. Some commands (database drops, schema migrations) are approval-gated rather than hard-blocked, so you stay in the loop on those even after the gate is live.
    >
-   > After the install, you keep the flag on (or off) per your preference. The safety gate keeps working either way. Most operators run with it on for daily work because the orchestrator is fine-grained about what it dispatches to specialists, and the hard-blocks catch the truly dangerous stuff.
+   > Two ways to minimise the early-window risk:
+   > - **Read the install command before you paste it.** It just points Claude at this repo. Nothing exotic.
+   > - **Run the install in a fresh directory** with no existing secrets, repos, or sensitive files. The wizard only writes inside the install directory until you explicitly point it at other projects later.
+   >
+   > After the install, you keep the `--dangerously-skip-permissions` flag on (or off) per your preference. The safety gate keeps working either way. Most operators run with it on for daily work because the orchestrator is fine-grained about what it dispatches to specialists, and the hard-blocks catch the truly dangerous stuff.
 
 2. Paste this single line into the Claude prompt:
 
