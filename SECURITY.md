@@ -110,9 +110,9 @@ If any of the above is a deal-breaker for your environment, install in a sandbox
 
 ### No formal third-party security audit has been completed
 
-The maintainer has not commissioned a security audit from a third-party firm. The threat model in this document, the safety gate implementation, the secret redactor patterns, and the install wizard are reviewed by the maintainer and informed by public critique (see "Reviews and audits" in `README.md`). They are not certified by an external auditor.
+The maintainer has not commissioned a security audit from a third-party firm. The threat model in this document, the safety gate implementation, the secret redactor patterns, and the install wizard are reviewed by the maintainer only. They are not certified by an external auditor.
 
-If you need an audited agentic stack for a regulated environment, this is not currently the project for you. The blueprint is MIT-licensed, so a third-party audit is something a user, an organisation, or a community can fund and publish independently. Audit findings (positive or critical) are welcome via GitHub Issues or PR, and links to public audits are tracked in the `README.md` "Reviews and audits" section.
+If you need an audited agentic stack for a regulated environment, this is not currently the project for you. The blueprint is MIT-licensed, so a third-party audit is something a user, an organisation, or a community can fund and publish independently. Audit findings (positive or critical) are welcome via GitHub Issues or PR.
 
 ## Auth and secrets
 
@@ -138,8 +138,7 @@ The blueprint code lives in this public repository. Before installing:
 - **Audit the install command.** It is a single paste in the README's install section. It tells Claude to read two files from `raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/`. Both files are public, plain-text Markdown. Read them directly if you want to see what the wizard will generate before running it.
 - **Verify the blueprint cryptographically.** Every commit to `main` regenerates `CHECKSUMS.sha256` with SHA256 hashes of the four published artifacts (`xantham-system-v31.md`, `xantham-templates-v31.md`, `LICENSE`, `README.md`). Run `bash scripts/verify-blueprint.sh` (or the curl one-liner in the README) to confirm the bytes you fetched match the bytes the maintainer published.
 - **Pin to a commit SHA you have reviewed.** The README's install section supports pinned-SHA URLs (`/<sha>/xantham-system-v31.md` instead of `/main/xantham-system-v31.md`). Pinning to a SHA defeats the "I trusted main, then the repo was compromised after my audit" attack and makes the install reproducible.
-- **Sandbox the first install.** `docker/Dockerfile.xantham-sandbox` builds a minimal throwaway environment for the first install. Read the wizard output in the container, audit what it produced, and only then graduate to a host install. See `docker/README.md` for the full graduate-to-host flow.
-- **GPG-signed commits.** The maintainer signs commits on this repo with the GPG key associated with the GitHub account ([github.com/ZQadus](https://github.com/ZQadus)). GitHub shows a green "Verified" badge next to every signed commit. An unsigned commit on `main` is a signal worth flagging in an issue.
+- **Optional Docker sandbox.** `docker/Dockerfile.xantham-sandbox` builds a minimal throwaway environment if you want to run the first install inside a container before graduating to host. See `docker/README.md` for the full flow. Not required, presented as an option for users who want the strongest audit posture.
 - **MIT license.** This blueprint is MIT-licensed (see `LICENSE`). You can audit, modify, and redistribute. The maintainer makes no warranty.
 - **No telemetry to the maintainer.** Audit logs are local-only and gitignored. The blueprint does not phone home.
 
