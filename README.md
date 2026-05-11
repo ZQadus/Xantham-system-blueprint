@@ -143,7 +143,7 @@ If you see references to `your orchestrator` or `cortana` inside the blueprint -
 
 ## How to proceed safely
 
-This system runs shell commands, edits files, and pushes commits on your behalf. Meaningful surface area, treat it like any other piece of foreign code. The defaults below are what most installers do.
+This system runs shell commands, edits files, and pushes commits on your behalf. Meaningful surface area, treat it like any other piece of foreign code. Three checks before you install:
 
 1. **Clone the repo locally first.** Read the blueprint Markdown and the wizard scripts at your own pace before you hand them to Claude Code.
 
@@ -156,23 +156,7 @@ This system runs shell commands, edits files, and pushes commits on your behalf.
 
 3. **Do not hand the orchestrator credentials you can't rotate fast.** Telegram bot tokens are revocable from `@BotFather` in seconds. Treat anything else with care. Project-level deploy keys, database passwords, OAuth credentials should be ones you can rotate in minutes if something goes wrong.
 
-### Optional, for the security-conscious
-
-These two are not required. If you want extra confidence before pasting the install prompt, they raise the bar.
-
-- **Verify the blueprint files cryptographically.** A SHA256 manifest at `CHECKSUMS.sha256` tracks every published file.
-
-  ```bash
-  bash scripts/verify-blueprint.sh
-  ```
-
-  Script exits `0` on match, `1` on mismatch, `2` on fetch errors. macOS uses `shasum -a 256`, Linux uses `sha256sum`.
-
-- **Run the first install in a Docker sandbox.** The repo ships `docker/Dockerfile.xantham-sandbox`. Build it, do the first wizard pass inside the container, throw the container away when done. See [`docker/README.md`](docker/README.md) for the full flow. This is the strongest possible audit posture, with the trade-off that you're learning the system inside a container before running it on your real machine.
-
-- **Pin the install command to a specific commit SHA** (rather than `main`). The install command in the next section accepts a `<COMMIT_SHA>` placeholder. Pinning defeats the "I trusted main, then the repo was compromised after my audit" attack and makes your install reproducible across machines.
-
-If anything in the audit feels off, open an issue before installing. The blueprint is going nowhere.
+If you want a higher-paranoia install, the **"How to install in a Docker sandbox (optional)"** section below is for you.
 
 ## Maintainer track record
 
@@ -226,6 +210,52 @@ If anything looks off in the above, do not install. Open an issue or send a ques
 4. When done, the wizard generates eight files at the project root: `SETUP-CHECKLIST.md` (verify install), `USER-GUIDE.md` (your day-one cheat sheet), `BACKUP-AND-RECOVERY.md`, `FIRST-WEEK.md`, `PITFALLS.md`, `MEMORY-HYGIENE.md`, plus two helper scripts in `scripts/`.
 
 5. Close the session, run your new agent's terminal alias (e.g. `myagent` if you named it MyAgent), and the first fresh session walks you through `SETUP-CHECKLIST.md` before any real work.
+
+## How to install in a Docker sandbox (optional)
+
+Most people don't need this. The standard install above is fine if you trust the blueprint after reading it. The Docker route is for users who want to audit the wizard's output inside a throwaway environment before graduating to a host install.
+
+What you get with this route:
+
+- The full wizard runs inside an isolated container. If anything writes to the wrong place, the container is the only thing affected.
+- You can audit what the wizard generated (scripts, hooks, settings.json, agent configs) inside the container before bringing any of it to your real machine.
+- A cryptographic check confirms the blueprint files match the maintainer-published bytes before the wizard runs.
+
+### Step 1: verify the blueprint files cryptographically
+
+A SHA256 manifest at `CHECKSUMS.sha256` tracks every published file. Run the verifier first:
+
+```bash
+bash scripts/verify-blueprint.sh
+```
+
+The script exits `0` on match, `1` on mismatch (do not install), `2` on fetch errors. macOS uses `shasum -a 256`, Linux uses `sha256sum`, both supported.
+
+### Step 2: build and enter the sandbox container
+
+```bash
+docker build -f docker/Dockerfile.xantham-sandbox -t xantham-sandbox docker/
+docker run --rm -it xantham-sandbox
+```
+
+Inside the container, run the standard install command from the section above. The wizard walks you through Q0 through Q19 the same way, but everything it writes lives inside the container's filesystem.
+
+### Step 3: audit what got generated
+
+Inside the container, read the generated files:
+
+- `.claude/hooks/safety-gate.sh` — the safety gate body
+- `.claude/hooks/banned-language-gate.sh` — the banned-language gate body
+- `scripts/` directory — all wizard-generated scripts
+- `CLAUDE.md` — the orchestrator's operational config
+
+If anything looks off, kill the container (`exit` and the `--rm` flag wipes it) and either fix the issue or report it as a GitHub issue.
+
+### Step 4: graduate to host install (optional)
+
+If the audit looks good and you want the system running on your real machine, repeat the standard install on your host filesystem now that you know what to expect. The container can stay around for future test installs or you can discard it.
+
+See [`docker/README.md`](docker/README.md) for the full reference, including how to pin the install to a specific commit SHA for reproducibility.
 
 ## How to use it
 
