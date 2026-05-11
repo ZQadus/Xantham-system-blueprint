@@ -179,6 +179,29 @@ After a sync, you can either keep working in the same session (context window is
 
 The 1M context window on Max plans is generous. Most operators do 4-5 projects per session and `sync` between them or at the end, without hitting any wall.
 
+### Picking back up in a new session
+
+This is the fun bit. After a `sync` or `wrapup`, close the terminal entirely. Next time you sit down, run your orchestrator's launch alias (e.g. `myagent`), and the first message you type into Telegram can just be:
+
+> hi
+
+That single word triggers the maintenance + greeting digest protocol. The orchestrator runs through:
+
+1. **Telegram tail check.** Pulls the last 30-50 messages so it knows what you were actually doing in the previous session, not just what's in HANDOFF.md.
+2. **HANDOFF.md read** for the project (or projects) you were on.
+3. **Unpushed commits scan** across active projects so it knows what's still local-only.
+4. **Working-context recovery** via `bash scripts/load-context.sh`.
+5. **Stale commit detection** via `bash scripts/commit-watcher.sh`.
+6. **Open threads from the AI Brain** (NotebookLM) so anything you queried mid-session that you didn't act on resurfaces.
+
+Then it sends you a single Telegram message: health status, open threads from last session, suggested priorities for today, unpushed commits if any. You can pick the priority and just say "yes" or "do that one first" and you're rolling again with full context, in a session that used zero tokens to get there.
+
+Other greetings that fire the same protocol: `hey`, `hello`, `morning`, `yo`, `gm`, `good morning`, `sup`, `yes`.
+
+If you want to skip the digest and jump straight to a specific project, just say `status <project>` instead. Same picking-back-up data, scoped to one project.
+
+If something is on fire and you need to skip everything, lead with the actual request: "deploy the portfolio" or "fix the bug in NearbyMe" works. The orchestrator will recognise it as a task, not a greeting, and route immediately.
+
 ### Multi-project setup
 
 The orchestrator lives in its own directory (e.g. `~/Documents/Xantham`). Projects can live anywhere on your machine. The orchestrator learns where each one lives from `docs/projects.md` (registered automatically the first time you create a new project, or by running `bash scripts/register-project.sh <folder> <description> [stack]`).
