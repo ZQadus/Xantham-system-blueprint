@@ -156,8 +156,6 @@ This system runs shell commands, edits files, and pushes commits on your behalf.
 
 3. **Do not hand the orchestrator credentials you can't rotate fast.** Telegram bot tokens are revocable from `@BotFather` in seconds. Treat anything else with care. Project-level deploy keys, database passwords, OAuth credentials should be ones you can rotate in minutes if something goes wrong.
 
-If you want a higher-paranoia install, the **"How to install in a Docker sandbox (optional)"** section below is for you.
-
 ## Maintainer track record
 
 This is a single-maintainer open-source project. The most useful security signal you have is the maintainer's prior public work. Verify it directly rather than taking the README's word for it.
@@ -169,6 +167,59 @@ This is a single-maintainer open-source project. The most useful security signal
 If anything looks off in the above, do not install. Open an issue or send a question first.
 
 ## How to install
+
+Two paths, pick the one that fits your trust level. The wizard is identical in both; the only difference is whether you run it inside a throwaway container or directly on your host.
+
+| Path | Best for | Trade-off |
+|---|---|---|
+| **Recommended: Docker sandbox** | First-time installers, security-conscious users, anyone auditing before committing | Need Docker installed. Extra ~5 min to build the container. Highest audit posture. |
+| **Fast path: direct host install** | Users who have already audited the blueprint, or who already trust the maintainer | Less friction, no Docker needed. Lower audit posture by design. |
+
+Both paths use the same install command. The wizard generates the same files. After a successful sandbox install you can repeat the steps on your host and the result is identical.
+
+### Recommended path: install in a Docker sandbox
+
+The full wizard runs inside an isolated container. Filesystem writes stay inside the container. You can audit what got generated before bringing any of it to your real machine.
+
+**Step 1, verify the blueprint files cryptographically.**
+
+A SHA256 manifest at `CHECKSUMS.sha256` tracks every published file. Run the verifier first:
+
+```bash
+git clone https://github.com/ZQadus/Xantham-system-blueprint.git
+cd Xantham-system-blueprint
+bash scripts/verify-blueprint.sh
+```
+
+The script exits `0` on match, `1` on mismatch (do not install), `2` on fetch errors. macOS uses `shasum -a 256`, Linux uses `sha256sum`, both supported.
+
+**Step 2, build and enter the sandbox container.**
+
+```bash
+docker build -f docker/Dockerfile.xantham-sandbox -t xantham-sandbox docker/
+docker run --rm -it xantham-sandbox
+```
+
+Inside the container, run the standard install command from the Fast path below (the same single-paste prompt). The wizard walks Q0 through Q19 identically, but everything it writes lives inside the container.
+
+**Step 3, audit what got generated.**
+
+Read the generated files inside the container:
+
+- `.claude/hooks/safety-gate.sh` for the safety gate body
+- `.claude/hooks/banned-language-gate.sh` for the banned-language gate body
+- `scripts/` directory for all wizard-generated scripts
+- `CLAUDE.md` for the orchestrator's operational config
+
+If anything looks off, type `exit` (the `--rm` flag wipes the container) and either fix the issue locally or report it as a GitHub issue.
+
+**Step 4, graduate to host install when ready.**
+
+If the audit looks good, repeat the Fast-path install on your host filesystem now that you know what to expect. The container can stay around for future test installs or you can discard it.
+
+Full reference + commit-pinning options at [`docker/README.md`](docker/README.md).
+
+### Fast path: install directly on host
 
 1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre.
 
@@ -210,52 +261,6 @@ If anything looks off in the above, do not install. Open an issue or send a ques
 4. When done, the wizard generates eight files at the project root: `SETUP-CHECKLIST.md` (verify install), `USER-GUIDE.md` (your day-one cheat sheet), `BACKUP-AND-RECOVERY.md`, `FIRST-WEEK.md`, `PITFALLS.md`, `MEMORY-HYGIENE.md`, plus two helper scripts in `scripts/`.
 
 5. Close the session, run your new agent's terminal alias (e.g. `myagent` if you named it MyAgent), and the first fresh session walks you through `SETUP-CHECKLIST.md` before any real work.
-
-## How to install in a Docker sandbox (optional)
-
-Most people don't need this. The standard install above is fine if you trust the blueprint after reading it. The Docker route is for users who want to audit the wizard's output inside a throwaway environment before graduating to a host install.
-
-What you get with this route:
-
-- The full wizard runs inside an isolated container. If anything writes to the wrong place, the container is the only thing affected.
-- You can audit what the wizard generated (scripts, hooks, settings.json, agent configs) inside the container before bringing any of it to your real machine.
-- A cryptographic check confirms the blueprint files match the maintainer-published bytes before the wizard runs.
-
-### Step 1: verify the blueprint files cryptographically
-
-A SHA256 manifest at `CHECKSUMS.sha256` tracks every published file. Run the verifier first:
-
-```bash
-bash scripts/verify-blueprint.sh
-```
-
-The script exits `0` on match, `1` on mismatch (do not install), `2` on fetch errors. macOS uses `shasum -a 256`, Linux uses `sha256sum`, both supported.
-
-### Step 2: build and enter the sandbox container
-
-```bash
-docker build -f docker/Dockerfile.xantham-sandbox -t xantham-sandbox docker/
-docker run --rm -it xantham-sandbox
-```
-
-Inside the container, run the standard install command from the section above. The wizard walks you through Q0 through Q19 the same way, but everything it writes lives inside the container's filesystem.
-
-### Step 3: audit what got generated
-
-Inside the container, read the generated files:
-
-- `.claude/hooks/safety-gate.sh` — the safety gate body
-- `.claude/hooks/banned-language-gate.sh` — the banned-language gate body
-- `scripts/` directory — all wizard-generated scripts
-- `CLAUDE.md` — the orchestrator's operational config
-
-If anything looks off, kill the container (`exit` and the `--rm` flag wipes it) and either fix the issue or report it as a GitHub issue.
-
-### Step 4: graduate to host install (optional)
-
-If the audit looks good and you want the system running on your real machine, repeat the standard install on your host filesystem now that you know what to expect. The container can stay around for future test installs or you can discard it.
-
-See [`docker/README.md`](docker/README.md) for the full reference, including how to pin the install to a specific commit SHA for reproducibility.
 
 ## How to use it
 
