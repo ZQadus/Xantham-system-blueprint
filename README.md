@@ -72,6 +72,77 @@ If you see references to `your orchestrator` or `cortana` inside the blueprint -
 
 5. Close the session, run your new agent's terminal alias (e.g. `myagent` if you named it MyAgent), and the first fresh session walks you through `SETUP-CHECKLIST.md` before any real work.
 
+## How to use it
+
+Day-to-day, you drive Xantham from Telegram. Plain English works for most things ("what's the status on project X", "ship the portfolio", "fix the bug in NearbyMe", "draft a Reddit post for r/ClaudeAI"). The orchestrator routes to the right specialist and reports back.
+
+A handful of explicit commands are worth learning early. All of them are typed directly into Telegram.
+
+### Daily commands
+
+| Command | What it does |
+|---|---|
+| `help` | Lists the active commands. Always current, so re-check if you forget what's wired. |
+| `team` | Lists your specialist crew (engineer, research, growth, infra, writing, etc) and what each one is for. |
+| `projects` / `project list` | Shows every project the orchestrator knows about, grouped by category (mobile apps, web, SaaS, tools, etc). |
+| `status <project>` | Reads HANDOFF.md for that project and summarises where you left off. |
+| `healthcheck` | Runs a system check (Telegram plugin, AI Brain auth, memory database, safety hook, project doc coverage, MCP servers). Run it weekly or when something feels off. |
+| `history <query>` | Unified search across Telegram, audit log, git log, and memory markdown. Useful for "when did we decide X" or "where did I save that note about Y". |
+| `brain <question>` | Asks your NotebookLM AI Brain. Use for cross-project questions, old decisions, things you remember but don't know where they live. |
+
+### Shipping work
+
+| Command | What it does |
+|---|---|
+| `ship <project>` | Commits and pushes the project. Verification runs after to confirm the deploy landed (not just the push). |
+| `review <project>` | Runs tests and dispatches a code-reviewer pass over the recent changes. |
+| `deploy <project>` | Promotes to production on Vercel (or the project's configured target). |
+| `nuke <project>` | Stash + clean the working tree. Requires explicit confirmation, never silent. |
+
+### Context window management with `sync`
+
+This is the command that lets one Claude session cover a full day of work without context exhaustion.
+
+Claude Code sessions hold the conversation in a context window. As you work across projects, that window fills up. Older context gets compressed or dropped. Without help, a long session degrades into "what were we doing again" the further you get from where you started.
+
+The fix is `sync`. At the end of a project block (or whenever you context-switch to a different project), you say `sync <project>` and the orchestrator runs a full cycle:
+
+1. **Writes a HANDOFF.md** for the project so the next session knows the exact state.
+2. **Folds the relevant new information into long-term memory** as markdown notes that survive across sessions.
+3. **Updates the Profile bucket** if you signalled anything new about yourself or your priorities.
+4. **Pushes a snapshot to your AI Brain** (NotebookLM) so the cross-session memory layer is current.
+5. **Commits and pushes outstanding work** if the project has a clean state to ship.
+
+Variants:
+
+- `sync` (no project) syncs the current focus project.
+- `sync all` runs the cycle for every project touched in the session, in parallel.
+- `wrapup` or `/wrapup` is the end-of-session version. Runs sync across every touched project + writes a session reflection + closes out cleanly.
+
+After a sync, you can either keep working in the same session (context window is now lighter because long-term state is on disk and in the Brain), or open a fresh terminal and start a clean Claude session. The fresh session will pick up exactly where you left off via HANDOFF.md and the memory layer, with zero context used.
+
+The 1M context window on Max plans is generous. Most operators do 4-5 projects per session and `sync` between them or at the end, without hitting any wall.
+
+### Multi-project setup
+
+The orchestrator lives in its own directory (e.g. `~/Documents/Xantham`). Projects can live anywhere on your machine. The orchestrator learns where each one lives from `docs/projects.md` (registered automatically the first time you create a new project, or by running `bash scripts/register-project.sh <folder> <description> [stack]`).
+
+Working on multiple things in parallel is the default. Telling Telegram "work on NearbyMe and the portfolio in parallel" dispatches two agents in their own working trees so they don't trample each other. The orchestrator coordinates the merge back.
+
+### Pattern that works for most operators
+
+- Morning: open a fresh session, the orchestrator's morning digest fires automatically (if enabled) and tells you what's pending across all projects.
+- Throughout the day: work in long focused blocks via Telegram, `sync` whenever you context-switch.
+- End of day: `wrapup` runs sync across every touched project, writes a session reflection, closes cleanly.
+- Next morning: fresh session, zero context, full state restored.
+
+### When something goes wrong
+
+- Read the `PITFALLS.md` file the wizard wrote during install. It catalogues the failure modes I've hit so you don't have to.
+- `healthcheck` will tell you which subsystem is unhappy.
+- `history "<keyword>"` finds anything I logged at the time.
+- The safety hook blocks any destructive command (force push to main, `rm -rf`, `DROP TABLE`, etc) regardless of who asked. If you genuinely need to run one, you run it yourself in your own terminal, not via the orchestrator.
+
 ## Files in this repo
 
 - **`xantham-system-v31.md`** (~4900 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
