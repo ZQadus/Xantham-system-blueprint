@@ -1289,9 +1289,11 @@ The first-Telegram welcome instructs the user to run `/telegram:access` to appro
 
 ## Step 11: Verify auto-embedding post-commit hook
 
-This hook is what makes new memory files searchable across sessions. Without it, `memory-search.sh` cannot find anything you save.
+This hook is what makes new memory files searchable across sessions via sqlite-vec. Without it, `memory-search.sh` cannot find anything you save.
 
-- [ ] **Post-commit hook is installed and executable**
+**Skip this step if you picked Simple mode.** The auto-embedding post-commit hook is Advanced-mode only because it depends on sqlite-vec, which is itself part of the E1 semantic-memory extension. Simple-mode installs use grep + the MEMORY.md index file for memory lookup, so the hook is not needed and `scripts/install-git-hooks.sh` is not generated. Move to Step 12.
+
+- [ ] **Post-commit hook is installed and executable** (Advanced mode only)
 
   Mac/Linux/Git-Bash:
   ```bash
