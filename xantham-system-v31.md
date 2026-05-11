@@ -2643,6 +2643,34 @@ Store the complete roster as `{{agents}}` -- a list of `{role, name}` pairs.
 
 ---
 
+### Q7.5: Agent spawn aggressiveness
+
+Decides how many agents your orchestrator dispatches in parallel for medium-and-larger tasks. This is the "how conservative do you want me to be with tokens" knob.
+
+Ask:
+> One more thing on the team setup, how aggressive should parallel agent dispatch be?
+>
+> **Conservative (1 at a time)** -- the orchestrator runs work sequentially, one specialist at a time. Easiest on a Pro or Max 5x plan. Slower wall-clock but predictable token usage. Pick this if you want to feel each token before it's spent.
+>
+> **Balanced (up to 3 in parallel)** -- the orchestrator runs 2-3 specialists in parallel when work decomposes cleanly (e.g. researcher + writer + engineer on the same project). Comfortable on Max 5x, safe on Max 20x. Good default.
+>
+> **Aggressive (up to 16 in parallel)** -- the orchestrator fans out to 5-16 specialists for big build sprints. Requires Max 20x to be comfortable; even then, watch the 5-hour rolling rate limit if you're running 8+ heavy-research or build agents at once. Pick this if you want maximum throughput and you've used multi-agent work before.
+>
+> You can change this any time later by editing the line in CLAUDE.md. The default is **Balanced** if you don't pick.
+
+Store the answer as `{{spawn_aggressiveness}}` with values `conservative` / `balanced` / `aggressive`. The wizard's CLAUDE.md generation step uses this to bake the right orchestration habits into the file:
+
+- **Conservative**: writes "Run work sequentially, one specialist at a time. Spawn parallel agents only when explicit user request." into the orchestration section.
+- **Balanced**: writes "Default to 2-3 parallel specialists when work decomposes cleanly. Fan out further only on explicit user request or for sprints clearly bigger than 3 lanes."
+- **Aggressive**: writes "Default to aggressive parallel dispatch. Spawn 5-16 specialists for big sprints. Use Agent Teams channel pattern when work has cross-talk. Watch the 5-hour rolling rate limit on Max 20x."
+
+If the user is on Pro or Max 5x (Q5 answer) and picks Aggressive, warn them once:
+> Heads up: you're on {{plan_name}}. Aggressive parallel dispatch can chew through your 5-hour window fast if you spawn 8+ heavy agents. You can still pick it, but Balanced is usually the right call below Max 20x. Confirm Aggressive or want to switch to Balanced?
+
+If they confirm Aggressive on a smaller plan, respect it. Don't second-guess twice.
+
+---
+
 ### Q8: Security level
 
 Ask:
