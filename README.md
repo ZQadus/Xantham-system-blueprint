@@ -134,11 +134,19 @@ If you see references to `your orchestrator` or `cortana` inside the blueprint -
 1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre.
 
    **If you've never run Claude Code from a terminal before:**
-   - **Mac:** Open Terminal (⌘+space, type Terminal). Type `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent && claude`. Press enter.
-   - **Windows:** Open PowerShell. Type `mkdir $env:USERPROFILE\Documents\MyAgent ; cd $env:USERPROFILE\Documents\MyAgent ; claude`. Press enter.
+   - **Mac:** Open Terminal (⌘+space, type Terminal). Type `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent && claude --dangerously-skip-permissions`. Press enter.
+   - **Windows:** Open PowerShell. Type `mkdir $env:USERPROFILE\Documents\MyAgent ; cd $env:USERPROFILE\Documents\MyAgent ; claude --dangerously-skip-permissions`. Press enter.
    - **Linux:** Same as Mac.
 
    You'll see a screen that says **"Welcome to Claude Code"** with a `>` prompt. NOT the regular terminal prompt (`$` or `%`). If you see `$` or `%` after running `claude`, the command didn't launch the TUI - check that Claude Code is installed (claude.com/claude-code).
+
+   > **About `--dangerously-skip-permissions`**: the wizard runs hundreds of tool calls (file writes, Bash commands, hook installs) over ~30 minutes. Without this flag you'd be hitting "Allow" every few seconds for the whole install, which is painful and error-prone.
+   >
+   > Reasonable concern: **isn't that unsafe?** Yes if you're letting a random Claude session run wild. No once the safety gate is installed, because the safety gate **physically blocks destructive commands at the OS level regardless of permission state** (force-push to main, `rm -rf`, `DROP TABLE`, etc).
+   >
+   > The wizard installs the safety gate in **Step 0** of the install (before any other work happens). Within the first 90 seconds of the wizard running, the hard-blocks are already enforcing. Every step after that (the agent installs, MCP wiring, hook setup, the lot) runs under the safety net. By the time you're answering Q5 the system is fully protected, even with `--dangerously-skip-permissions` still on for the rest of the install.
+   >
+   > After the install, you keep the flag on (or off) per your preference. The safety gate keeps working either way. Most operators run with it on for daily work because the orchestrator is fine-grained about what it dispatches to specialists, and the hard-blocks catch the truly dangerous stuff.
 
 2. Paste this single line into the Claude prompt:
 
