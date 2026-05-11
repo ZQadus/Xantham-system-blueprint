@@ -2845,6 +2845,56 @@ Ask:
 **Default:** superpowers.
 **Affects:** Plugin installation commands run during setup, skill references in CLAUDE.md.
 
+**After the install commands run, the wizard must pause and walk the user through a session reload.** Plugins (including the Telegram plugin) and any hook updates do not take effect in the current Claude session. The new tools, slash commands, and hooks only register on next launch.
+
+The wizard must capture the current session id BEFORE prompting reload, so the user can come back to the same conversation. Run:
+
+```bash
+SESSION_ID=$(claude session current 2>/dev/null || echo "")
+```
+
+(If `claude session current` is unavailable on the user's Claude Code version, fall back to: print to chat "Your session ID is in the top-right corner of the Claude Code window, copy it before you close.")
+
+Then present the user with the exact resume sequence:
+
+> Heads up, this is the one step you have to do yourself. Plugins and hooks just installed do not become active in the current session. You need to **close this Claude Code session, open a fresh terminal, and resume the same conversation** so we can continue setup with the new tools active.
+>
+> Here is exactly how:
+>
+> **1. Exit this session cleanly.** Press `Ctrl+C` twice, or type `/exit`, or close the terminal window.
+>
+> **2. Open a fresh terminal.** Same kind you opened to start the install (Terminal on Mac, PowerShell on Windows).
+>
+> **3. Resume this exact session.** Run one of these (whichever lands sooner):
+>
+> ```bash
+> # Option A, your agent's launch alias (if it was created in earlier steps)
+> {{orchestrator_lower}}-resume
+> ```
+>
+> ```bash
+> # Option B, direct Claude Code resume flag
+> cd {{install_dir}} && claude --resume {{session_id}}
+> ```
+>
+> ```bash
+> # Option C, latest-session shortcut
+> cd {{install_dir}} && claude --continue
+> ```
+>
+> **4. Tell me "resumed".** I'll verify the plugin loaded + continue the install.
+
+If the user reports the resume failed (alias not found, session id stale), guide the recovery:
+
+> Three quick checks:
+> - If the alias was not found, your shell config did not pick up the launch alias yet. Run `source ~/.zshrc` (Mac) or `. $PROFILE` (Windows PowerShell) in the fresh terminal, then retry the alias.
+> - If `--resume <id>` errors with "session not found", the session expired or was cleaned up. Use `claude --continue` instead, it grabs the most recent session.
+> - If neither works, run `claude` fresh and tell me "starting fresh", I will re-read your install state from `data/runtime/install-state.json` and pick up where we left off.
+
+Store the session capture as `{{session_id}}` (for the prompt template above) and `{{resume_command}}` (the alias if available, else the `--resume` line).
+
+**Affects:** Whether the wizard pauses for a session reload after Q14, whether the SETUP-CHECKLIST.md tells the user how to resume cleanly, whether the install resumes the same conversation or restarts fresh.
+
 ---
 
 ### Q15: First project
