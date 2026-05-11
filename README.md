@@ -67,6 +67,38 @@ The system is general-purpose. Anything Claude Code can do, your specialist crew
 
 The bigger principle: anything you'd type into a Claude conversation, you can route through this system, with the difference that it remembers across sessions, runs specialist agents in parallel, and ships safely.
 
+## New to agentic AI? Read this first
+
+If you've used ChatGPT or the Claude.ai web chat, you already know what an AI conversation looks like. You type, it answers. Useful, but you have to drive every step.
+
+**Agentic** is the upgrade. Instead of just answering, the AI takes actions: runs commands, reads files, edits code, searches the web, pushes deploys, sends Telegram messages. It uses tools the way you would. You give it a goal in plain English, it figures out the steps and executes them. You stay in the loop on the important calls, but you don't have to drive every keystroke.
+
+Xantham is **multi-agent on top of that.** Instead of one AI doing everything, you get a master (the "orchestrator") plus a crew of 9 specialists, each pointed at a different domain.
+
+### Who's on the crew
+
+- **Engineer** -- writes and reviews code, ships builds, fixes bugs
+- **Research** -- competitive analysis, paper deep-dives, market intel
+- **Growth** -- ASO, launch playbooks, paid + organic strategy
+- **Social** -- platform-tactical content for Reddit, X, LinkedIn, TikTok
+- **Infra** -- deploys, CI/CD, DNS, monitoring, hosting
+- **Writing** -- long-form, decks, docs, emails, no AI tells
+- **Business** -- pricing, partnerships, contracts, legal
+- **Trading** -- strategy research, backtests, portfolio analysis (no live capital unless you wire it yourself)
+- **Human dynamics** -- negotiation, networking, cold outreach, presence
+
+The orchestrator is the boss. You talk to it. It routes work to the right specialist (or several at once), then reports back. Most tasks need one specialist. Bigger sprints get 3-5 specialists running in parallel in their own isolated working trees so they don't trample each other.
+
+### Three things this gives you over a regular Claude chat
+
+1. **Persistent memory.** A regular Claude session forgets you when you close the tab. Xantham writes notes to disk and to an AI Brain (NotebookLM) so the next session knows everything the last one did. Across days, weeks, months.
+2. **Parallel work.** A regular Claude is one thread. Xantham can run 5-16 specialists in parallel for big sprints. Your wall-clock time on a 4-hour build collapses to 45 minutes.
+3. **Safety hooks.** A regular Claude can in theory be talked into a destructive command. Xantham's safety gate physically refuses force-push to main, `rm -rf`, dropping a database, etc. Even if you tell it to. The hard-blocks are non-negotiable by design.
+
+### One thing to internalise before you install
+
+You're not "using" an AI assistant. You're **running a small operation** that happens to be entirely AI-driven. You're the operator. The orchestrator is your chief of staff. The specialists are your team. You direct, they execute, the system remembers. The mental model shift from "AI helper" to "AI operation" is the actual unlock. Most of the value of Xantham comes from leaning into that shift rather than treating it like a fancier ChatGPT.
+
 ## Before you start
 
 You'll need:
