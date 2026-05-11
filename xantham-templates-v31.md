@@ -1283,7 +1283,12 @@ secret_scan() {
     # Vercel access token, AWS access key, Stripe live keys, Slack bot/user/app,
     # Telegram bot token (digits:hash), Google OAuth client secret, generic
     # private-key blocks.
-    local patterns='sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{40,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|ghu_[A-Za-z0-9]{30,}|ghs_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|vca_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk_live_[A-Za-z0-9]{20,}|rk_live_[A-Za-z0-9]{20,}|xox[bpoars]-[A-Za-z0-9-]{10,}|[0-9]{8,12}:[A-Za-z0-9_-]{30,}|GOCSPX-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    # OpenAI branch covers legacy (sk-<48 char alnum>) AND modern formats
+    # introduced 2024: project-scoped (sk-proj-*) and service-account
+    # (sk-svcacct-*) keys. Both modern formats carry underscores + hyphens
+    # in the body, so the character class must include [-_] in addition to
+    # [A-Za-z0-9]. 30-char minimum guards against CSS-class hits on `sk-`.
+    local patterns='sk-ant-[A-Za-z0-9_-]{20,}|sk-(proj|svcacct)-[A-Za-z0-9_-]{30,}|sk-[A-Za-z0-9]{40,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|ghu_[A-Za-z0-9]{30,}|ghs_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|vca_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk_live_[A-Za-z0-9]{20,}|rk_live_[A-Za-z0-9]{20,}|xox[bpoars]-[A-Za-z0-9-]{10,}|[0-9]{8,12}:[A-Za-z0-9_-]{30,}|GOCSPX-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
     # Find all tracked-or-untracked files except .git and gitignored content.
     # Using git ls-files keeps us inside the user's gitignore boundary.
     local files
@@ -1315,8 +1320,15 @@ secret_scan() {
         [[ -n "$size" && "$size" -gt 1048576 ]] && continue
         # Match patterns. Strip false-positive contexts before checking.
         local matches
+        # Whitelist common false-positive contexts. NOTE: we deliberately do
+        # NOT whitelist `# NEVER COMMIT` / `# DO NOT COMMIT` here. Those are
+        # comments a user adds NEXT to a real secret while intending to come
+        # back and remove it later. Whitelisting them would let a real key
+        # slip through if the line includes that comment. If you need to
+        # mark a literal placeholder, use `# placeholder` (already whitelisted)
+        # or rename the variable.
         matches=$(grep -E "$patterns" "$fullpath" 2>/dev/null | \
-            grep -Ev '(EXAMPLE|example|YOUR_|placeholder|<your_|class=|className=|"sk-"|`sk-`|# NEVER COMMIT|# DO NOT COMMIT|XXXXX|REPLACE_ME)' \
+            grep -Ev '(EXAMPLE|example|YOUR_|placeholder|<your_|class=|className=|"sk-"|`sk-`|XXXXX|REPLACE_ME)' \
             || true)
         if [[ -n "$matches" ]]; then
             echo "  SECRET-SCAN HIT in $f:" >&2
@@ -1388,7 +1400,7 @@ echo "=== Done ==="
 **Why each new step:**
 
 - `.gitignore` written first (step 3): blocks `.env` / `node_modules/` / build artefacts from ever being staged.
-- Secret scan (step 5): catches the case where a user dropped an API key in `config.js` or similar before running the script. Patterns cover Anthropic, OpenAI, GitHub PATs, Vercel, AWS, Stripe live, Slack, Telegram bot tokens, Google OAuth client secrets, and PEM-encoded private keys. Whitelist strips out `class=`/`className=` (CSS hits on `sk-`), `EXAMPLE`/`placeholder`/`<your_` (template strings), and explicit "DO NOT COMMIT" comments.
+- Secret scan (step 5): catches the case where a user dropped an API key in `config.js` or similar before running the script. Patterns cover Anthropic (`sk-ant-*`), OpenAI (legacy `sk-*`, project `sk-proj-*`, service-account `sk-svcacct-*`), GitHub PATs, Vercel, AWS, Stripe live, Slack, Telegram bot tokens, Google OAuth client secrets, and PEM-encoded private keys. Whitelist strips ONLY contexts that are almost-never-secrets: `class=`/`className=` (CSS hits on `sk-`), `EXAMPLE`/`placeholder`/`<your_` (template strings), `XXXXX`/`REPLACE_ME` (clear placeholder markers). Deliberately NOT in the whitelist: `# DO NOT COMMIT` / `# NEVER COMMIT`. Those are comments users typically add NEXT TO a real secret, and whitelisting them would silently let the secret through.
 - Explicit `git add` (step 6): scaffolded docs + `.gitignore` only. If the user has other files, they add them deliberately after reviewing.
 - `--dry-run`: prints every action without writing or committing. Useful before running on a folder that already has content.
 
@@ -1426,6 +1438,11 @@ data/audit/*.jsonl
 .env.*
 !.env.example
 
+# direnv per-directory env (`direnv allow` files frequently hold
+# `export ANTHROPIC_API_KEY=...` etc., same blast radius as .env).
+.envrc
+.envrc.local
+
 # --- LARGE BINARY / GENERATED CONTENT ---
 
 # sqlite-vec semantic memory database + WAL/journal sidecars (multi-MB,
@@ -1440,13 +1457,46 @@ data/vector-memory.db
 node_modules/
 __pycache__/
 *.pyc
-.DS_Store
 dist/
 build/
 .next/
 coverage/
 .venv/
 venv/
+
+# --- OS-specific junk ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+# Linux + editor swap files
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+*.swp
+*.swo
+*.swn
+
+# --- IDE / editor artefacts ---
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
 
 # --- NOT IGNORED, FOR THE RECORD ---
 #
@@ -1464,8 +1514,11 @@ venv/
 - `data/runtime/`: holds `bot-token.txt`, session flags, the Telegram inbound-payload file, the turn-contract. Bot token leak is the worst-case outcome on first push.
 - `logs/` + `data/audit/*.jsonl` (with `!data/audit/archive/` exception): live logs reveal attempted destructive commands with timestamps; archived gzips are intentionally kept for compliance / forensics.
 - `.env` family: standard but worth being explicit, the gate has no way to scan env files for leakage.
+- `.envrc` + `.envrc.local` (direnv): same blast radius as `.env`. Frequently holds `export ANTHROPIC_API_KEY=...` for users who use direnv to scope env vars per directory.
 - `data/vector-memory.db` + sqlite sidecars: regenerable from `memory/` markdown via `scripts/embed-memories.py`. No reason to ship binary churn.
 - `node_modules/` etc.: standard, prevents repo bloat.
+- OS-specific junk block (`.DS_Store`, `Thumbs.db`, `Desktop.ini`, `*.swp`, `*~`, etc.): the blueprint pitches first-class Mac + Windows + Linux support, so mixed-team installs see all three classes of OS noise. Ignoring all three avoids "your `Thumbs.db` is in my PR" cross-OS churn.
+- IDE artefact block (`.idea/`, `.vscode/`, `*.iml`, `.project`, `.classpath`): different team members use JetBrains / VS Code / Eclipse; keeping IDE state out of the repo prevents merge churn on settings that are per-developer, not per-project.
 
 **Note on `~/.config/claude/api-key`:** the optional Advanced-mode auth-failover key (Extension E6) lives outside the repo by design (`$HOME/.config/claude/api-key`, mode `0600`). There is nothing to gitignore. The uninstall script prompts before deleting it.
 
@@ -1515,6 +1568,26 @@ STATUSLINE_SENTINEL="# XANTHAM-SENTINEL: statusline-v31"
 SHELL_SENTINEL_START="# XANTHAM-SENTINEL-BEGIN: launch-functions"
 SHELL_SENTINEL_END="# XANTHAM-SENTINEL-END: launch-functions"
 
+# Embedded inside generated launchd plist XML as a comment. Uninstall
+# content-greps for this string instead of trusting filename glob.
+PLIST_SENTINEL="XANTHAM-SENTINEL: launchd-plist-v31"
+
+# Marker file written inside every AppleScript .app bundle the wizard
+# builds via install-launchd-wrappers.sh. Uninstall checks for this
+# file before rm -rf'ing the bundle.
+APP_SENTINEL_REL="Contents/Resources/.xantham-sentinel"
+
+# Sidecar marker the wizard writes to ~/.claude/ when it mutates
+# settings.json. Without this, uninstall's jq-fallback path refuses to
+# touch settings.json (someone else's install or hand-written config).
+SETTINGS_SIDECAR="$HOME/.claude/.settings.json.xantham-managed"
+
+# Sidecar marker the wizard writes to ~/.config/claude/ when the
+# auth-failover api-key file was provisioned by THIS wizard. Without
+# this, uninstall refuses to prompt for the api-key (treats it as
+# user-provisioned and out of scope).
+API_KEY_SIDECAR="$HOME/.config/claude/.api-key-installed-by-xantham"
+
 # --- helpers ---
 say() { echo "  $*"; }
 plan() { echo "  - $*"; }
@@ -1551,14 +1624,14 @@ echo "=== {{orchestrator_name}} uninstall ==="
 echo
 echo "Manifest -- files this script will inspect or remove:"
 
-plan "Project directory: $PROJECT_DIR"
-plan "Statusline script: $HOME_DIR/.claude/statusline-command.sh (only if wizard-installed)"
-plan "Claude Code settings: $HOME_DIR/.claude/settings.json (strip statusLine block + restore from .pre-install backup if present)"
-plan "Shell launch functions in: ~/.zshrc, ~/.bashrc, \$PROFILE (only between XANTHAM sentinels)"
-plan "Global safety gate: $HOME_DIR/.claude/hooks/safety-gate.sh (prompts before removing)"
-plan "launchd plists: $HOME_DIR/Library/LaunchAgents/com.${ORCHESTRATOR_LOWER}.*.plist (Mac only)"
-plan "AppleScript wrappers: $HOME_DIR/Applications/${ORCHESTRATOR_LOWER}-*.app (Mac only)"
-plan "Auth-failover API key: $HOME_DIR/.config/claude/api-key (prompts before removing; paid asset)"
+plan "Project directory: $PROJECT_DIR (prompts before removing)"
+plan "Statusline script: $HOME_DIR/.claude/statusline-command.sh (sentinel-gated, only if wizard-installed)"
+plan "Claude Code settings: $HOME_DIR/.claude/settings.json (restore from .pre-install backup if present, jq-strip only if .xantham-managed sidecar present)"
+plan "Shell launch functions in: ~/.zshrc, ~/.bashrc, \$PROFILE (sentinel-gated, between XANTHAM sentinels)"
+plan "Global safety gate: $HOME_DIR/.claude/hooks/safety-gate.sh (sentinel-gated, prompts before removing)"
+plan "launchd plists: $HOME_DIR/Library/LaunchAgents/com.${ORCHESTRATOR_LOWER}.*.plist (Mac only, content-sentinel-gated)"
+plan "AppleScript wrappers: $HOME_DIR/Applications/${ORCHESTRATOR_LOWER}-*.app (Mac only, marker-file-gated)"
+plan "Auth-failover API key: $HOME_DIR/.config/claude/api-key (sidecar-gated; prompts before removing only if THIS wizard provisioned it)"
 echo
 echo "Not touched: Telegram bot upstream (revoke via @BotFather), NotebookLM notebook, Anthropic subscription."
 echo
@@ -1592,35 +1665,58 @@ fi
 SETTINGS="$HOME_DIR/.claude/settings.json"
 SETTINGS_BACKUP="$HOME_DIR/.claude/settings.json.pre-install"
 if [[ -f "$SETTINGS_BACKUP" ]]; then
+    # The .pre-install backup is itself a sentinel: it only exists because
+    # the wizard wrote it before mutating settings.json. Safe to restore.
     say "Found pre-install backup -- restoring $SETTINGS from .pre-install"
     do_or_say "cp \"$SETTINGS_BACKUP\" \"$SETTINGS\""
-elif [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
+    do_or_say "rm -f \"$SETTINGS_BACKUP\""
+elif [[ -f "$SETTINGS_SIDECAR" ]] && [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
+    # Backup is missing but the wizard's sidecar marker is present, so we
+    # know this settings.json was mutated by THIS install. Safe to jq-strip.
     if jq -e '.statusLine' "$SETTINGS" >/dev/null 2>&1; then
-        say "No backup found -- stripping statusLine block from settings.json via jq"
+        say "No backup but sidecar present -- stripping statusLine block via jq"
         if [[ $DRY_RUN -eq 0 ]]; then
             local_tmp=$(mktemp)
             jq 'del(.statusLine)' "$SETTINGS" > "$local_tmp" && mv "$local_tmp" "$SETTINGS"
         fi
     fi
+    do_or_say "rm -f \"$SETTINGS_SIDECAR\""
+elif [[ -f "$SETTINGS" ]]; then
+    say "settings.json present but no pre-install backup AND no Xantham sidecar -- leaving alone (cannot prove we wrote it)"
 fi
 
-# --- step 3: launchd plists (Mac only) ---
-echo "[3/8] launchd plists (Mac only)"
+# --- step 3: launchd plists + AppleScript wrappers (Mac only) ---
+echo "[3/8] launchd plists + AppleScript wrappers (Mac only)"
 if [[ "$(uname)" == "Darwin" ]]; then
     PLIST_DIR="$HOME_DIR/Library/LaunchAgents"
     if [[ -d "$PLIST_DIR" ]]; then
         for plist in "$PLIST_DIR"/com.${ORCHESTRATOR_LOWER}.*.plist; do
             [[ -f "$plist" ]] || continue
-            say "Unloading and removing $plist"
-            do_or_say "launchctl unload \"$plist\" 2>/dev/null || true"
-            do_or_say "rm -f \"$plist\""
+            # Content-grep for the XML-comment sentinel the wizard embedded
+            # in every plist body. Without this, a plist that just happens
+            # to share the com.<orchestrator>. prefix (e.g. a user-written
+            # one outside the wizard) gets left alone.
+            if grep -q -F "$PLIST_SENTINEL" "$plist" 2>/dev/null; then
+                say "Unloading and removing $plist (sentinel present)"
+                do_or_say "launchctl unload \"$plist\" 2>/dev/null || true"
+                do_or_say "rm -f \"$plist\""
+            else
+                say "Plist $plist lacks our sentinel -- leaving alone"
+            fi
         done
     fi
     if [[ -d "$HOME_DIR/Applications" ]]; then
         for app in "$HOME_DIR/Applications/${ORCHESTRATOR_LOWER}-"*.app; do
             [[ -d "$app" ]] || continue
-            say "Removing AppleScript wrapper $app"
-            do_or_say "rm -rf \"$app\""
+            # Marker file written by install-launchd-wrappers.sh after
+            # osacompile. Without this, the .app bundle was built by hand
+            # or by someone else and we leave it alone.
+            if [[ -f "$app/$APP_SENTINEL_REL" ]]; then
+                say "Removing AppleScript wrapper $app (sentinel present)"
+                do_or_say "rm -rf \"$app\""
+            else
+                say "AppleScript wrapper $app lacks our sentinel -- leaving alone"
+            fi
         done
     fi
 else
@@ -1647,12 +1743,18 @@ fi
 echo "[5/8] Auth-failover API key at ~/.config/claude/api-key"
 API_KEY="$HOME_DIR/.config/claude/api-key"
 if [[ -f "$API_KEY" ]]; then
-    say "Paid Anthropic API key present. Keeping it lets you reuse the key in other tools."
-    if confirm "Remove the API key file?" "N"; then
-        do_or_say "rm -f \"$API_KEY\""
-        say "Removed API key"
+    if [[ -f "$API_KEY_SIDECAR" ]]; then
+        say "Paid Anthropic API key present + Xantham sidecar found (this wizard provisioned it)."
+        say "Keeping it lets you reuse the key in other tools."
+        if confirm "Remove the API key file?" "N"; then
+            do_or_say "rm -f \"$API_KEY\""
+            do_or_say "rm -f \"$API_KEY_SIDECAR\""
+            say "Removed API key + sidecar"
+        else
+            say "Keeping API key at $API_KEY"
+        fi
     else
-        say "Keeping API key at $API_KEY"
+        say "API key at $API_KEY exists but no Xantham sidecar -- user-provisioned, leaving alone"
     fi
 fi
 
@@ -4075,11 +4177,11 @@ If multiple Claude Code sessions on different machines share the same bot token,
 
 NotebookLM auth runs through the `notebooklm-py` CLI which holds a Google session. When it expires (usually after about 14 days of inactivity), the next sync push fails silently and the AI Brain stops getting fresh snapshots.
 
-1. Run `notebooklm auth` from inside the install. It opens a browser, you sign in with Google again, the session file refreshes.
-2. Test with a small push: `bash scripts/push-brain.sh test`. If the source shows up in the notebook, auth is good.
-3. If push still fails, check the notebook ID in `data/runtime/brain.json` matches an existing notebook in your Google account. Notebooks deleted from the web UI keep returning errors until the local ID is updated.
+1. Run `notebooklm login` from inside the install. It opens a browser, you sign in with Google again, the session file refreshes.
+2. Test with a small push by triggering the next sync from Telegram (`sync <project>`). The sync step pushes a fresh snapshot to the Brain. If the source shows up in the notebook, auth is good. If you want a direct test without the full sync, the `notebooklm-py` CLI can list sources on the current notebook (`notebooklm list-sources <notebook-id>`); a successful list confirms auth.
+3. If push still fails, check the notebook ID in `data/runtime/brain-current.json` (the `current_id` field) matches an existing notebook in your Google account. Notebooks deleted from the web UI keep returning errors until the local ID is updated.
 
-NotebookLM caps each notebook at around 100 sources. The system rolls over to a fresh monthly partition automatically, but if a push fails right around the cap, run `bash scripts/brain-rollover.sh` to force the rollover.
+NotebookLM caps each notebook at around 100 sources. The system is designed to roll over to a fresh monthly partition (a notebook named `{{orchestrator_name}} AI Brain: YYYY-MM`). If a push fails right around the cap and rollover did not fire, force a manual rollover with the `notebooklm-py` CLI: `notebooklm create "{{orchestrator_name}} AI Brain: $(date +%Y-%m)"`, then edit `data/runtime/brain-current.json` so `current_id` points at the new notebook ID. The next push lands cleanly.
 
 ## Recovery: the safety gate gets corrupted
 
@@ -4196,7 +4298,7 @@ If `review` returns nothing useful, the project probably doesn't have CLAUDE.md 
 
 Pick one of these three. They're how operators make the system actually theirs.
 
-**Option A. Add a personal note to the Profile bucket.** The Profile bucket (`memory/profile_{{orchestrator_lower}}.md` or `memory/profile_<your-name>.md`) is the third leg of the Karpathy three-bucket pattern. It holds session-aware narrative about you: current focus, recent decisions, current mood, work context. Tell the orchestrator: "update my profile, I'm currently focused on X and Y". It edits the file. The orchestrator reads it at session start, so this is where you bias its priorities.
+**Option A. Add a personal note to the Profile bucket.** The Profile bucket (`memory/profile_{{user_name_lower}}.md`) is the third leg of the Karpathy three-bucket pattern. It is a per-user file, named after you (not the orchestrator). It holds session-aware narrative about you: current focus, recent decisions, current mood, work context. Tell the orchestrator: "update my profile, I'm currently focused on X and Y". It edits the file. The orchestrator reads it at session start, so this is where you bias its priorities.
 
 **Option B. Define a custom skill.** The orchestrator has skills under `.claude/skills/`. Each skill is a folder with a `SKILL.md` containing a `description` field that controls when the skill fires. To add a custom one, tell the orchestrator: "create a skill called `<name>` that fires when I say X, loads context Y, and tells you to do Z". The orchestrator scaffolds the skill, commits it, and uses it next time the trigger fires.
 
@@ -4243,19 +4345,19 @@ If `/mcp` shows a plugin disconnected, try `/mcp restart <plugin-name>` from the
 1. Is your laptop awake? Telegram polling pauses on sleep. Mac: open a second terminal, run `caffeinate -i` to keep it awake while a long task runs. Windows: Settings, System, Power, set sleep to "Never" while plugged in.
 2. Is the Claude Code session actually running? Look at your terminal. You should see the `>` prompt of Claude Code, not your normal shell `$` or `%`.
 3. From your Claude Code session, run `/mcp`. The `telegram` server should show `connected`. If not, `/mcp restart telegram`.
-4. Run `/telegram:diagnose` from your Claude Code prompt. The diagnostic skill checks bot token validity, pairing state, allowlist policy, and recent poll errors. It prints the first failing thing.
-5. Check the bot token in `data/runtime/telegram.json`. If it looks wrong or empty, re-paste it. Get a fresh one from `@BotFather` if needed.
+4. Run the manual diagnostic checklist: (a) confirm `data/runtime/telegram.json` exists and is mode 0600 (`ls -la data/runtime/telegram.json`); (b) read the bot token from that file and hit `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"` from the shell, expecting a JSON response with `ok: true` plus the bot's username; (c) check `claude mcp list` shows `telegram` as connected; (d) check that no other Claude Code session is running with the same token (only one polling consumer per token). Whichever step fails first is the issue to fix.
+5. If the bot token in `data/runtime/telegram.json` looks wrong or empty, re-paste it. Get a fresh one from `@BotFather` if needed, then re-run `/telegram:configure`.
 6. If multiple Claude Code sessions on different machines share the same bot token, they fight over `getUpdates`. Only one session per token. Close the others.
 
 ## NotebookLM Brain rejecting sources
 
 **Symptom**: a sync runs, but the Brain push step logs an error or silently fails. New snapshots don't appear in your notebook.
 
-**Fix**: NotebookLM caps each notebook at about 100 sources. After the cap, every push returns `INVALID_ARGUMENT` from the API. The system rolls over to a fresh monthly partition automatically, but if a push fails right at the cap, force the rollover manually: `bash scripts/brain-rollover.sh`. That creates a new notebook (`{{orchestrator_name}} AI Brain: YYYY-MM`), updates `data/runtime/brain-current.json` to point at it, and the next push lands cleanly.
+**Fix**: NotebookLM caps each notebook at about 100 sources. After the cap, every push returns `INVALID_ARGUMENT` from the API. The system is designed to roll over to a fresh monthly partition. If a push fails right at the cap and rollover did not fire, force one manually with the `notebooklm-py` CLI: `notebooklm create "{{orchestrator_name}} AI Brain: $(date +%Y-%m)"` to make a new notebook, copy the returned notebook ID, then edit `data/runtime/brain-current.json` so `current_id` points at the new ID. The next push lands cleanly.
 
-If pushes fail for a different reason, run `notebooklm auth` to refresh the Google session. NotebookLM auth expires after roughly 14 days of inactivity.
+If pushes fail for a different reason, run `notebooklm login` to refresh the Google session. NotebookLM auth expires after roughly 14 days of inactivity.
 
-If the notebook ID in `data/runtime/brain.json` points at a notebook you deleted from the web UI, every push will fail until the local ID gets updated. Either restore the notebook from the NotebookLM trash, or `bash scripts/brain-rollover.sh` to create a fresh one and point at it.
+If the notebook ID in `data/runtime/brain-current.json` (`current_id` field) points at a notebook you deleted from the web UI, every push will fail until the local ID gets updated. Either restore the notebook from the NotebookLM trash, or create a fresh notebook with `notebooklm create "<name>"` and update `current_id` to the new ID.
 
 ## Safety gate blocking a legitimate command
 
@@ -4320,7 +4422,7 @@ If the statusline still shows garbage characters, the bash script may be running
 Three paths to unstick:
 
 - **Path A (TCC grant).** Open System Settings, Privacy and Security, Full Disk Access. Add `/bin/bash` to the allowed list. This grants every bash script TCC permission everywhere. Heavy-handed but reliable.
-- **Path B (relocate).** Move the install out of `~/Documents/`. TCC doesn't block `~/.local/` or `~/code/` by default. The install path is captured in shell aliases, so relocating means updating the aliases too. The `bash scripts/relocate-install.sh <new-path>` helper handles the alias rewrite if it exists.
+- **Path B (relocate).** Move the install out of `~/Documents/`. TCC does not block `~/.local/` or `~/code/` by default. The install path is captured in shell aliases, so relocating means updating those aliases too. The manual procedure: (a) `cp -R ~/Documents/{{orchestrator_name}} ~/code/{{orchestrator_name}}` to copy the tree, (b) open your shell profile (`~/.zshrc` on Mac, `$PROFILE` on Windows) and search-replace the old install path with the new one in every alias and function that mentions it, (c) reload the shell, (d) verify with `{{launch_cmd}}` that the launch alias still resolves, (e) once the new location is healthy, remove the old tree (`rm -rf ~/Documents/{{orchestrator_name}}.old` after renaming the original to `.old` as a safety step).
 - **Path C (session-scoped only).** The system's daemons are designed to fall back to session-scoped scheduling (Claude Code's `CronCreate` tool, fired from inside an active session) when launchd is blocked. This is the default in v31. You lose background scheduling when no session is running, but everything inside a session works fine.
 
 Path C is what the system ships with. Most operators don't need launchd because the orchestrator handles all scheduling inside an active session.
@@ -4423,7 +4525,7 @@ The cycle has a hard $1 cost cap (Anthropic API budget for the offline phase) an
 
 To approve the last dream's proposals: `dream approve` on Telegram. To reject: `dream reject`. The orchestrator applies or discards accordingly.
 
-Scheduled dream passes fire every 24 hours or every 5 sessions, whichever comes first. You can disable scheduled dreams by editing `data/runtime/dream-schedule.json` and setting `enabled: false`.
+Scheduled dream passes fire every 24 hours or every 5 sessions, whichever comes first. The schedule is enforced inside the orchestrator's memory skill (`.claude/skills/{{orchestrator_lower}}-memory`), not a config file. To disable scheduled dreams, edit that skill's `SKILL.md` and remove or comment out the Mode B scheduling section. Manual `/dream` invocation always works regardless.
 
 ## Episodic rollups
 
@@ -4442,7 +4544,7 @@ The memory layer is designed to handle thousands of files without performance is
 That said, two thresholds are worth pruning at:
 
 - **`agent-memory/<name>/` exceeds 200 files**: that specialist has accumulated too much per-agent state. Tell the orchestrator "audit my agent-memory for <name>, propose a prune". It walks the files, surfaces overlapping ones, and you approve a consolidation.
-- **`memory/` exceeds 500 files**: total memory has grown enough to slow down full grep searches. Run a dream pass with `--aggressive` flag, which lowers the consolidation threshold. Approves usually drop 20 to 30% of files.
+- **`memory/` exceeds 500 files**: total memory has grown enough to slow down full grep searches. Run a more aggressive dream pass by lowering the similarity threshold: `bash scripts/dream.sh --full-cycle --threshold 40` (default is 55, expressed as word-overlap percent). Lower numbers flag more pairs as near-duplicates, so more files surface for consolidation. Approves usually drop 20 to 30% of files.
 
 Most operators never hit either threshold in the first six months. The dream consolidation pass keeps it bounded.
 
@@ -4459,7 +4561,7 @@ If the hook stops working (you commit memory files but `memory-search.sh` return
 
 To verify the hook is wired:
 
-`ls -la .git/hooks/post-commit` should show an executable file pointing at `scripts/post-commit.sh` (or equivalent). If absent or non-executable, run `bash scripts/install-git-hooks.sh`.
+`ls -la .git/hooks/post-commit` should show an executable file. The canonical source lives at `scripts/hooks/post-commit` (no `.sh` extension, under the `hooks/` subdirectory); `bash scripts/install-git-hooks.sh` copies it into `.git/hooks/post-commit` and marks it executable. If `.git/hooks/post-commit` is absent or non-executable, re-run the install script.
 
 ## When the memory layer feels stale
 
@@ -4476,7 +4578,7 @@ After the rebuild, retry the search. If it still returns nothing, the issue is u
 
 ## Profile maintenance
 
-The Profile bucket (`memory/profile_<your-name>.md` or `memory/profile_{{orchestrator_lower}}.md`) is mutable, session-aware narrative about you. It updates on session end and on explicit signals during a session ("I'm switching focus to X", "I just got back from Y, my schedule is different now").
+The Profile bucket (`memory/profile_{{user_name_lower}}.md`) is mutable, session-aware narrative about you. It is named after you (the user), not the orchestrator. It updates on session end and on explicit signals during a session ("I'm switching focus to X", "I just got back from Y, my schedule is different now").
 
 You can edit it directly. The orchestrator reads it at session start, so anything you write there biases the next session's priorities and recall.
 

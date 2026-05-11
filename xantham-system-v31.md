@@ -2940,7 +2940,7 @@ If the user reports the resume failed (alias not found, session id stale), guide
 
 1. The plugin actually loaded (check with `claude plugin list` or equivalent inside the session)
 2. The alias actually works in their fresh shell (run the alias name as a sanity check, if it fails again, fix the alias by inspecting their shell rc file, identifying which one their terminal actually sources, writing the alias line into the right file)
-3. The Telegram plugin specifically can reach the bot (test message via `/telegram:diagnose` or equivalent)
+3. The Telegram plugin specifically can reach the bot (send a test message from the user's phone and confirm it shows in the session, OR `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"` returns `ok: true` for the token in `data/runtime/telegram.json`)
 
 Only when all three pass does the wizard move on to Q15. If any verification fails, fix it before continuing. This is the hand-holding step where "fix the alias issue" lives, so the user does not have to debug their own shell config.
 
@@ -3186,7 +3186,7 @@ After all questions are answered, generate files in this order. Each file comes 
 
 7. **Generate script bodies.** Walk every script-bearing section in `blueprints/xantham-templates-v31.md` and write each literal body to its indicated path under `scripts/`. Script bodies live in FOUR distinct sections of the templates appendix and the wizard MUST pull from all four, not just the first one:
 
-   1. **`## Script Templates`** (the always-installed core: healthcheck, verify-runtime-perms, load-context, commit-watcher, log-correction, history, register-project, pre-compaction-sync, post-compaction-reload, recent-telegram, redact-secrets, memory-search, embed-memories.py, check-memory-freshness, session-end-sync, update-handoff, reflect, promote-correction, log-telegram, batch-sync, sync-project-memories, check-blueprint-drift, telegram-signal).
+   1. **`## Script Templates`** (the always-installed core: healthcheck, verify-runtime-perms, load-context, commit-watcher, log-correction, history, register-project, pre-compaction-sync, post-compaction-reload, recent-telegram, redact-secrets, memory-search, embed-memories.py, check-memory-freshness, session-end-sync, update-handoff, reflect, promote-correction, log-telegram, batch-sync, sync-project-memories, check-blueprint-drift, telegram-signal, uninstall).
    2. **`## Common Templates (referenced earlier in this blueprint)`** (setup-db.sh, sync-safety-gates.sh, restore-memory-symlinks.sh). Always installed.
    3. **`## E1 - sqlite-vec + Nomic-embed`** (embed-memories.sh, memory-search.sh, install-git-hooks.sh, scripts/hooks/post-commit). Install only if `{{install_mode}}=advanced` AND E1 was selected at Q18.
    4. **`## E4 - Observability`** ({{orchestrator_lower}}-live.sh, audit-archive.sh). Install only if `{{install_mode}}=advanced` AND E4 was selected at Q18.
@@ -4972,7 +4972,7 @@ The script `scripts/check-auth-status.sh` pings `/v1/messages` and tracks consec
 Windows Task Scheduler equivalent:
 
 ```powershell
-schtasks /Create /SC MINUTE /MO 5 /TN "xantham-auth-canary" /TR "\"C:\Program Files\Git\bin\bash.exe\" -c \"cd C:/Users/<you>/Documents/MyAgent && bash scripts/check-auth-status.sh\""
+schtasks /Create /SC MINUTE /MO 5 /TN "{{orchestrator_lower}}-auth-canary" /TR "\"C:\Program Files\Git\bin\bash.exe\" -c \"cd C:/Users/<you>/Documents/{{orchestrator_name}} && bash scripts/check-auth-status.sh\""
 ```
 
 The healthcheck script surfaces the auth posture (OAuth or API key, last canary result, degraded flag state) so you know which mode is live without inspecting files.
