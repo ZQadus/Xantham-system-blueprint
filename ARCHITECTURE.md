@@ -94,7 +94,7 @@ A typical end-to-end turn:
 1. **Operator types on phone.** "Ship NearbyMe."
 2. **Telegram routes** the message via its servers to your bot, which the local Telegram MCP plugin receives.
 3. **Claude Code session reads** the inbound message as a tool result (the plugin tags it with `chat_id`, `message_id`, `user`, `ts`).
-4. **Orchestrator parses** the command. For `ship <project>`, it loads the `cortana-ai-seo` skill (auto-fires on ship), checks the project's HANDOFF.md, and decides whether to dispatch a specialist or run inline.
+4. **Orchestrator parses** the command. For `ship <project>`, it loads the orchestrator-named AI-SEO skill (auto-fires on ship; named `<orchestrator_lower>-ai-seo` after your install wizard runs), checks the project's HANDOFF.md, and decides whether to dispatch a specialist or run inline.
 5. **Active-recall pre-turn** fires if the message contains URLs, project names, or named persons. `scripts/active-recall.sh` surfaces top-3 relevant memory hits per entity from `memory/` (warm cache ~50ms, cold ~280ms).
 6. **Specialist dispatched** with a context packet (what is asked, what is the project, what is constrained). For `ship`, `@marco` handles deploy verification.
 7. **Specialist runs tool calls.** Each call passes through the PreToolUse hook layer. Allowed calls execute, blocked calls return a refusal that the agent sees and responds to.

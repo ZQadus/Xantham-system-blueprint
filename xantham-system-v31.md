@@ -4,7 +4,7 @@ architectural_role: trunk
 
 # Xantham System - Blueprint v31
 
-You hand this file to a fresh Claude Code session. It walks you through picking a mode, generating the install scripts, and finishes with a working personal orchestrator on your phone. **Time to first reply: 75 to 120 minutes from `git clone` to your phone vibrating with output.**
+You hand this file to a fresh Claude Code session. It walks you through picking a mode, generating the install scripts, and finishes with a working personal orchestrator on your phone. **Time to first reply: about an hour from `git clone` to your phone vibrating with output (30-45 minutes if Node 18 / Git / jq / sqlite3 / bun are already installed, closer to 90 minutes from a fresh laptop where the wizard installs prereqs first).**
 
 The orchestrator takes Telegram messages from your phone, routes tasks to a crew of specialist sub-agents (engineering, research, growth strategy, platform-tactical social media, deploy, writing, trading, business, human-interaction), keeps memory across sessions, and runs background work on a schedule. Replies come back to Telegram so you can be anywhere.
 
@@ -501,7 +501,7 @@ Zero.
 
 **Install (Mac / Linux / Windows-Git-Bash, identical commands)**
 
-The wizard generates the hardened gate body straight into `.claude/hooks/safety-gate.sh` during Step 11 from the `## E5 - Hardened safety gate` template in `blueprints/xantham-templates-v31.md` (262 lines). It includes hard-blocks for force-push to protected branches, git filter-branch, reflog expire, refspec-prefixed force pushes (`+HEAD:main`), `push.default` overrides, and a CLI-rm whitelist (`vercel env rm`, `gh secret rm`, `docker rm`, `npm rm`, `git rm`, etc.) that prevented past false positives.
+The wizard generates the hardened gate body straight into `.claude/hooks/safety-gate.sh` during Step 11 from the `## E5 - Hardened safety gate` template in `xantham-templates-v31.md` (262 lines). It includes hard-blocks for force-push to protected branches, git filter-branch, reflog expire, refspec-prefixed force pushes (`+HEAD:main`), `push.default` overrides, and a CLI-rm whitelist (`vercel env rm`, `gh secret rm`, `docker rm`, `npm rm`, `git rm`, etc.) that prevented past false positives.
 
 ```bash
 # 1. Back up BOTH safety gates before the hardened body overwrites either one.
@@ -513,7 +513,7 @@ cp ~/.claude/hooks/safety-gate.sh ~/.claude/hooks/safety-gate.sh.core-backup 2>/
 
 # 2. Verify the wizard wrote the hardened body to the project-level gate.
 #    The wizard generates the body during Step 11 from the E5 template in
-#    blueprints/xantham-templates-v31.md. The string "HARD BLOCKED" only
+#    xantham-templates-v31.md. The string "HARD BLOCKED" only
 #    appears in the hardened gate, not the core one.
 grep -q "HARD BLOCKED" .claude/hooks/safety-gate.sh && echo "OK: hardened gate active" || echo "FAIL: re-run Step 11 generation"
 
@@ -1057,12 +1057,12 @@ If you've never run Claude Code from a terminal, here is the literal first step:
 Once you see that prompt, paste the line below as your first message:
 
 ```
-Read the Xantham System v31 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v31.md and run the full setup wizard. Walk me through every step, ask me one question at a time, and don't assume any values, guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
+Read the Xantham System v31 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v31.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-templates-v31.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
 ```
 
 If you forked this blueprint to your own GitHub repo, replace the URL above with your fork's raw URL.
 
-**What happens next.** The wizard will ask you 15 questions one at a time. Each question shows up in this chat. There is no progress bar, just answer each one. It takes 20-45 minutes. After the last question, you will see "Setup complete" and a list of files to verify.
+**What happens next.** The wizard will ask you 15 questions one at a time. Each question shows up in this chat. There is no progress bar, just answer each one. It takes about an hour end-to-end (30-45 minutes if your prereqs Node 18 / Git / jq / sqlite3 / bun are already installed). After the last question, you will see "Setup complete" and a list of files to verify.
 
 The wizard handles everything else interactively:
 - Runs a preflight check confirming all the prerequisites above are present.
@@ -1221,7 +1221,7 @@ This is a deterministic specimen test. We create a canary file, then ask the gat
   Select-String -Pattern '"PreToolUse"' -Path .claude\settings.json -Context 0,2
   ```
 
-  Expected: `safety-gate.sh` exists and is executable, AND `.claude/settings.json` has a `PreToolUse` hook entry with `command` pointing to `.claude/hooks/safety-gate.sh`. If either is missing, re-run the wizard's hook-install step or copy the template body from `blueprints/xantham-templates-v31.md` → `## Template: .claude/hooks/safety-gate.sh`. Also verify the global gate at `~/.claude/hooks/safety-gate.sh` exists (run `bash scripts/sync-safety-gates.sh` if not).
+  Expected: `safety-gate.sh` exists and is executable, AND `.claude/settings.json` has a `PreToolUse` hook entry with `command` pointing to `.claude/hooks/safety-gate.sh`. If either is missing, re-run the wizard's hook-install step or copy the template body from `xantham-templates-v31.md` → `## Template: .claude/hooks/safety-gate.sh`. Also verify the global gate at `~/.claude/hooks/safety-gate.sh` exists (run `bash scripts/sync-safety-gates.sh` if not).
 
 ---
 
@@ -1278,12 +1278,12 @@ The first-Telegram welcome instructs the user to run `/telegram:access` to appro
 
   Expected: your phone's `user_id` (a numeric Telegram ID) appears in the allowlist with a recent timestamp.
 
-  Fix if `/telegram:access` is unrecognised: the skill failed to install. Run:
+  Fix if `/telegram:access` is unrecognised: the `telegram` plugin (which ships the `telegram:access` skill) failed to install. Run:
   ```bash
   claude plugin marketplace add claude-plugins-official
-  claude plugin install telegram-access@claude-plugins-official
+  claude plugin install telegram@claude-plugins-official
   ```
-  Then re-launch Claude Code (close and reopen) and retry `/telegram:access`.
+  Then re-launch Claude Code (close and reopen) and retry `/telegram:access`. The slash command lives inside the `telegram` plugin, there is no separate `telegram-access` plugin to install.
 
 ---
 
@@ -2203,15 +2203,15 @@ Read this entire section carefully before asking the first question. You are abo
 
 1. Read this full document first. Understand all four parts before you start asking questions.
 2. Ask the questions below **one at a time**. Wait for the user's answer before moving to the next question.
-3. Store each answer as a variable using the `{{placeholder}}` names specified. You will need every one of them when generating files from the templates in `blueprints/xantham-templates-v31.md`.
+3. Store each answer as a variable using the `{{placeholder}}` names specified. You will need every one of them when generating files from the templates in `xantham-templates-v31.md`.
 4. Some questions have branching logic -- only ask them if the conditions are met.
-5. After all questions are answered, generate every file listed in the "Generation Order" section using the templates in `blueprints/xantham-templates-v31.md`. Substitute all `{{placeholders}}` with the user's answers.
+5. After all questions are answered, generate every file listed in the "Generation Order" section using the templates in `xantham-templates-v31.md`. Substitute all `{{placeholders}}` with the user's answers.
 6. Run the post-setup validation checks.
 7. Print the setup summary.
 
 ### Variable reference
 
-These are the variables you will collect. Every template in the companion file `blueprints/xantham-templates-v31.md` references them by these exact names.
+These are the variables you will collect. Every template in the companion file `xantham-templates-v31.md` references them by these exact names.
 
 | Variable | Type | Set by question |
 |---|---|---|
@@ -3127,7 +3127,7 @@ extensions:
 
 ## Generation Order
 
-After all questions are answered, generate files in this order. Each file comes from a template in `blueprints/xantham-templates-v31.md`. **Track success of every step.** If any numbered step below fails, capture the error, do NOT continue to the next numbered step, and emit `DIAGNOSTIC-CHECKLIST.md` instead of `SETUP-CHECKLIST.md` at the end (see Step 18).
+After all questions are answered, generate files in this order. Each file comes from a template in `xantham-templates-v31.md`. **Track success of every step.** If any numbered step below fails, capture the error, do NOT continue to the next numbered step, and emit `DIAGNOSTIC-CHECKLIST.md` instead of `SETUP-CHECKLIST.md` at the end (see Step 18).
 
 1. **Create directory structure:**
    ```
@@ -3172,21 +3172,21 @@ After all questions are answered, generate files in this order. Each file comes 
    └── CLAUDE.md
    ```
 
-   **Step 1.5 -- write `.gitignore` BEFORE any other generation step.** Use the body in **`blueprints/xantham-templates-v31.md` § Template: .gitignore**. This file must exist at `{{project_path}}/.gitignore` before Step 2 creates the sqlite DB or any subsequent step touches `data/approved.txt`, `data/runtime/`, `data/vector-memory.db`, or `logs/safety-gate.log`. Writing the gitignore here closes a real first-push leak window: the safety-gate template comment at line 497 in the templates file (`# NOTE: this file MUST be in .gitignore`) had no companion gitignore until now. Fixes Marco audit CS3.
+   **Step 1.5 -- write `.gitignore` BEFORE any other generation step.** Use the body in **`xantham-templates-v31.md` § Template: .gitignore**. This file must exist at `{{project_path}}/.gitignore` before Step 2 creates the sqlite DB or any subsequent step touches `data/approved.txt`, `data/runtime/`, `data/vector-memory.db`, or `logs/safety-gate.log`. Writing the gitignore here closes a real first-push leak window: the safety-gate template comment at line 497 in the templates file (`# NOTE: this file MUST be in .gitignore`) had no companion gitignore until now. Fixes Marco audit CS3.
 
 2. **Create the SQLite database:** run `setup-db.sh` which creates `data/{{db_name}}` with the full schema (memories table with FTS5, corrections table, patterns table).
 
-3. **Generate CLAUDE.md** from the master template in **`blueprints/xantham-templates-v31.md` § Template: CLAUDE.md**. This is the largest file - it defines the orchestrator's identity, core loop, routing table, commands, agent spawning rules, safety rules, and everything else. Substitute every `{{placeholder}}` (orchestrator name, agent roster, plan, security tier, mode, etc.). Honour both kinds of conditional in the template: `<!-- IF plan=... -->` blocks (driven by `{{plan}}` for the plan-label header) AND `<!-- IF spawn_aggressiveness=... -->` blocks (driven by `{{spawn_aggressiveness}}` from Q7.5 for the agent-spawning-rules section). The two conditionals are intentionally independent so a Max-20x user who picked Conservative gets the right rules (sequential dispatch) instead of inheriting plan-derived aggressive defaults. Also substitute the derived `{{spawn_aggressiveness_block}}` literal text inside whichever spawn-rules block ends up active, and the derived `{{context_warning_threshold}}` + `{{plan_name}}` values in the pre-compaction sync section.
+3. **Generate CLAUDE.md** from the master template in **`xantham-templates-v31.md` § Template: CLAUDE.md**. This is the largest file - it defines the orchestrator's identity, core loop, routing table, commands, agent spawning rules, safety rules, and everything else. Substitute every `{{placeholder}}` (orchestrator name, agent roster, plan, security tier, mode, etc.). Honour both kinds of conditional in the template: `<!-- IF plan=... -->` blocks (driven by `{{plan}}` for the plan-label header) AND `<!-- IF spawn_aggressiveness=... -->` blocks (driven by `{{spawn_aggressiveness}}` from Q7.5 for the agent-spawning-rules section). The two conditionals are intentionally independent so a Max-20x user who picked Conservative gets the right rules (sequential dispatch) instead of inheriting plan-derived aggressive defaults. Also substitute the derived `{{spawn_aggressiveness_block}}` literal text inside whichever spawn-rules block ends up active, and the derived `{{context_warning_threshold}}` + `{{plan_name}}` values in the pre-compaction sync section.
 
-4. **Generate .claude/settings.json** from **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Standard Security)** OR **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
+4. **Generate .claude/settings.json** from **`xantham-templates-v31.md` § Template: .claude/settings.json (Standard Security)** OR **`xantham-templates-v31.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
 
    **Step 4 backup + sidecar (sentinel-gating, fixes Marco audit CG5).** If `~/.claude/settings.json` ALREADY EXISTS on the host (another Claude Code project on the same machine), copy it to `~/.claude/settings.json.pre-install` BEFORE writing the new one. Do NOT overwrite an existing `.pre-install` (preserve any older install's backup). Then `touch ~/.claude/.settings.json.xantham-managed` (mode `0644`) AFTER writing the new settings.json. The sidecar marker is what `scripts/uninstall.sh` reads to know it can safely jq-strip the `statusLine` block when the .pre-install backup is missing. Without the sidecar, uninstall refuses to touch settings.json. Mac/Linux: standard `cp` + `touch`. Windows (PowerShell): `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.pre-install"` + `New-Item -Path "$env:USERPROFILE\.claude\.settings.json.xantham-managed" -ItemType File`.
 
-5. **Generate hook scripts.** For each hook listed below, look up the matching **`## Template: .claude/hooks/<name>.sh`** section in `blueprints/xantham-templates-v31.md` and write the literal body to `.claude/hooks/<name>.sh`, substituting placeholders. Hook list: `safety-gate.sh` (always), `log-telegram-hook.sh` (only if `{{messaging}}`=telegram), `audit-log-hook.sh` (only if `{{security}}`=enterprise OR Advanced mode with E4 selected at Q18), `voice-lint.sh` (always; the de-personalised reply-quality lint), `stop-composer.sh` (always), `stop-verify-contract.sh` (always). After writing, `chmod +x` each. Mac/Linux: `chmod +x .claude/hooks/*.sh`. Windows (Git Bash): `chmod +x .claude/hooks/*.sh` works the same; on plain PowerShell the chmod is unnecessary because Git Bash interprets the shebang directly.
+5. **Generate hook scripts.** For each hook listed below, look up the matching **`## Template: .claude/hooks/<name>.sh`** section in `xantham-templates-v31.md` and write the literal body to `.claude/hooks/<name>.sh`, substituting placeholders. Hook list: `safety-gate.sh` (always), `log-telegram-hook.sh` (only if `{{messaging}}`=telegram), `audit-log-hook.sh` (only if `{{security}}`=enterprise OR Advanced mode with E4 selected at Q18), `voice-lint.sh` (always; the de-personalised reply-quality lint), `stop-composer.sh` (always), `stop-verify-contract.sh` (always). After writing, `chmod +x` each. Mac/Linux: `chmod +x .claude/hooks/*.sh`. Windows (Git Bash): `chmod +x .claude/hooks/*.sh` works the same; on plain PowerShell the chmod is unnecessary because Git Bash interprets the shebang directly.
 
-6. **Generate skill bodies.** For each skill in **`blueprints/xantham-templates-v31.md` § Skill Templates**, write the literal body to `.claude/skills/<skill-name>/SKILL.md`. Substitute `{{orchestrator_name}}` / `{{orchestrator_lower}}` placeholders. Skills to generate: `<orchestrator_lower>-sync`, `<orchestrator_lower>-maintenance`, `<orchestrator_lower>-orchestration`, `<orchestrator_lower>-brain`, `<orchestrator_lower>-safety`, `<orchestrator_lower>-observability`, `<orchestrator_lower>-blueprint-updates`, plus any others in the Skill Templates section. <!-- TODO: cross-reference Kai-1's skill template section once it lands - skill list above is the contract; bodies come from blueprints/xantham-templates-v31.md. -->
+6. **Generate skill bodies.** For each skill in **`xantham-templates-v31.md` § Skill Templates**, write the literal body to `.claude/skills/<skill-name>/SKILL.md`. Substitute `{{orchestrator_name}}` / `{{orchestrator_lower}}` placeholders. Skills to generate: `<orchestrator_lower>-sync`, `<orchestrator_lower>-maintenance`, `<orchestrator_lower>-orchestration`, `<orchestrator_lower>-brain`, `<orchestrator_lower>-safety`, `<orchestrator_lower>-observability`, `<orchestrator_lower>-blueprint-updates`, plus any others in the Skill Templates section. <!-- TODO: cross-reference Kai-1's skill template section once it lands - skill list above is the contract; bodies come from xantham-templates-v31.md. -->
 
-7. **Generate script bodies.** Walk every script-bearing section in `blueprints/xantham-templates-v31.md` and write each literal body to its indicated path under `scripts/`. Script bodies live in FOUR distinct sections of the templates appendix and the wizard MUST pull from all four, not just the first one:
+7. **Generate script bodies.** Walk every script-bearing section in `xantham-templates-v31.md` and write each literal body to its indicated path under `scripts/`. Script bodies live in FOUR distinct sections of the templates appendix and the wizard MUST pull from all four, not just the first one:
 
    1. **`## Script Templates`** (the always-installed core: healthcheck, verify-runtime-perms, load-context, commit-watcher, log-correction, history, register-project, pre-compaction-sync, post-compaction-reload, recent-telegram, redact-secrets, memory-search, embed-memories.py, check-memory-freshness, session-end-sync, update-handoff, reflect, promote-correction, log-telegram, batch-sync, sync-project-memories, check-blueprint-drift, telegram-signal, uninstall).
    2. **`## Common Templates (referenced earlier in this blueprint)`** (setup-db.sh, sync-safety-gates.sh, restore-memory-symlinks.sh). Always installed.
@@ -3199,9 +3199,9 @@ After all questions are answered, generate files in this order. Each file comes 
 
    Verification: after generating all scripts, list `scripts/` and confirm the four-section contract is honoured. A missing `setup-db.sh` means section 2 was skipped. A missing `install-git-hooks.sh` means section 3 was skipped. A missing `audit-archive.sh` (when E4 selected) means section 4 was skipped.
 
-8. **Generate starter memory seeds.** For each seed in **`blueprints/xantham-templates-v31.md` § Starter Memory Seeds**, write the literal body to its indicated path under `memory/`. Then write `memory/MEMORY.md` as the index pointing at every seed. <!-- TODO: cross-reference Isabella's starter memory seeds section once it lands - seed list comes from blueprints/xantham-templates-v31.md. -->
+8. **Generate starter memory seeds.** For each seed in **`xantham-templates-v31.md` § Starter Memory Seeds**, write the literal body to its indicated path under `memory/`. Then write `memory/MEMORY.md` as the index pointing at every seed. <!-- TODO: cross-reference Isabella's starter memory seeds section once it lands - seed list comes from xantham-templates-v31.md. -->
 
-9. **Generate agent configs** in `.claude/agents/` - one per selected agent, from **`blueprints/xantham-templates-v31.md` § Template: Agent Config**.
+9. **Generate agent configs** in `.claude/agents/` - one per selected agent, from **`xantham-templates-v31.md` § Template: Agent Config**.
 
 10. **Create agent + orchestrator memory directories INSIDE the repo**, then symlink Claude Code's expected paths to them. Canonical files live in the repo so `git commit` backs them up and cloud routines see them:
     ```bash
@@ -3229,7 +3229,7 @@ After all questions are answered, generate files in this order. Each file comes 
 
 11. **Generate .mcp.json** if Telegram or any MCP servers were selected.
 
-12. **Add shell launch functions** to the user's shell profile. Mac/Linux: append the bash/zsh functions from **`blueprints/xantham-templates-v31.md` § Template: Shell Launch Functions (Mac/Linux)** to `~/.zshrc` or `~/.bashrc`. Windows: append the PowerShell function from **`blueprints/xantham-templates-v31.md` § Template: Shell Launch Functions (Windows)** to `$PROFILE`.
+12. **Add shell launch functions** to the user's shell profile. Mac/Linux: append the bash/zsh functions from **`xantham-templates-v31.md` § Template: Shell Launch Functions (Mac/Linux)** to `~/.zshrc` or `~/.bashrc`. Windows: append the PowerShell function from **`xantham-templates-v31.md` § Template: Shell Launch Functions (Windows)** to `$PROFILE`.
 
 13. **Generate data/help-text.md and data/team-text.md** from the agent roster.
 
@@ -3382,7 +3382,7 @@ Claude Code starts in the project root and reads CLAUDE.md. The file declares wh
 
 **State across sessions.** Three places. Markdown under `memory/` for behavioural rules and project facts. `HANDOFF.md` per project for last-known state. `data/audit.db` for searchable history. Cold-start a session, the orchestrator reads the first two and queries the third on demand.
 
-**Parallelism.** Sub-agents spawn via the Task tool. Max 20x supports 4-6 background agents at once. Max 5x supports 2-3. Pro runs them serially. Background work never blocks the main loop. The orchestrator acknowledges inbound, dispatches, and pings back when results land.
+**Parallelism.** Sub-agents spawn via the Task tool. The Balanced default (recommended for most installers) runs 2-3 in parallel. Aggressive mode on Max 20x fans out up to 16, gated by the 5-hour rolling rate limit. Max 5x is comfortable at 2-3. Pro runs sequentially. Background work never blocks the main loop. The orchestrator acknowledges inbound, dispatches, and pings back when results land.
 
 **Scaling.** Adding agents means adding entries to the routing table and `.claude/agents/<name>.md` config files. No infrastructure changes. A three-agent setup and a twelve-agent setup run identically.
 
@@ -4024,7 +4024,7 @@ If NotebookLM auth fails at any point, the system skips silently and relies on l
 
 --- END OF PART 2: ARCHITECTURE REFERENCE ---
 
-> 📎 *Part 3 (Code Templates) lives in the companion file: `blueprints/xantham-templates-v31.md`. Every template body the install wizard copies verbatim (CLAUDE.md, settings.json, hooks, scripts, skills, agent configs, memory seeds, doc bodies) is stored there. The landing file you are reading now keeps the human-readable wizard, architecture reference, advanced patterns, and troubleshooting catalogue.*
+> 📎 *Part 3 (Code Templates) lives in the companion file: `xantham-templates-v31.md`. Every template body the install wizard copies verbatim (CLAUDE.md, settings.json, hooks, scripts, skills, agent configs, memory seeds, doc bodies) is stored there. The landing file you are reading now keeps the human-readable wizard, architecture reference, advanced patterns, and troubleshooting catalogue.*
 
 ---
 
@@ -4378,7 +4378,7 @@ Add to the core loop:
 - Logging outbound replies: `bash scripts/log-telegram.sh "{{orchestrator_name_lower}}" "<reply>" "<project>" false`
 - The reply-first rule (always reply on Telegram within seconds, never leave the user waiting)
 
-Add `scripts/log-telegram.sh` if it was not generated during initial setup (terminal-only setups skip this script). Use the template from `blueprints/xantham-templates-v31.md` § Template: scripts/log-telegram.sh.
+Add `scripts/log-telegram.sh` if it was not generated during initial setup (terminal-only setups skip this script). Use the template from `xantham-templates-v31.md` § Template: scripts/log-telegram.sh.
 
 **Step 6: Configure access control**
 The Telegram plugin's access system controls who can talk to your bot:

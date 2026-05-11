@@ -12,12 +12,12 @@
 
 ## What you get
 
-- A master orchestrator (your AI) plus a crew of 9 specialist agents (engineering, research, growth, social, deploy, writing, trading, business, human dynamics)
+- A master orchestrator (your AI) plus a crew of 9 specialist agents (engineering, research, growth, social, infra, writing, trading, business, human dynamics)
 - Telegram interface so you can run the system from your phone
 - Persistent memory that survives across sessions, with semantic search
 - Live shared whiteboard so multiple agents coordinate cleanly when running in parallel
 - Per-tool-call audit log + safety gate that prevents destructive accidents
-- A self-installing wizard that walks you through setup in 20-60 minutes
+- A self-installing wizard that walks you through setup in about an hour (30-45 minutes if you already have Node 18, Git, jq, sqlite3, and bun installed)
 
 ## What you can do with it
 
@@ -100,7 +100,7 @@ The orchestrator is the boss. You talk to it. It routes work to the right specia
 ### Three things you get from this setup
 
 1. **Persistent memory across sessions.** Every session writes structured notes to disk, plus an optional snapshot to an AI Brain (NotebookLM). When you open a fresh terminal next Tuesday, the orchestrator reads back yesterday's state in under 5 seconds. Days, weeks, months of work stay continuous.
-2. **5 to 16 specialists in parallel on big sprints.** Default is 5 to 8 working at once, each in its own git worktree so they don't trample each other. A 4-hour solo build collapses to roughly 45 minutes of wall-clock time when the work splits cleanly.
+2. **2-3 specialists in parallel by default, up to 16 in Aggressive mode on Max 20x.** The Balanced default (recommended for most installers) fans out 2-3 specialists when work decomposes cleanly. Aggressive mode runs 5-16 in their own git worktrees on big sprints, gated by the 5-hour Max 20x rolling rate limit. A 4-hour solo build collapses to roughly 45 minutes of wall-clock time when the work splits cleanly.
 3. **Hard-blocked destructive commands.** The safety gate refuses force-push to main, `rm -rf` against your home directory, and `DROP TABLE` against a database, regardless of approval. Approval-gated commands (database migrations and similar) still pause for your call. The hard-blocks are not configurable on purpose.
 
 ### One thing worth knowing before you install
@@ -117,7 +117,7 @@ You'll need:
 - **Mac or Windows** (Linux works too, treated like Mac)
 - **Claude Code** installed (claude.com/claude-code)
 - **An active Claude.ai paid plan**: Pro ($20/mo), Max 5x ($100/mo), or Max 20x ($200/mo). The system uses your existing subscription - no additional API charges. Pro works; Max is recommended for parallel agent work.
-- **About 90 minutes** of your time (60 min if you have Node/Git/Homebrew already installed; 30 min more if starting from a fresh laptop)
+- **About an hour** of your time (30-45 minutes if you already have Node 18, Git, jq, sqlite3, and bun installed; closer to a full hour if starting from a fresh laptop and the wizard installs the prereqs first)
 
 The wizard will check for Node 18, Git, jq, sqlite3, and bun on first run, and tell you exactly how to install any that are missing.
 
@@ -127,7 +127,7 @@ The wizard will check for Node 18, Git, jq, sqlite3, and bun on first run, and t
 - Google (free, optional - for the NotebookLM AI Brain. Skip if uncomfortable)
 - GitHub (free, optional - for auto-creating private repos for your projects)
 
-**Cost summary:** £0/month for the system itself. Just your Claude.ai subscription.
+**Cost summary:** $0/month (£0) for the system itself. Just your Claude.ai subscription.
 
 ## Data and privacy
 
@@ -139,7 +139,7 @@ The wizard will check for Node 18, Git, jq, sqlite3, and bun on first run, and t
 
 ## A note on the maintainer
 
-If you see references to `your orchestrator` or `cortana` inside the blueprint - that's the maintainer's literal name. Yours will be whatever you pick during the install wizard. The blueprint is system-agnostic.
+If you see references to `your orchestrator` or `cortana` anywhere in this repo (blueprint, ARCHITECTURE, SECURITY, COMPARISON, docker) - that is the maintainer's literal orchestrator name. Yours will be whatever you pick during the install wizard. Every doc here is system-agnostic; the install wizard substitutes your chosen name into every generated file.
 
 ## How to proceed safely
 
@@ -230,7 +230,7 @@ Full reference + commit-pinning options at [`docker/README.md`](docker/README.md
 
    You'll see a screen that says **"Welcome to Claude Code"** with a `>` prompt. NOT the regular terminal prompt (`$` or `%`). If you see `$` or `%` after running `claude`, the command didn't launch the TUI - check that Claude Code is installed (claude.com/claude-code).
 
-   > **About `--dangerously-skip-permissions`**: the wizard runs hundreds of tool calls (file writes, Bash commands, hook installs) over ~30 minutes. Without this flag you'd be hitting "Allow" every few seconds for the whole install, which is painful and error-prone.
+   > **About `--dangerously-skip-permissions`**: the wizard runs hundreds of tool calls (file writes, Bash commands, hook installs) over the full hour of install. Without this flag you'd be hitting "Allow" every few seconds for the whole install, which is painful and error-prone.
    >
    > **Honest about the trade-off**: there is a window of unprotected execution during the early install steps. Q0 preflight runs Bash commands before the safety gate is generated. Q1 through Q5 collect answers but write minimal files. The safety gate gets generated and activated around Q6-Q9 depending on the mode you pick.
    >
@@ -256,7 +256,7 @@ Full reference + commit-pinning options at [`docker/README.md`](docker/README.md
    - Ask you to name your orchestrator at the right point in the flow.
    - Pick sensible defaults for everything else and confirm before applying.
 
-   You don't need ANY values up front. The wizard asks one question at a time, in plain English, and tells you exactly how to get any external value (bot token, notebook ID) as it reaches that step. Total time: 20-45 minutes including bot setup.
+   You don't need ANY values up front. The wizard asks one question at a time, in plain English, and tells you exactly how to get any external value (bot token, notebook ID) as it reaches that step. Total time: about an hour including bot setup, 30-45 minutes if your prereqs (Node 18 / Git / jq / sqlite3 / bun) are already installed.
 
 4. When done, the wizard generates eight files at the project root: `SETUP-CHECKLIST.md` (verify install), `USER-GUIDE.md` (your day-one cheat sheet), `BACKUP-AND-RECOVERY.md`, `FIRST-WEEK.md`, `PITFALLS.md`, `MEMORY-HYGIENE.md`, plus two helper scripts in `scripts/`.
 
@@ -370,8 +370,8 @@ Versions ship cumulatively. The latest pair on `main` is what the wizard install
 
 ## Modes
 
-- **Simple mode.** Orchestrator + 9 specialists + Telegram + NotebookLM Brain + basic safety gate. Set up in ~20 minutes. £0/month plus your Claude.ai subscription.
-- **Advanced mode.** Simple plus the v31 power-user stack: E1 semantic memory (sqlite-vec + Ollama), E3 Agent Teams (live shared whiteboard), E4 Observability (per-tool-call audit JSONL + live viewer), E5 Hardened safety gate, plus the Amazing Memory layer (cognitive overlay with episodic + semantic + procedural memory, Profile bucket, dream consolidation pass, active-recall pre-turn entity lookup), plus auth failover (the canary that flips your Claude Code over to a paid API key if your Max OAuth ever suspends). ~45-60 minutes setup. £0/month for the local stack. ~$4/month if you enable the optional `dream` consolidation pass (~$1 per weekly run on Anthropic API).
+- **Simple mode.** Orchestrator + 9 specialists + Telegram + NotebookLM Brain + basic safety gate. Set up in roughly 30 minutes. $0/month (£0) plus your Claude.ai subscription.
+- **Advanced mode.** Simple plus the v31 power-user stack: E1 semantic memory (sqlite-vec + Ollama), E3 Agent Teams (live shared whiteboard), E4 Observability (per-tool-call audit JSONL + live viewer), E5 Hardened safety gate, plus the Amazing Memory layer (cognitive overlay with episodic + semantic + procedural memory, Profile bucket, dream consolidation pass, active-recall pre-turn entity lookup), plus auth failover (the canary that flips your Claude Code over to a paid API key if your Max OAuth ever suspends). About an hour of setup. $0/month (£0) for the local stack. About $4/month (~£3) if you enable the optional `dream` consolidation pass (~$1 per weekly run on Anthropic API).
 
 ## Both Mac and Windows are supported
 

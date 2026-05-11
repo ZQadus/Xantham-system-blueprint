@@ -9,7 +9,7 @@ How Xantham stacks up against the most-cited public agent frameworks and orchest
 | Installation effort | Paste one prompt, 20-60 min wizard | `claude plugin install` per agent | Install Droid CLI, sign in | `pip install autogen-agentchat` | `pip install crewai` | `pip install langgraph` | `git clone` + OpenRouter key |
 | Runs on a Claude.ai subscription (no extra API keys) | Yes | Yes (Claude Code) | No, separate paid plan | No, BYO LLM keys | No, BYO LLM keys | No, BYO LLM keys | No, OpenRouter key |
 | Persistent memory | Flat markdown + sqlite-vec + cognitive overlay + NotebookLM Brain | Per-agent skill bundles, no operator-level memory layer | Session-scoped, no built-in persistence | None native, you wire your own | Short-term + long-term + entity + contextual, SqliteProvider checkpoints | Checkpointer abstraction, you pick the backend | None |
-| Parallel agents | Yes, 5-16 in worktrees | Yes, Managed Agents primitive | Yes, droid swarms | Yes, group chat patterns | Yes, hierarchical or parallel crews | Yes, supervisor / fork-at-checkpoint | No, sequential council |
+| Parallel agents | Yes, 2-3 default, up to 16 in Aggressive mode on Max 20x, in isolated worktrees | Yes, Managed Agents primitive | Yes, droid swarms | Yes, group chat patterns | Yes, hierarchical or parallel crews | Yes, supervisor / fork-at-checkpoint | No, sequential council |
 | Safety hooks | PreToolUse gate, hard-block / approval / audit buckets | Inherits Claude Code permissions | Inherits Claude Code permissions | None native | None native | None native | None |
 | Telegram interface | First-class, default install | No | No | DIY | DIY | DIY | No |
 | Observability layer | Per-tool-call JSONL audit log, telegram-tail digest | Cowork plugin telemetry | Built-in dashboard (paid) | DIY | Native event stream + telemetry | LangSmith (paid SaaS) | None |
@@ -43,7 +43,7 @@ Cost lines worth surfacing: Xantham is $0/month plus your existing Claude.ai pla
 
 **Runs entirely on a Claude.ai subscription.** No new API keys, no separate billing relationship. Pro at $20/month works for solo use; Max 20x at $200 flat covers heavy parallel agent work. Compared to CrewAI / LangGraph / AutoGen, where the LLM bill is per-token and scales with use, Xantham's cost story is predictable.
 
-**Operationalized council pattern.** karpathy/llm-council is the source pattern (Chairman LLM ranks anonymous responses). Xantham wires it as `cortana-orchestration` habit-17 with a mandatory Lens D competitive-scan slot for product decisions, and archives outputs to `Library/decisions/council/`. llm-council is a side project; Xantham operationalizes it.
+**Operationalized council pattern.** karpathy/llm-council is the source pattern (Chairman LLM ranks anonymous responses). Xantham wires it as habit-17 of the orchestrator's orchestration skill (`<orchestrator_lower>-orchestration` after install) with a mandatory Lens D competitive-scan slot for product decisions, and archives outputs to `Library/decisions/council/`. llm-council is a side project; Xantham operationalizes it.
 
 **Memory + safety + Telegram together.** Each of these exists elsewhere as a piece. Praktor ships Telegram. CrewAI ships memory. AgentShield ships safety. No competitor in this table ships all three integrated, with a single-paste install and a $0/month cost on top of your existing Claude plan.
 

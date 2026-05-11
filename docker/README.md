@@ -87,6 +87,6 @@ After the sandbox install finishes:
 1. Walk through `SETUP-CHECKLIST.md` inside the sandbox to confirm what the wizard reports as installed.
 2. Inspect `/workspace/.claude/hooks/` and `/workspace/scripts/` to see the generated safety gate body and the scripts the wizard wrote.
 3. If everything matches what the blueprint claims, exit the sandbox.
-4. On your host, follow the normal install instructions from the main README, ideally pinning to the same commit SHA you just audited (see "Pin install to a commit SHA" in the main README).
+4. On your host, follow the normal install instructions from the main README. For the strongest audit posture, pin the install URLs to the commit SHA you just audited by swapping `/main/` for `/<sha>/` in the raw.githubusercontent.com URLs inside the install command. `bash scripts/verify-blueprint.sh <sha>` confirms the bytes match before you install.
 
 The sandbox is for trust-building. The host install is the one you actually use.
