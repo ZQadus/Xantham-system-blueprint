@@ -332,7 +332,7 @@ Currently a single-maintainer project. If you find bugs or have suggestions, ope
 
 ## License
 
-Add your own license here. The maintainer ships personal AI infrastructure publicly because it's useful to others, not because it's a product.
+MIT. See [LICENSE](LICENSE). Fork it, hand it to teammates, ship it inside your own product. Attribution appreciated, not required.
 
 ## Contact
 
