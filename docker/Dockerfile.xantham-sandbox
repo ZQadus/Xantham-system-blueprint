@@ -58,25 +58,46 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && apt-get clean
 
-# Node 18 LTS via NodeSource (matches the wizard's documented prereq).
+# Version pins.
+#
+# Why pin: the base image is digest-pinned above, but unpinned binaries
+# (Claude Code, Bun, Node) reopen the supply-chain attack class that digest
+# pinning was meant to close. A user who audits the container today and
+# decides to install tomorrow would otherwise get whatever "latest" was at
+# that moment. Pinning these makes the audit and the install reproducible.
+#
+# Refresh policy: review these quarterly (Jan / Apr / Jul / Oct). Bump only
+# after auditing the upstream release notes. See docker/README.md "How to
+# bump these" for the procedure.
+ARG NODE_VERSION=18.19.1-1nodesource1
+ARG BUN_VERSION=bun-v1.3.13
+ARG CLAUDE_CODE_VERSION=2.1.138
+
+# Node 18 LTS via NodeSource, pinned to a specific point release.
+# The NodeSource setup script installs the apt repo + GPG key; apt then
+# verifies the package signature against that key. We pin the exact
+# `nodejs` package version rather than letting apt resolve "nodejs" to
+# whatever the repo currently serves.
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
+ && apt-get install -y --no-install-recommends nodejs=${NODE_VERSION} \
  && rm -rf /var/lib/apt/lists/* \
  && apt-get clean \
  && node --version \
  && npm --version
 
 # Bun (the wizard uses it for some scripts). Installed via the official
-# installer, then immediately verified.
-RUN curl -fsSL https://bun.sh/install | bash \
+# installer, pinned to a specific release tag.
+RUN curl -fsSL https://bun.sh/install | bash -s "${BUN_VERSION}" \
  && ln -s /root/.bun/bin/bun /usr/local/bin/bun \
  && bun --version
 
 # Claude Code itself. The wizard runs INSIDE Claude Code's REPL, so the binary
-# has to be present in the sandbox. Pinned to the latest npm-published version
-# at image build time; rebuild the image to refresh.
-RUN npm install -g @anthropic-ai/claude-code \
- && claude --version || true
+# has to be present in the sandbox. Pinned to a specific npm-published version
+# so a rebuild a week from now produces the same Claude Code as a rebuild today.
+# Removed `|| true` so a failed install fails the build instead of silently
+# producing a broken sandbox.
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+ && claude --version
 
 # Non-root user for the actual install. Root inside a container is still root,
 # but dropping privileges narrows the blast radius if a wizard step

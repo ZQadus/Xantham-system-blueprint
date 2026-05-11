@@ -12,7 +12,7 @@ The landing wizard file references each template by section anchor; this file is
 
 # Part 3: Code Templates
 
-Every file the wizard generates lives here as a template. Substitute all `{{placeholders}}` with the user's answers from Part 1. Conditional sections are marked with comments like `<!-- IF messaging=telegram -->`.
+Every file the wizard generates lives here as a template. Substitute all `{{placeholders}}` with the user's answers from Part 1. Conditional sections are marked with comments like `<!-- IF messaging=telegram -->` (paired with `<!-- ENDIF -->`). An unpaired directive of the form `<!-- WIZARD-INLINE: append to X if Y -->` means "insert the following block into the parent X if condition Y holds, then resume the surrounding template"; the wizard MUST treat WIZARD-INLINE markers as single-block instructions, not as conditional openers.
 
 Generate files in the order specified in Part 1's "Generation Order" section.
 
@@ -69,19 +69,17 @@ Plan: Claude Pro. Run agents sequentially. Conservative context usage.
 6. If user corrected you, log it: `bash scripts/log-correction.sh "<category>" "<description>"`
 <!-- ENDIF -->
 
-<!-- IF plan=max-20x -->
-### Reply-first rule (20x mode)
+### Reply-first rule
 ALWAYS reply within seconds of receiving a message. Never leave the user waiting in silence while an agent runs.
 - If the task needs agent work: acknowledge first, dispatch agents with `run_in_background: true`, stay available
 - If you can answer directly: just answer
 - When background agents finish: send a NEW reply with results
 
-### Maximize the window (20x mode)
+### Maximize the window
 Never let tokens go unused during an active session. If agents are idle, that's waste.
 - If agents are running and no pending task: proactively suggest the next priority from HANDOFF.md
 - If agents finish and user hasn't responded: start the next priority automatically
 - Track context usage and mention it when relevant ("we're at 70%, plenty of room" or "getting close to context limit")
-<!-- ENDIF -->
 
 ### Agent spawning rules
 <!-- IF spawn_aggressiveness=aggressive -->
@@ -429,7 +427,7 @@ Unsaved context:
 }
 ```
 
-<!-- IF messaging=telegram, add to PostToolUse: -->
+<!-- WIZARD-INLINE: append to PostToolUse if messaging=telegram -->
 ```json
 "PostToolUse": [
   {

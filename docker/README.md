@@ -20,15 +20,49 @@ If you have read the blueprint, audited the install command, and trust the maint
 
 Minimal Debian Bookworm with only the wizard's runtime prereqs:
 
-- Node 18 LTS (the wizard's documented version)
+- Node 18 LTS, pinned to `18.19.1-1nodesource1`
 - Git, jq, sqlite3, unzip, build-essential
-- Bun (the wizard uses it for a few scripts)
-- Claude Code itself (latest at image build time)
+- Bun, pinned to `v1.3.13`
+- Claude Code, pinned to `@anthropic-ai/claude-code@2.1.138`
 - `tini` for clean PID 1 signal handling
 
 No GUI, no editor, no SSH server, no preinstalled credentials, no host network beyond standard outbound egress, no host filesystem mounts unless you add them yourself.
 
-Base image is pinned by digest (not just tag) so a future rebuild of `debian:bookworm-slim` cannot silently swap in different bytes.
+Base image is pinned by digest (not just tag) so a future rebuild of `debian:bookworm-slim` cannot silently swap in different bytes. The three runtime binaries above are version-pinned for the same reason: a user auditing the container today and installing tomorrow gets identical bytes.
+
+## How to bump these
+
+Review quarterly (Jan / Apr / Jul / Oct) or sooner if upstream ships a security advisory you need.
+
+The pins live as `ARG` directives at the top of `docker/Dockerfile.xantham-sandbox`:
+
+```dockerfile
+ARG NODE_VERSION=18.19.1-1nodesource1
+ARG BUN_VERSION=bun-v1.3.13
+ARG CLAUDE_CODE_VERSION=2.1.138
+```
+
+To bump:
+
+1. **Audit the upstream release notes** for the target version. For Claude Code, read `https://github.com/anthropics/claude-code/releases`. For Bun, `https://github.com/oven-sh/bun/releases`. For NodeSource, `https://github.com/nodesource/distributions/releases`.
+2. **Find the exact version string** each upstream expects:
+   - NodeSource: `apt-cache madison nodejs` inside the running container shows available versions. Format is `<semver>-1nodesource1`.
+   - Bun: tag names on GitHub releases (e.g. `bun-v1.3.13`). The installer takes this as its positional arg.
+   - Claude Code: `npm view @anthropic-ai/claude-code versions --json` lists all published versions.
+3. **Edit the three `ARG` lines** in the Dockerfile.
+4. **Rebuild** with `docker build -f docker/Dockerfile.xantham-sandbox -t xantham-sandbox docker/` and confirm `claude --version`, `bun --version`, `node --version` inside the container all show the bumped versions.
+5. **Commit** with a message that says what bumped to what and why.
+
+Override at build time without editing the file:
+
+```bash
+docker build \
+  --build-arg CLAUDE_CODE_VERSION=2.2.0 \
+  -f docker/Dockerfile.xantham-sandbox \
+  -t xantham-sandbox docker/
+```
+
+This is useful for trying a candidate version before promoting it into the committed pin.
 
 ## Build
 
