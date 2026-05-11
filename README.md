@@ -101,7 +101,7 @@ The orchestrator is the boss. You talk to it. It routes work to the right specia
 
 1. **Persistent memory across sessions.** Every session writes structured notes to disk, plus an optional snapshot to an AI Brain (NotebookLM). When you open a fresh terminal next Tuesday, the orchestrator reads back yesterday's state in under 5 seconds. Days, weeks, months of work stay continuous.
 2. **5 to 16 specialists in parallel on big sprints.** Default is 5 to 8 working at once, each in its own git worktree so they don't trample each other. A 4-hour solo build collapses to roughly 45 minutes of wall-clock time when the work splits cleanly.
-3. **Hard-blocked destructive commands.** Force-push to main, `rm -rf` against your home directory, `DROP TABLE` against a database — the safety gate refuses these at the hook layer regardless of approval. Approval-gated commands (database migrations, etc.) still pause for your call. The hard-blocks are not configurable on purpose.
+3. **Hard-blocked destructive commands.** The safety gate refuses force-push to main, `rm -rf` against your home directory, and `DROP TABLE` against a database, regardless of approval. Approval-gated commands (database migrations and similar) still pause for your call. The hard-blocks are not configurable on purpose.
 
 ### One thing worth knowing before you install
 

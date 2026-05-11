@@ -3890,6 +3890,603 @@ Register new projects: `bash scripts/register-project.sh <path> <description> [s
 
 ---
 
+## Template: USER-GUIDE.md
+
+```markdown
+# {{orchestrator_name}}: day-one cheat sheet
+
+This is what you read on day one and keep open in another tab for the first week. The agent loop config lives in `CLAUDE.md` (the orchestrator reads that). This file is for you.
+
+## Starting and ending a session
+
+Open a terminal at the install root and run `{{launch_cmd}}`. That drops you into a fresh Claude Code session with your orchestrator ready to talk.
+
+If you want to pick up exactly where the last session left off, use `{{launch_cmd}}-resume`. Most days you want a fresh session. The memory layer carries state between sessions, so you usually don't need the previous context.
+
+When you're done for the day, type `wrapup` in Telegram. The orchestrator writes HANDOFF.md for every project you touched, pushes a snapshot to the AI Brain if it's wired up, and logs a session reflection. Close the terminal after.
+
+## The daily command list
+
+These all get typed into Telegram. The orchestrator picks them up from there.
+
+- `help`: lists every command. Run it when you forget what's wired.
+- `team`: shows your specialist crew with what each one is for.
+- `projects`: shows every project the orchestrator knows about, grouped by category.
+- `status <project>`: reads HANDOFF.md and tells you where you left off.
+- `sync <project>`: full sync cycle. Memory, handoff, commit, push. Use this between work blocks.
+- `sync all`: same cycle, every touched project, in parallel.
+- `healthcheck`: verifies Telegram, AI Brain, memory database, safety gate, docs, MCP. Run weekly.
+- `history "<keyword>"`: searches Telegram, audit log, git log, and memory markdown. Useful for "when did we decide X".
+- `brain "<question>"`: hits the NotebookLM AI Brain. For cross-project memory or old decisions.
+
+## The shipping command list
+
+- `ship <project>`: commits everything in the project working tree, pushes to the remote, runs a deploy verification check after.
+- `review <project>`: runs the test suite and dispatches a reviewer agent over the recent changes.
+- `deploy <project>`: promotes to production on whatever target the project is wired to (Vercel, Cloudflare, etc.).
+- `nuke <project>`: stashes the working tree and runs `git clean`. Always asks for explicit confirmation before doing anything.
+
+## Picking back up next session by typing `hi`
+
+This is the move worth knowing on day one. After a sync or a wrapup, close the terminal entirely. Tomorrow morning, run `{{launch_cmd}}` and the first message you send on Telegram can just be `hi`.
+
+That single word fires the maintenance and greeting digest protocol. The orchestrator pulls the last 30 to 50 Telegram messages, reads HANDOFF.md for the projects you were on, scans for unpushed commits across active projects, loads working context via `scripts/load-context.sh`, and surfaces any open threads from the AI Brain.
+
+You get back a single Telegram message with health status, suggested priorities, unpushed commits if any. You pick one and say "yes" or "do that first" and the system is rolling again with full context, in a session that cost zero tokens to get there.
+
+Other greetings that fire the same digest: `hey`, `hello`, `morning`, `yo`, `gm`, `good morning`, `sup`, `yes`. If you want to skip the digest, just lead with a task ("deploy the portfolio", "fix the login bug on X"). The orchestrator routes it as work, not greeting.
+
+## Registering a new project
+
+When you start a new project anywhere on disk, run from inside the install:
+
+`bash scripts/register-project.sh "<absolute-folder-path>" "<one-line description>" "<stack tag, e.g. nextjs, swift, python>"`
+
+That command does five things at once. It writes the project entry into `docs/projects.md`. It creates `CLAUDE.md` + `HANDOFF.md` + `FEATURES.md` inside the project folder. It initialises git if the folder isn't a repo. If you have a GitHub account wired and the `gh` CLI installed, it creates a private repo and pushes the initial commit.
+
+You can also just tell the orchestrator on Telegram: "register a new project at `<path>` called `<name>`, stack is `<stack>`". The orchestrator runs the same script with the right values.
+
+## Shipping a project end to end
+
+Most projects ship from Telegram. The pattern looks like this:
+
+1. Work on the project in a focused block. Either drive directly via Telegram or open a Claude Code session inside the project folder.
+2. When the change is ready, type `review <project>` in Telegram. The reviewer agent runs the test suite and audits the diff. You see flagged issues before shipping.
+3. Address anything serious. Iterate.
+4. Type `ship <project>`. The orchestrator commits, pushes, and waits for the deploy to land. You see a confirmation only after the deploy verification passes, not just after the push.
+5. If the project has a separate production target (Vercel, Cloudflare Pages, Railway, etc.), `deploy <project>` promotes the latest commit. For projects with auto-deploy on push, `ship` already covers it.
+
+If anything fails during the verify step, the orchestrator pings you with the failure output. You decide whether to roll back or push through.
+
+## The other generated docs
+
+The wizard wrote five other markdown files at the project root. Each one covers a specific situation. Read them in this rough order over your first week.
+
+- `SETUP-CHECKLIST.md`: the day-zero verification list. Walk every box on first session, then archive it.
+- `FIRST-WEEK.md`: a day-by-day routine for your first seven days with the system.
+- `PITFALLS.md`: failure modes you will hit and the concrete fix for each one.
+- `BACKUP-AND-RECOVERY.md`: what to back up, where, how to restore if your laptop dies.
+- `MEMORY-HYGIENE.md`: keeping the memory layer healthy as it grows over months.
+
+## How the orchestrator talks to you
+
+Most replies on Telegram are short. The system was tuned for fast, dense responses, not long explanations. If you want more detail on something, ask for it ("explain that further", "show the actual commit") and you'll get it.
+
+When you correct the orchestrator ("no, do it like this"), the correction gets logged. After the same category of correction lands three times, it gets promoted into the CLAUDE.md operating rules so it stops happening. That's the self-improvement loop. You don't have to do anything for it to run.
+
+## When the orchestrator is wrong
+
+It will be. The fastest fix is to tell it on Telegram, in the same thread:
+- "you used my old API key, here's the new one"
+- "stop using `--`, use commas instead"
+- "you assumed I wanted X, I actually wanted Y"
+
+The correction gets saved. Next time the same situation comes up, it acts on the corrected behaviour. Don't waste effort re-explaining at length. One clear sentence is enough.
+
+## Where to look when something feels off
+
+- `healthcheck` first. It tells you which subsystem is unhappy.
+- `history "<keyword>"` finds anything you logged at the time.
+- `PITFALLS.md` covers the common failure modes with fixes.
+- For anything not in those: tell the orchestrator on Telegram. It can read its own logs.
+
+That's enough to start. Open the terminal, run `{{launch_cmd}}`, and send a `hi` to Telegram.
+```
+
+---
+
+## Template: BACKUP-AND-RECOVERY.md
+
+```markdown
+# Backup and recovery
+
+What to back up, where it lives, how to restore when something breaks.
+
+## Where the install lives on disk
+
+Everything the wizard generated lives in one folder. The default is `~/Documents/{{orchestrator_name}}` on Mac and Linux, `%USERPROFILE%\Documents\{{orchestrator_name}}` on Windows. Inside that folder:
+
+- `CLAUDE.md`: the orchestrator's operating config.
+- `.claude/`: hooks, skills, settings.json, agent configs.
+- `memory/`: every markdown memory file, organised by type and date.
+- `agent-memory/`: per-specialist memory directories.
+- `scripts/`: the operational scripts.
+- `data/runtime/`: bot tokens, session state, lock files. Mode 0600. Not in git.
+- `data/`: audit logs, telegram history, runtime state.
+- `docs/`: project registry and reference docs.
+
+The folder is a git repo. Most of it is committed and pushed to GitHub. The pieces that aren't in git are the things that need a separate backup plan.
+
+## What is critical
+
+These files matter most. If you lose them, you lose state that took weeks to build.
+
+- `memory/` and `agent-memory/`: months of accumulated facts, decisions, corrections, profiles. Committed to git, so push regularly.
+- `CLAUDE.md`: the operating rules the orchestrator runs on. If you customised this beyond the wizard output, that customisation is in here.
+- `.claude/settings.json`: hooks, permissions, plugin enablement. Customisations are easy to lose.
+- `data/runtime/`: bot token, Telegram pairing state, notebook ID. Gitignored, so a separate backup plan is needed.
+- `~/.claude/`: Claude Code's own auth files, statusline script, hooks installed at user scope. Not in any repo.
+
+## How to back up
+
+Two paths work. Pick one and run it weekly.
+
+**Path A: git mirror.** The repo already pushes to GitHub on every `ship` and `sync`. Just make sure your remote is current. From inside the install:
+
+`git status` should show nothing pending. If it does, `bash scripts/session-end-sync.sh` cleans up, then `git push origin main`. That covers everything inside the install folder that isn't gitignored.
+
+For the gitignored runtime state, set up a private mirror repo and rsync into it weekly:
+
+`rsync -av data/runtime/ ~/Documents/{{orchestrator_name}}-runtime-backup/ && cd ~/Documents/{{orchestrator_name}}-runtime-backup/ && git add . && git commit -m "weekly runtime snapshot $(date +%Y-%m-%d)" && git push`
+
+The runtime mirror has your bot token in it. Make sure that repo is private.
+
+**Path B: external drive.** If you don't want a second cloud repo, rsync the whole folder to an encrypted external drive once a week:
+
+`rsync -av --delete ~/Documents/{{orchestrator_name}}/ /Volumes/MyBackup/{{orchestrator_name}}/`
+
+The `--delete` flag mirrors deletions. Drop it if you'd rather keep deleted files around.
+
+Whichever path you pick, also back up `~/.claude/` (the user-scope Claude Code config). It's small and almost never changes, but losing it means re-authing Claude Code and re-installing the statusline.
+
+## How to restore from a backup
+
+1. Install Claude Code from `claude.com/claude-code`. Log in with your Anthropic account.
+2. Install the prereqs (`node`, `git`, `jq`, `sqlite3`, `bun`, plus `python3` if you have the Advanced extensions). The blueprint's Q0 preflight lists the install commands for Mac, Windows, and Linux.
+3. Clone your install repo from GitHub: `git clone <repo-url> ~/Documents/{{orchestrator_name}} && cd ~/Documents/{{orchestrator_name}}`.
+4. Restore `data/runtime/` from your backup. Either pull from the private mirror repo, or copy from the external drive.
+5. Restore `~/.claude/` from your backup if you have it. Otherwise the wizard reinstalls the statusline on next launch.
+6. Run `bash scripts/healthcheck.sh`. It tells you what's missing.
+7. Open `SETUP-CHECKLIST.md` and walk every box. Most will pass straight away. Anything that fails has a fix command listed inline.
+
+Total restore time on a fresh laptop with prereqs already installed: about 20 minutes. From a completely fresh machine: about an hour.
+
+## Recovery: the Telegram plugin stopped responding
+
+The most common Telegram failure is the bot getting paired to a different Claude Code session somewhere else, or a token rotation. To re-pair:
+
+1. In your Claude Code terminal, run `/telegram:configure`. It walks you through re-pairing.
+2. If the bot token itself has rotated (or was lost), open Telegram on your phone, message `@BotFather`, type `/mybots`, pick your bot, hit "API Token", and paste the new token back into `/telegram:configure`.
+3. The configure step writes a new `data/runtime/telegram.json` with mode 0600. Test by sending a message from your phone. The bot should reply.
+
+If multiple Claude Code sessions on different machines share the same bot token, they'll fight over the same `getUpdates` poll. Only one session per token. Close all the others.
+
+## Recovery: the NotebookLM Brain auth expired
+
+NotebookLM auth runs through the `notebooklm-py` CLI which holds a Google session. When it expires (usually after about 14 days of inactivity), the next sync push fails silently and the AI Brain stops getting fresh snapshots.
+
+1. Run `notebooklm auth` from inside the install. It opens a browser, you sign in with Google again, the session file refreshes.
+2. Test with a small push: `bash scripts/push-brain.sh test`. If the source shows up in the notebook, auth is good.
+3. If push still fails, check the notebook ID in `data/runtime/brain.json` matches an existing notebook in your Google account. Notebooks deleted from the web UI keep returning errors until the local ID is updated.
+
+NotebookLM caps each notebook at around 100 sources. The system rolls over to a fresh monthly partition automatically, but if a push fails right around the cap, run `bash scripts/brain-rollover.sh` to force the rollover.
+
+## Recovery: the safety gate gets corrupted
+
+The safety gate lives at `.claude/hooks/safety-gate.sh` and at `~/.claude/hooks/safety-gate.sh` (synced to user scope). If either file gets damaged or accidentally edited into a broken state, destructive commands stop being blocked.
+
+1. From inside the install: `bash scripts/sync-safety-gates.sh`. It compares the in-repo gate against the user-scope copy and re-syncs.
+2. If the in-repo gate itself is broken, restore from git: `git checkout HEAD -- .claude/hooks/safety-gate.sh`, then `bash scripts/sync-safety-gates.sh`.
+3. If git history doesn't have a working copy (you committed the broken version), regenerate from the blueprint. Open a fresh Claude Code session and ask: "regenerate `.claude/hooks/safety-gate.sh` from the v31 blueprint template". The wizard's safety gate template is in `xantham-templates-v31.md` under `## Template: .claude/hooks/safety-gate.sh`.
+4. Verify with `bash scripts/test-safety-gate.sh` if present. It runs the canonical block test cases.
+
+## Recovery: the post-commit memory hook stopped working
+
+You commit memory files, but `bash scripts/memory-search.sh "<keyword>"` returns nothing. The post-commit hook probably isn't installed or isn't executable.
+
+`ls -la .git/hooks/post-commit` should return an executable file. If not, run `bash scripts/install-git-hooks.sh`. That reinstalls the post-commit hook + makes it executable.
+
+If you're on Advanced mode and the hook is installed but search still returns nothing, the sqlite-vec database may need a rebuild: `bash scripts/embed-memories.sh`. It re-embeds every memory file from scratch. Takes a few minutes on a few hundred files.
+
+## What is not recoverable
+
+Some state lives outside the install entirely. The wizard doesn't back these up, and a recovery has to recreate them by hand.
+
+- Your Claude.ai subscription: tied to your Anthropic account. Doesn't need recovery.
+- Your Telegram bot account: lives on Telegram's servers. The bot itself is fine. Only the token paired to your install needs re-pairing.
+- Your NotebookLM notebooks: live in your Google account. They survive a machine wipe.
+- Your GitHub repos: pushed already, recoverable on clone.
+
+That covers every layer the install touches. If you push the install repo + back up `data/runtime/` weekly, you have a working recovery path inside an hour.
+```
+
+---
+
+## Template: FIRST-WEEK.md
+
+```markdown
+# Your first week with {{orchestrator_name}}
+
+Seven days of light routine to get the system from "freshly installed" to "actually integrated into how you work". One thing per day. Roughly 30 minutes each.
+
+## Day 1: verify install, register your first project
+
+Walk every box of `SETUP-CHECKLIST.md`. If you already did this during install, archive it: `mv SETUP-CHECKLIST.md data/SETUP-CHECKLIST.md.done`. Future sessions won't re-prompt.
+
+Then pick one real project you're working on right now. Register it:
+
+`bash scripts/register-project.sh "<absolute-folder-path>" "<one-line description>" "<stack tag>"`
+
+Or just tell the orchestrator on Telegram: "register a new project at `<path>` called `<name>`". The first registration is the one that matters most. The folder needs to actually exist on disk before you register it.
+
+Once registered, type `projects` on Telegram. You should see your project listed.
+
+## Day 2: do a real sync and watch what gets written
+
+Work on the project you registered yesterday. Do a normal work block, 30 to 90 minutes, whatever you'd usually do. When you're done, type `sync <project>` on Telegram.
+
+The orchestrator runs through the full cycle: HANDOFF.md gets rewritten, new memory files land in `memory/`, profile updates happen, the AI Brain push fires if it's wired, and a commit lands on the project. You get a single Telegram message summarising what changed.
+
+Then open `memory/` in your file browser. Look at what landed. You'll see a few new markdown files with frontmatter (`name`, `description`, `type`, `last_verified`, `ttl_days`). That is what the orchestrator now remembers about today's work.
+
+Skim them. If anything looks wrong or trivial, tell the orchestrator: "delete the memory about X, it's not useful". It removes the file and the post-commit hook strips the chunk from the vector index.
+
+This step is the one that builds trust. You can see exactly what the system knows.
+
+## Day 3: ask the AI Brain a cross-session question
+
+If you wired up the NotebookLM Brain during install, this is the day to actually use it. If you skipped the Brain, skip this day.
+
+Open Telegram. Ask the orchestrator something that requires memory from before today:
+
+- "What did we decide about <topic>?"
+- "When did we last work on <project>?"
+- "What's the status across all my projects?"
+- "Summarise everything we did on <project> last week."
+
+The orchestrator routes the question through `brain <question>` if it needs cross-session memory. NotebookLM searches the snapshots pushed during yesterday's sync and writes a structured answer. The orchestrator picks the most relevant part and replies.
+
+If the answer is wrong or thin, the snapshots probably weren't pushed yet. Force a push: tell the orchestrator "push everything to the Brain now" and wait a couple of minutes for indexing.
+
+## Day 4: try parallel agent dispatch
+
+Pick a task that genuinely splits into independent pieces. Examples:
+
+- "Refactor the login flow on project A, and at the same time draft a Reddit post for r/ClaudeAI about the wizard install"
+- "Have the research agent do a frontier scan on agent orchestration, and have the writing agent draft a blog post about my last sprint"
+- "Audit the design tokens of project A, and write a status report for project B, in parallel"
+
+Send it on Telegram. The orchestrator should dispatch two specialists in their own working trees, give you an acknowledgement that both are running, and ping you with results separately as they finish.
+
+If only one specialist runs, the task probably wasn't split enough. Be more explicit: "do these two things at the same time, dispatch separate agents".
+
+The point of this day is to feel what parallel work looks like. Most of the time you'll only need one specialist. When you have a genuine 2-domain task, this is the pattern.
+
+## Day 5: end the day with `wrapup`, start tomorrow with `hi`
+
+Today, when you finish work, type `wrapup` on Telegram. It runs sync across every project you touched today, writes a session reflection at `data/reflections/`, and commits everything that can ship. Close the terminal completely.
+
+Tomorrow morning, open a fresh terminal, run `{{launch_cmd}}`, and the first thing you send on Telegram is just `hi`.
+
+The greeting digest fires. You should see a single message back: health status, what's pending, suggested priorities, unpushed commits if any. The whole thing took zero tokens to load. You're back in flow.
+
+If the digest looks wrong (out of date, missing something obvious, references projects you don't care about today), tell the orchestrator: "drop the X reference, focus on Y for today". It adjusts and remembers.
+
+## Day 6: use `review` on a branch
+
+Make a real change to a project you have registered. Could be a bug fix, a small feature, anything. When the change is ready but before you ship, type `review <project>` on Telegram.
+
+The reviewer specialist runs the project's test suite and audits the diff. You should see flagged issues come back on Telegram: anything that broke a test, anything that looks like a regression, anything that violates the project's CLAUDE.md conventions.
+
+Address the issues. Iterate. Re-run `review <project>` until it comes back clean. Then `ship <project>` to commit and push.
+
+If `review` returns nothing useful, the project probably doesn't have CLAUDE.md conventions written yet. Open the project's CLAUDE.md and add what matters: code style, what to never do, what the tests cover. The reviewer reads from there next time.
+
+## Day 7: customise
+
+Pick one of these three. They're how operators make the system actually theirs.
+
+**Option A. Add a personal note to the Profile bucket.** The Profile bucket (`memory/profile_{{orchestrator_lower}}.md` or `memory/profile_<your-name>.md`) is the third leg of the Karpathy three-bucket pattern. It holds session-aware narrative about you: current focus, recent decisions, current mood, work context. Tell the orchestrator: "update my profile, I'm currently focused on X and Y". It edits the file. The orchestrator reads it at session start, so this is where you bias its priorities.
+
+**Option B. Define a custom skill.** The orchestrator has skills under `.claude/skills/`. Each skill is a folder with a `SKILL.md` containing a `description` field that controls when the skill fires. To add a custom one, tell the orchestrator: "create a skill called `<name>` that fires when I say X, loads context Y, and tells you to do Z". The orchestrator scaffolds the skill, commits it, and uses it next time the trigger fires.
+
+**Option C. Wire a project-specific MCP.** If one of your projects talks to a third-party API (Stripe, Linear, Notion, etc.), check whether an MCP server exists for it. The Pipedream MCP wraps about 2,500 third-party APIs in one server, so it usually does. Tell the orchestrator: "add the Pipedream MCP to my install, scope it to project X". It writes the config, restarts the MCP layer, and the next session has the new tools available.
+
+After this day, you've used every major capability of the system at least once. Day 8 onwards is just doing real work.
+
+## What good looks like after the first week
+
+If everything went well:
+
+- The orchestrator knows your active projects and can answer status questions without you re-explaining context.
+- The AI Brain has at least 5 to 10 snapshots in it, and `brain <question>` returns useful cross-session answers.
+- You've corrected the orchestrator at least once and seen the correction stick.
+- You've shipped at least one change end to end via Telegram.
+- `wrapup` and `hi` feel like normal session boundaries.
+
+If something on this list isn't working, that's the thing to fix this weekend. The rest comes naturally with use.
+```
+
+---
+
+## Template: PITFALLS.md
+
+```markdown
+# Pitfalls
+
+The failure modes operators hit, with the concrete fix for each one. Read once. Come back when something breaks.
+
+## Plugin not loading after a Claude Code reload
+
+**Symptom**: you reload Claude Code (Cmd+R on Mac, or close and reopen the session), and a plugin that worked yesterday now isn't responding. `/mcp` shows the plugin as `disconnected` or missing.
+
+**Fix**: plugin registration sometimes drops on reload. From a fresh terminal at the install root, source your shell profile (`source ~/.zshrc` on Mac, or restart PowerShell on Windows), then retry your launch alias (`{{launch_cmd}}`). If the alias itself is missing, the profile didn't load the function. Check `grep "{{launch_cmd}}" ~/.zshrc` on Mac, `Select-String "{{launch_cmd}}" $PROFILE` on Windows. If absent, the wizard's profile-write step failed. Re-run that one piece by asking the orchestrator: "the {{launch_cmd}} alias is missing from my shell profile, write it".
+
+If `/mcp` shows a plugin disconnected, try `/mcp restart <plugin-name>` from the Claude Code prompt. If that fails, the plugin likely needs a fresh OAuth flow. Run `claude plugin list` to see which are installed, then re-auth the failing one through its specific path (most plugins use a browser OAuth handshake).
+
+## Telegram bot not responding
+
+**Symptom**: you send a message from your phone, nothing happens. The orchestrator session is open and looks fine.
+
+**Fix**: walk this checklist top to bottom.
+
+1. Is your laptop awake? Telegram polling pauses on sleep. Mac: open a second terminal, run `caffeinate -i` to keep it awake while a long task runs. Windows: Settings, System, Power, set sleep to "Never" while plugged in.
+2. Is the Claude Code session actually running? Look at your terminal. You should see the `>` prompt of Claude Code, not your normal shell `$` or `%`.
+3. From your Claude Code session, run `/mcp`. The `telegram` server should show `connected`. If not, `/mcp restart telegram`.
+4. Run `/telegram:diagnose` from your Claude Code prompt. The diagnostic skill checks bot token validity, pairing state, allowlist policy, and recent poll errors. It prints the first failing thing.
+5. Check the bot token in `data/runtime/telegram.json`. If it looks wrong or empty, re-paste it. Get a fresh one from `@BotFather` if needed.
+6. If multiple Claude Code sessions on different machines share the same bot token, they fight over `getUpdates`. Only one session per token. Close the others.
+
+## NotebookLM Brain rejecting sources
+
+**Symptom**: a sync runs, but the Brain push step logs an error or silently fails. New snapshots don't appear in your notebook.
+
+**Fix**: NotebookLM caps each notebook at about 100 sources. After the cap, every push returns `INVALID_ARGUMENT` from the API. The system rolls over to a fresh monthly partition automatically, but if a push fails right at the cap, force the rollover manually: `bash scripts/brain-rollover.sh`. That creates a new notebook (`{{orchestrator_name}} AI Brain: YYYY-MM`), updates `data/runtime/brain-current.json` to point at it, and the next push lands cleanly.
+
+If pushes fail for a different reason, run `notebooklm auth` to refresh the Google session. NotebookLM auth expires after roughly 14 days of inactivity.
+
+If the notebook ID in `data/runtime/brain.json` points at a notebook you deleted from the web UI, every push will fail until the local ID gets updated. Either restore the notebook from the NotebookLM trash, or `bash scripts/brain-rollover.sh` to create a fresh one and point at it.
+
+## Safety gate blocking a legitimate command
+
+**Symptom**: you ask the orchestrator to do something normal (rename a folder, clean up old files, run a project-specific CLI), and the safety gate blocks it with a `BLOCKED:` banner.
+
+**Fix**: the gate uses pattern matching. Some legitimate commands match destructive patterns. False positives are a known cost.
+
+For a one-time approval: tell the orchestrator "approve the last blocked command". It writes the exact command to `data/approved.txt` with a 30-day TTL. Retry the command in the same session. The gate sees the pre-approval and lets it through. One-time use.
+
+For repeating false positives: edit `.claude/hooks/safety-gate.sh` and refine the regex to be more specific. The categories live at the top of the file. Be careful not to weaken the gate for genuinely destructive commands. After editing, run `bash scripts/sync-safety-gates.sh` to sync the change to the user-scope gate at `~/.claude/hooks/safety-gate.sh`.
+
+Some commands are hard-blocked and cannot be approved at all (force push to protected branches, `rm -rf /`, `filter-branch`, etc.). For these, run the command manually in a plain terminal if you genuinely need it. The orchestrator never runs them.
+
+## Agent dispatch hits the rate limit
+
+**Symptom**: you dispatch a multi-agent sprint (5 to 8 specialists in parallel), and partway through you get a 5-hour rate-limit error from Anthropic. The session pauses until the window resets.
+
+**Fix**: the Claude Max plan has a 5-hour rolling rate limit. Aggressive parallel dispatches can exhaust it. The system was built for Max 20x which has generous limits, but even on 20x, a sustained 8-agent burst over an hour can hit the cap.
+
+Three mitigations:
+
+- **Pace heavy sprints.** Run 5-to-8-agent fan-outs at the start of a fresh 5-hour window, not in the last hour.
+- **Watch the statusline.** The bottom-of-screen statusline shows `XX% 5h`. When that hits 80%, dispatch fewer parallel agents until the window resets.
+- **Wire auth failover.** Advanced mode includes the auth-failover canary. If your OAuth ever suspends or rate-limits sustained, the canary flips Claude Code over to a separately-billed API key without losing the session. Set up at `bash scripts/auth-fallback.sh test-key <KEY>`.
+
+If you're on Pro or Max 5x, the rate limit is tighter. Default to 2 to 3 parallel agents, not 5 to 8.
+
+## Sync command runs forever
+
+**Symptom**: you type `sync <project>` and the orchestrator never replies. The session hangs.
+
+**Fix**: most "sync hangs" cases are a stuck Bash subprocess. The sync cycle spawns several scripts, one of which is waiting on something that never returns. Common culprits:
+
+- A `git push` is stuck on credential prompt (you don't have credentials cached).
+- An MCP call (NotebookLM, GitHub, etc.) is waiting on an expired auth token.
+- A `bash scripts/healthcheck.sh` inside the sync is waiting on a slow MCP server.
+
+To unstick:
+
+1. Open Activity Monitor (Mac) or Task Manager (Windows). Look for `bash` processes that have been running for more than 2 minutes inside the install path. Kill them.
+2. Tell the orchestrator "cancel that sync, try a simpler one" and ask it to run just the memory + handoff parts (no Brain push, no GitHub).
+3. If the hang is on credentials, run `gh auth login` to refresh GitHub credentials.
+
+Sync should always complete in under 90 seconds for a typical project. Past that, something is stuck.
+
+## Statusline breaking after a Claude Code update
+
+**Symptom**: you update Claude Code, and the bottom-of-screen statusline disappears or shows garbage characters.
+
+**Fix**: Claude Code updates sometimes reset `~/.claude/settings.json`. Re-run the statusline install step.
+
+From the install root: ask the orchestrator "the statusline broke after a Claude Code update, re-install it". It re-writes `~/.claude/statusline-command.sh`, re-adds the `statusLine` block to `~/.claude/settings.json`, and confirms with `chmod +x` on the script. Restart Claude Code (close and reopen the terminal) to pick up the new config.
+
+If the statusline still shows garbage characters, the bash script may be running through a different shell than expected. Check that `bash` is in PATH inside Claude Code's perspective (Windows users on PowerShell need Git Bash installed). The fix on Windows is usually `winget install Git.Git` to install Git Bash if it isn't already there.
+
+## macOS TCC blocking launchd-spawned scripts
+
+**Symptom**: scheduled jobs you set up via `launchd` (Mac's cron equivalent) silently fail with `Operation not permitted` exit code 126. They worked before the last macOS update.
+
+**Fix**: macOS Transparency, Consent, and Control (TCC) started blocking `launchd`-spawned bash from executing scripts inside `~/Documents/` around macOS 14.4 onwards. The install lives under `~/Documents/`, so anything triggered by `launchd` hits the block.
+
+Three paths to unstick:
+
+- **Path A (TCC grant).** Open System Settings, Privacy and Security, Full Disk Access. Add `/bin/bash` to the allowed list. This grants every bash script TCC permission everywhere. Heavy-handed but reliable.
+- **Path B (relocate).** Move the install out of `~/Documents/`. TCC doesn't block `~/.local/` or `~/code/` by default. The install path is captured in shell aliases, so relocating means updating the aliases too. The `bash scripts/relocate-install.sh <new-path>` helper handles the alias rewrite if it exists.
+- **Path C (session-scoped only).** The system's daemons are designed to fall back to session-scoped scheduling (Claude Code's `CronCreate` tool, fired from inside an active session) when launchd is blocked. This is the default in v31. You lose background scheduling when no session is running, but everything inside a session works fine.
+
+Path C is what the system ships with. Most operators don't need launchd because the orchestrator handles all scheduling inside an active session.
+
+## Memory file landed but `memory-search.sh` returns nothing
+
+**Symptom**: you saved something to memory (the orchestrator confirmed). `bash scripts/memory-search.sh "<keyword>"` returns zero hits.
+
+**Fix**: the post-commit hook auto-embeds new memory files into sqlite-vec. If the hook isn't installed or isn't executable, the embed never runs.
+
+Check: `ls -la .git/hooks/post-commit` should show an executable file. If not, `bash scripts/install-git-hooks.sh`. That reinstalls the hook and makes it executable.
+
+If you're on Simple mode (no sqlite-vec), memory search runs through grep + the `MEMORY.md` index. The file exists, but vector search doesn't. Use `history "<keyword>"` instead, which falls back to grep.
+
+If you're on Advanced mode and the hook is installed but search still returns nothing: `bash scripts/embed-memories.sh` re-embeds every memory file. Takes a few minutes. Useful after restoring from backup.
+
+## Orchestrator forgot something it should remember
+
+**Symptom**: you told the orchestrator a fact yesterday. Today it acts as if it never knew.
+
+**Fix**: facts only persist if they got written to memory. Telegram conversation history doesn't survive a session by itself.
+
+Check whether the fact landed: `bash scripts/history.sh "<keyword>"`. It searches Telegram, audit log, git log, and memory markdown together. If the fact only appears in Telegram, the orchestrator didn't save it to memory. Tell it now: "save this to memory: <fact>". It writes a file and commits.
+
+If the fact appears in memory but the orchestrator still ignores it, the active-recall lookup may have missed it. Active recall surfaces top-3 memory hits per entity, capped at 2 entities per turn. Some matches don't surface if the entity wasn't recognised. Test by asking the orchestrator directly: "what do you know about <entity>?". If it pulls the memory now, the lookup is fine, the issue was entity recognition.
+
+## Healthcheck red but nothing actually broken
+
+**Symptom**: `healthcheck` shows red on something (usually the Brain or an MCP), but everything works fine in practice.
+
+**Fix**: healthcheck is conservative. It flags optional components as red when they're not configured, even when you skipped them on purpose.
+
+- Brain red: you skipped NotebookLM during install. Either wire it up now (ask the orchestrator "set up the AI Brain") or ignore the red status.
+- MCP red: the specific server is disconnected. `/mcp` shows which. Most need a re-auth (`claude plugin list` then re-auth the relevant one).
+- sqlite-vec red on Simple mode: expected. Simple mode doesn't ship with sqlite-vec. Ignore.
+
+If the red item is something you do use, fix it. If you skipped it on purpose, tell the orchestrator "I don't use X, don't flag it red on healthcheck" and it updates the check.
+```
+
+---
+
+## Template: MEMORY-HYGIENE.md
+
+```markdown
+# Memory hygiene
+
+How to keep the memory layer healthy as it grows. Most of this happens automatically. This doc covers the parts that need human input.
+
+## What gets saved where
+
+Memory lives in three places:
+
+- `memory/`: shared across all specialists. Markdown files, one fact per file, with frontmatter for type, last_verified, and ttl_days.
+- `agent-memory/<name>/`: per-specialist memory. Each specialist (engineer, research, writer, etc.) keeps a local MEMORY.md plus topic files.
+- `data/vector-memory.db`: sqlite-vec semantic index. Gitignored. Rebuilt from `memory/` and `agent-memory/` on demand.
+
+Files under `memory/` are organised by type. The post-commit hook auto-regenerates `memory/MEMORY.md` (the index) on every commit, capped at 200 lines.
+
+## The TTL convention
+
+Every memory file carries `last_verified: YYYY-MM-DD` and `ttl_days: N` in its frontmatter. TTL is about freshness, not correctness. A stale memory might still be true, it just hasn't been confirmed lately.
+
+Defaults by type:
+
+- **feedback** (365 days): explicit rules from corrections. Long TTL because they reflect persistent preferences.
+- **project** (2 days): current project state. Very short because project state changes fast.
+- **user** (180 days): user profile facts. Stable but worth re-verifying twice a year.
+- **reference** (180 days): external system pointers, URLs, integrations. Re-verify when something feels off.
+- **note** (30 days): casual observations. Short by design.
+- **agent** (90 days): per-agent operational notes. Quarterly re-verify.
+
+You can override the default per file by editing the frontmatter. A particularly long-lived feedback rule might have `ttl_days: 999`. A volatile project status might have `ttl_days: 1`.
+
+## Checking freshness
+
+`bash scripts/check-memory-freshness.sh` walks every memory file, compares `last_verified + ttl_days` against today, and surfaces stale ones.
+
+Run it weekly, or when the greeting digest flags stale items. The output looks like:
+
+```
+STALE: memory/project_nearbyme.md (verified 2026-04-12, TTL 2 days, 29 days overdue)
+STALE: memory/reference_supabase_config.md (verified 2025-11-05, TTL 180 days, 7 days overdue)
+```
+
+For each stale file, you have three choices:
+
+1. **Re-verify**: open the file, confirm it's still true, update `last_verified` to today, commit. The post-commit hook re-embeds.
+2. **Update**: the fact has changed. Rewrite the file with the new state, set `last_verified` to today, commit.
+3. **Delete**: the fact no longer matters. `rm memory/<file>.md` and commit. The post-commit hook removes the chunk from sqlite-vec.
+
+Don't let stale memories accumulate. They confuse the orchestrator into acting on outdated facts.
+
+## Dream consolidation: the offline pass
+
+Once a week (or on demand), the system runs a dream consolidation pass. It's a 4-phase offline run that consolidates fragmented memories, dedups overlapping ones, and proposes promotions of recurring patterns into permanent rules.
+
+To invoke manually: `bash scripts/dream.sh --full-cycle` from the install root. Or send `/dream` on Telegram and the orchestrator runs it.
+
+The cycle has a hard $1 cost cap (Anthropic API budget for the offline phase) and runs in dry-run mode by default. Nothing in `memory/` changes without your explicit approval. You'll see a proposal of consolidations + deletions + promotions, and you can approve or reject each one.
+
+To approve the last dream's proposals: `dream approve` on Telegram. To reject: `dream reject`. The orchestrator applies or discards accordingly.
+
+Scheduled dream passes fire every 24 hours or every 5 sessions, whichever comes first. You can disable scheduled dreams by editing `data/runtime/dream-schedule.json` and setting `enabled: false`.
+
+## Episodic rollups
+
+Each session writes telegram tail, reflection, and commits into a per-day file at `memory/episodic/<YYYY-MM-DD>.md`. The Stop hook handles this automatically at session end.
+
+Once a week (Sundays), `bash scripts/maintain.sh` rolls 7 days of episodic files into a weekly compile. The compile lives at `memory/episodic/weekly/<YYYY-MM>.md` and is much shorter than the raw episodic files (typically 1 KB vs 50 KB).
+
+Once a month (first Sunday of the month), the same script runs a monthly retrospective: `memory/episodic/monthly/<YYYY-MM>.md`. The retrospective summarises the month's themes, recurring corrections, project arcs, and is the primary input to the next month's prioritisation.
+
+You don't manage these rollups by hand. They run on schedule. If you want to read past sessions, the rolled-up files are usually what you want, not the raw episodic ones.
+
+## When to manually prune
+
+The memory layer is designed to handle thousands of files without performance issues. Sqlite-vec retrieval scales linearly per chunk and stays sub-100ms warm cache up to about 50,000 chunks.
+
+That said, two thresholds are worth pruning at:
+
+- **`agent-memory/<name>/` exceeds 200 files**: that specialist has accumulated too much per-agent state. Tell the orchestrator "audit my agent-memory for <name>, propose a prune". It walks the files, surfaces overlapping ones, and you approve a consolidation.
+- **`memory/` exceeds 500 files**: total memory has grown enough to slow down full grep searches. Run a dream pass with `--aggressive` flag, which lowers the consolidation threshold. Approves usually drop 20 to 30% of files.
+
+Most operators never hit either threshold in the first six months. The dream consolidation pass keeps it bounded.
+
+## The post-commit hook and `MEMORY.md` regen
+
+Every git commit that touches `memory/` or `agent-memory/` fires the post-commit hook:
+
+1. It detects which files changed.
+2. For added or modified files, it re-embeds the content into `data/vector-memory.db` via `bash scripts/embed-memories.sh`.
+3. For deleted files, it removes the chunks from the database.
+4. It regenerates `memory/MEMORY.md` (the index) capped at 200 lines.
+
+If the hook stops working (you commit memory files but `memory-search.sh` returns nothing), see `PITFALLS.md` for the diagnostic and fix.
+
+To verify the hook is wired:
+
+`ls -la .git/hooks/post-commit` should show an executable file pointing at `scripts/post-commit.sh` (or equivalent). If absent or non-executable, run `bash scripts/install-git-hooks.sh`.
+
+## When the memory layer feels stale
+
+Two warning signs:
+
+- `bash scripts/memory-search.sh "<recent-thing>"` returns nothing for facts you saved this week.
+- The orchestrator keeps asking you for context you already gave it.
+
+Both usually trace to the same root cause: the post-commit hook didn't fire on recent commits, so new memory files are on disk but not in the vector index.
+
+Force a full re-embed: `bash scripts/embed-memories.sh`. It rebuilds `data/vector-memory.db` from scratch. Takes a few minutes for a few hundred files, longer if you're past 1000.
+
+After the rebuild, retry the search. If it still returns nothing, the issue is upstream: the memory files themselves don't contain the content you expected. Check the relevant files in `memory/` directly with grep.
+
+## Profile maintenance
+
+The Profile bucket (`memory/profile_<your-name>.md` or `memory/profile_{{orchestrator_lower}}.md`) is mutable, session-aware narrative about you. It updates on session end and on explicit signals during a session ("I'm switching focus to X", "I just got back from Y, my schedule is different now").
+
+You can edit it directly. The orchestrator reads it at session start, so anything you write there biases the next session's priorities and recall.
+
+The Profile bucket has a 7-day TTL by default. Stale signals decay. If a context you wrote there two weeks ago no longer matters, freshness flags it and you can prune.
+
+That's the whole layer. Most of it runs on its own. You step in when freshness check flags something or when dream consolidation asks for approval.
+```
+
+---
+
 ## Template: Library/ (conditional)
 
 <!-- Only generate if library=yes -->
