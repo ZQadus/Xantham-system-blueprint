@@ -11,6 +11,62 @@
 - Per-tool-call audit log + safety gate that prevents destructive accidents
 - A self-installing wizard that walks you through setup in 20-60 minutes
 
+## What you can do with it
+
+The system is general-purpose. Anything Claude Code can do, your specialist crew can be asked to do via Telegram. A non-exhaustive list of what operators actually use it for:
+
+### Coding and shipping software
+
+- **Build a new iOS app from a spec.** Tell the engineer to scaffold, build features in long sessions, run tests, ship to TestFlight. Real apps shipped to the App Store with this exact pattern.
+- **Maintain multiple projects in parallel.** Work on 4-5 projects in one session. Each one lives in its own working tree so agents don't trample each other. The orchestrator coordinates merges.
+- **Code review on a branch.** `review <project>` dispatches a reviewer agent that audits the diff against your codebase conventions + flags issues.
+- **Fix a production bug from your phone.** Telegram in, fix out. Verified via deploy check before the orchestrator says "done".
+- **Refactor across a large repo.** Multi-agent dispatch handles independent files in parallel. Sync writes the result back.
+
+### Research and analysis
+
+- **Frontier scans on a topic.** Ask the research agent for a survey of recent papers, repos, and posts on something specific (e.g. "what's the state of agent orchestration in 2026?"). It searches the web, peer-reviewed sources via the Consensus integration, and writes a structured brief.
+- **Competitive intelligence.** "Who else is building X? What do they charge, what do they ship, what's the gap?" Gets you a comparison matrix you can act on.
+- **Technical deep-dives.** Read a 30-page paper, summarise the load-bearing claims, link to verifiable sources, flag anything that didn't replicate.
+- **Market sizing + feasibility.** Hand the research agent a product idea, get a defensible TAM/SAM/SOM back with the assumptions visible.
+
+### Writing and content
+
+- **Long-form blog posts.** Built-in anti-AI-tell style guide, no em-dashes, varied sentence cadence. Output reads like a real person wrote it.
+- **Pitch decks and investor materials.** Structured outline + per-slide copy.
+- **Reddit posts, X threads, LinkedIn updates.** Platform-tactical content from the social agent. Title + body + cadence + which subreddit, all defensible.
+- **Cold-email and outreach drafts.** The human-dynamics agent writes intros calibrated to the recipient.
+- **Documentation.** PRDs, README files, technical specs, internal handover docs.
+
+### Operations and admin
+
+- **Morning digest.** Every morning, the orchestrator fires a catch-up on Telegram. What's pending, what shipped overnight, what needs your input today.
+- **Calendar suggestions.** "Find me 90 minutes this week to focus on X." Looks at your real calendar via the Google integration, suggests slots.
+- **Email triage.** Drafts replies, flags the ones that need your attention, archives the rest. You approve before anything sends.
+- **Reading queue.** Paste a YouTube link, get a structured summary with timestamps + key claims + a "should I actually watch this" verdict.
+- **Knowledge library.** Auto-promoted research notes, decisions, handbooks. Searchable across every session.
+
+### Trading and market research
+
+- **Strategy ideation and backtesting.** Walk-forward tests, portfolio analysis, risk-management work. Local execution, no broker API in the loop unless you wire one yourself.
+- **Market-data analysis.** Pull live data via the database integrations, run analysis, write a brief.
+- **Position sizing models.** Kelly criterion calculators, drawdown analysis, regime detection.
+
+### Growth and launch
+
+- **Launch playbooks.** ASO, paid + organic strategy, week-by-week rollout cadence.
+- **Subreddit + community strategy.** Where to post, when, with what voice. The social agent reads sub-specific norms before recommending.
+- **Cross-posting + repurposing.** One asset, multiple platforms, calibrated copy per channel.
+- **Conversion optimisation.** Landing page audit, CTA placement, copy A/B suggestions.
+
+### Personal stuff
+
+- **Project ideation.** "Help me think through X". Brainstorming agent walks the design space before any code gets written.
+- **Decision support.** Hard call you keep avoiding? The system has a council pattern for it (3 agents debate anonymously, a chairman ranks).
+- **Pattern detection on yourself.** After enough sessions, the system notices what you keep doing wrong + flags it. Auto-promoted to rules after the same correction lands 3 times.
+
+The bigger principle: anything you'd type into a Claude conversation, you can route through this system, with the difference that it remembers across sessions, runs specialist agents in parallel, and ships safely.
+
 ## Before you start
 
 You'll need:
