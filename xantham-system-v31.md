@@ -1,8 +1,12 @@
+---
+architectural_role: trunk
+---
+
 # Xantham System - Blueprint v31
 
 You hand this file to a fresh Claude Code session. It walks you through picking a mode, generating the install scripts, and finishes with a working personal orchestrator on your phone. **Time to first reply: 75 to 120 minutes from `git clone` to your phone vibrating with output.**
 
-The orchestrator takes Telegram messages from your phone, routes tasks to a crew of specialist sub-agents (engineering, research, deploy, writing, growth, trading, business, human-interaction), keeps memory across sessions, and runs background work on a schedule. Replies come back to Telegram so you can be anywhere.
+The orchestrator takes Telegram messages from your phone, routes tasks to a crew of specialist sub-agents (engineering, research, growth strategy, platform-tactical social media, deploy, writing, trading, business, human-interaction), keeps memory across sessions, and runs background work on a schedule. Replies come back to Telegram so you can be anywhere.
 
 Built and run by one person managing 8+ active projects since April 2026. Every habit, hook, and skill in this blueprint earned its place after a real bug, a real correction, or a real session-end review. The system itself is generic; you bring your own agent names, project list, and Telegram bot.
 
@@ -38,12 +42,12 @@ Before install, pick one. You can upgrade later, but the fresh-install path diff
 | Multi-agent coordination | Sequential via the Task tool | Live shared context via Agent Teams + whiteboard |
 | Observability | Telegram history log | Everything above + per-tool-call audit JSONL + live viewer |
 | Safety gate | Basic (file deletion / sudo / force-push) | Hardened (protected-branch hard-blocks, word-boundary regex, history-rewriting blocks) |
-| Includes | Core orchestrator + 9 specialist agents + Telegram + Brain + safety | Same + E1 sqlite-vec + E3 Agent Teams + E4 Observability + E5 Hardened safety |
+| Includes | Core orchestrator + 10 specialist agents + Telegram + Brain + safety | Same + E1 sqlite-vec + E3 Agent Teams + E4 Observability + E5 Hardened safety |
 | Good for | Getting started fast, low-overhead daily use, beginner-friendly | Power users running 5+ projects, multi-agent workflows, long-horizon memory recall, audit-trail compliance |
 
 ### Mode contents at a glance
 
-**Simple mode includes:** Orchestrator (your AI), Specialist crew (9 agents), Markdown memory, Telegram channel, NotebookLM Brain integration, Session cron, Compaction defence, Basic safety gate.
+**Simple mode includes:** Orchestrator (your AI), Specialist crew (10 agents), Markdown memory, Telegram channel, NotebookLM Brain integration, Session cron, Compaction defence, Basic safety gate.
 
 **Advanced mode includes everything in Simple, plus:**
 - **E1 Semantic memory** (sqlite-vec + Ollama Nomic-embed) - semantic search across your memory files. "Find the rule about timezones" works even when you don't remember the file name.
@@ -122,7 +126,7 @@ The Profile bucket is the third leg of the Karpathy three-bucket pattern: Memory
 
 There is exactly one profile file per user: `memory/profile_<user>.md`. Read at session start. Updated mid-session on explicit signals ("call me Sam", "I'm now working on X full-time"). Drafted at session end by `scripts/update-profile.sh` based on observed changes during the session. Lifecycle is `update_frequency: per-session` and `ttl_days: 7` in the frontmatter so it stays fresh.
 
-In v31, the Profile bucket is user-side only. The 9 specialist agents have `agent-memory/<name>/MEMORY.md` indexes plus topic files, no per-agent profile narrative. Per-agent profiles are a v32+ candidate, not v31.
+In v31, the Profile bucket is user-side only. The 10 specialist agents have `agent-memory/<name>/MEMORY.md` indexes plus topic files, no per-agent profile narrative. Per-agent profiles are a v32+ candidate, not v31.
 
 Update flow on session end:
 
@@ -898,6 +902,39 @@ To see more edges: graph view's settings panel → turn on "Show unresolved link
 - Core stays minimal (orchestrator + agents + Telegram + NotebookLM Brain + safety gate)
 - Extensions opt-in: E1 sqlite-vec semantic memory, E3 Agent Teams shared whiteboard, E4 Observability audit layer, E5 Hardened safety gate
 - Per-extension install + uninstall scripts, version-stamp file `.{{orchestrator_lower}}-blueprint-version`
+
+### v31.2 - infra hardening + perma-rules from 2026-05-09 / 2026-05-10 upgrade slate
+- **Banned-language gate hook** (`.claude/hooks/banned-language-gate.sh` + perl helper). PreToolUse blocks medical-claim words / marketing superlatives / AI-tells from leaking into orchestrator replies AND files written under `Library/`, `docs/`, app strings. Reads from `Library/app-store-compliance/banned-language-list.md` + allowlist. ~45ms per fire (60s cache). Configurable via `BANNED_LANG_GATE_PATHS` / `BANNED_LANG_GATE_DEBUG=1` / emergency bypass `BANNED_LANG_GATE_OFF=1`.
+- **Per-agent MCP scoping** (`scripts/sync_agent_skills.py`). Lifted from `anthropics/claude-financial-services`. Each `.claude/agents/<name>.md` declares `mcps:` in YAML frontmatter; script generates per-agent `.mcp.json`, validates against live `claude mcp list`, reports drift. Estimated 6-8k tokens saved per dispatch when Claude Code wires per-agent loading.
+- **Architectural-role tagging** (`scripts/tag-architectural-role.sh` + `scripts/check-trunk-edits.sh`). Convention: every long-lived markdown carries `architectural_role:` of `trunk` / `branch` / `leaf`. Trunk-edit watcher flags commits touching trunk files in healthcheck. Convention doc: `Library/agentic-engineering/architectural-role-tagging.md`.
+- **Agent-readiness audit script** (`scripts/agent-readiness-audit.sh`). Factory.ai-style 8-pillar pattern adapted for orchestrator-system scope: memory hygiene, skill coverage, tool budget, agent crew utilisation, hook reliability, blueprint drift, correction patterns, external dependencies. Quarterly trigger (first Monday of Jan/Apr/Jul/Oct) lives in `<orchestrator>-maintenance` skill. Read-only.
+- **Reverse-prompt Monday self-improvement** (`scripts/reverse-prompt-weekly.sh` + approve/reject siblings). Every Monday session-start, orchestrator looks at her own last 7 days (telegram + git + YouTube summaries + corrections + memory writes) and self-suggests 3 workflow improvements. Hard-gated to Monday. Cost-bounded. Approval rate tracked in `data/runtime/reverse-prompt-stats.jsonl`.
+- **Per-person profile files** (`memory/profile/<name>.md`). Auto-discovered from basenames via `scripts/active-recall-entities.sh`. Populator: `scripts/profile-person-update.sh` (single-fact / scan-tail / list modes). PII guardrail rejects facts containing phone / email / postcode patterns.
+- **HTML greeting digest pilot** (`scripts/render-html-digest.sh` + `.py`). Opt-in via `GREETING_DIGEST_FORMAT=html`. Reads same data sources as markdown greeting, emits self-contained dark-theme HTML with embedded CSS, no JS, no external deps. Markdown stays default; pilot validates the human-engagement thesis.
+- **AI-SEO on ship** (`scripts/ai-seo-on-ship.sh` + `<orchestrator>-ai-seo` skill). Auto-fires on every `ship <project>` / `deploy <project>` for projects with public web surface. Generates robots.txt (LLM-bot allowlist for GPTBot/ClaudeBot/PerplexityBot/Google-Extended/Applebot-Extended), sitemap.xml, llm.txt (llmstxt.org standard), `.well-known/schema.json` (JSON-LD), pricing.md. Idempotent.
+- **Orphan MCP reaper** (`scripts/reap-orphan-mcp.sh`). Detects bun/node/python MCP server processes reparented to PID 1 (cwd inside `~/.claude/plugins/`, uptime > 10 min) and kills them. Catches the failure mode where MCP connection breaks + Claude Code spawns a fresh subprocess without the orphan dying. Wired into session-end-sync in DRY-RUN mode (logs to `data/runtime/orphan-mcp-kills.log`). Healthcheck section 12 surfaces orphan count.
+- **SessionEnd subprocess guard** (`scripts/session-end-sync.sh` + `.claude/hooks/session-start-hook.sh`). Closes a Claude Code lifecycle hazard: every child `claude` invocation (`claude -p` headless, `claude plugin install`, SDK subagent dispatch, any tooling that shells out to `claude` from inside the repo) fires the SessionEnd hook on its own exit, not just the real interactive session end. Without the guard, the session-end-sync hook (HANDOFF rebuild + reflection write + per-person profile scan + orphan-MCP reap) runs on EVERY child exit, sometimes 10+ times per real session. The heavy I/O can destabilise the parent session's MCP sockets (Telegram / Gmail / Supabase / etc), producing visible `SessionEnd hook [...] failed: Hook cancelled` surfaces and 1-3 min MCP disconnects per child exit.
+
+  **Detection** (two layers, cheapest first, both inside `scripts/session-end-sync.sh`):
+
+  1. **Layer 1, payload-vs-marker.** SessionEnd stdin payload includes the firing session's UUID (`session_id` field). A marker file at `data/runtime/active-session.json` holds the parent session's UUID. Mismatch = child, skip. Match = real session-end, run full hook.
+  2. **Layer 2, `CLAUDE_CODE_ENTRYPOINT` fallback.** Used when Layer 1 is indeterminate (marker absent, marker corrupted, payload missing). `CLAUDE_CODE_ENTRYPOINT=cli` = interactive parent. Anything else (`sdk-cli`, etc) = child.
+
+  **Marker-write guard.** The SessionStart hook only writes the marker when BOTH `source=startup` AND `CLAUDE_CODE_ENTRYPOINT=cli`. Without the entrypoint gate, a child invocation's SessionStart would overwrite the parent's marker with its own UUID and its subsequent SessionEnd would then match, so the guard misfires and the full hook runs on the child anyway.
+
+  **Audit.** Skipped fires write a JSONL entry to `data/audit/<YYYY-MM-DD>.jsonl` (same daily file as the PostToolUse audit) with `tool: "SessionEnd"`, `output: "skipped (subprocess child)"`, and a `session_end` object containing the mismatched IDs + entrypoint + skip reason. Override for manual operator invocation: `SESSION_END_FORCE=1 bash scripts/session-end-sync.sh`.
+
+  **Platform notes.** Hazard is platform-neutral. The same child-claude-fires-SessionEnd race hits Mac, Linux, and Windows (WSL or native PowerShell shelling out to `claude.exe`) identically. The guard logic is pure bash + jq with no platform-specific syscalls. On Mac and Linux the script runs as-is. On Windows, run it under WSL or Git-Bash; the underlying detection (env vars + a JSON marker file under `data/runtime/`) works in any POSIX shell. The hazard exists wherever a session-end hook is wired to run heavy work, so if your orchestrator's SessionEnd hook touches shared sockets, the same guard pattern applies.
+- **Karpathy AutoResearch wrapper** (`scripts/auto-research.sh`). Wraps Karpathy's published `karpathy/autoresearch` repo by reference at `~/.local/autoresearch`. Adapts Karpathy's ML-experiment loop for skill optimisation per the 3-level criteria framework (hard rules / LLM-judge / pure-creativity-out-of-scope). Hard caps: 15 iterations + $5 budget per run. Dry-run default. Handbook: `Library/agentic-engineering/auto-improvement-loops.md`.
+- **YouTube claim verification gate** (`scripts/verify-yt-claims.sh`). Runs after every YouTube summary write + before Library promotion. Extracts named entities, writes `<video_id>.verified.md` sidecar, orchestrator fills status (verified / unverified / partial / skipped) via WebSearch + Consensus MCP. Library promotion BLOCKED for unverified entities. Closes the failure mode where YouTube summaries were taken at face value + propagated as upgrade candidates without verification.
+- **Spec-kit bridge skill** (`<orchestrator>-spec-kit-bridge` at `.claude/skills/<orchestrator>-spec-kit-bridge/SKILL.md`). Integrates github/spec-kit (95k stars, MIT, official GitHub spec-driven-development toolkit) into the orchestrator's plan-first chain. Pinned at v0.8.8.dev0 via `uv tool install specify-cli==0.8.8.dev0 --from git+https://github.com/github/spec-kit.git@v0.8.8`. Fires BEFORE engineering agent dispatch on greenfield builds with budget >4h. Walks 6 phases: init -> constitution (3-5 non-negotiable principles) -> spec (priority-ordered MVP user stories + numbered FRs + measurable SCs) -> clarify (max 3 NEEDS-CLARIFICATION markers) -> plan (technical context + constitution check) -> tasks (atomic dependency-ordered T-XYZ-NN) -> analyze (cross-artifact consistency gate). Skip for bug fixes, ops work, refactors, brownfield, <4h tasks. Orchestration habit `plan-first` escalates to spec-kit on greenfield + >4h. Pilot evidence: spec-kit's `/speckit-analyze` cross-artifact gate caught 5 issues a council-derived brief had missed (budget mismatch ~25 percent over, hard-blocker naming gap masquerading as a soft note, success-criterion verifiability under privacy constitution, gap with no acceptance scenario, citation hand-waving). Two of those (budget + naming) are blockers that would have hit mid-build.
+- **Three perma-rules in CLAUDE.md core loop:**
+  - Rule 9 published-repo-first: WebSearch GitHub + npm + PyPI before framing ANY upgrade as "build custom X". Default to install/wrap or fork/adapt over build-from-scratch. Only build custom when no published fit OR fit-gap is documented.
+  - Rule 10 verify YouTube claims: every video summary triggers `verify-yt-claims.sh` before Library promotion. Library promotion + upgrade-candidate dispatch BLOCKED for unverified entities.
+  - Rule 11 spec-kit on greenfield + >4h: plan-first escalates to the full spec-kit pipeline (constitution -> spec -> plan -> tasks -> analyze) before engineering agent dispatch.
+
+### v31.1 - platform-tactical social specialist added
+- Roster expanded to 10 specialists by splitting Natalie's growth role: Natalie keeps strategy + ASO + paid + brand, new Maya specialist takes platform-tactical execution (TikTok / IG / X / YouTube / Reddit content + algorithm + viral hooks + creator-economy + community management)
 
 ### v28 - additional specialist agents
 - Roster expanded to 9 specialists (engineering, research, growth, deploy, writing, trading, business, human dynamics, plus orchestrator)
@@ -2983,6 +3020,7 @@ After all questions are answered, generate files in this order. Each file comes 
    │   ├── history.sh
    │   ├── register-project.sh
    │   ├── check-blueprint-drift.sh
+   │   ├── blueprint-drift-check.sh
    │   ├── sync-project-memories.sh
    │   ├── pre-compaction-sync.sh
    │   ├── post-compaction-reload.sh

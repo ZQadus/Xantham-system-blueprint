@@ -1,3 +1,7 @@
+---
+architectural_role: trunk
+---
+
 # Xantham System Templates v31
 
 Companion file to `xantham-system-v31.md`. This file contains every template body the install wizard copies verbatim into the user's filesystem (scripts, hooks, skills, agent configs, memory seeds, doc bodies).
@@ -9119,10 +9123,10 @@ Build complete. Manual steps remain ({{user_name}}, NOT the orchestrator):
      launchctl bootstrap gui/\$(id -u) \\
         ~/Library/LaunchAgents/com.{{orchestrator_lower}}.corrections-review.plist
 
-     # Signal-fire (new. schedule.json driven, see scripts/signal-schedule.sh):
-     bash scripts/signal-schedule.sh apply        # generates plist + copies to LaunchAgents
-     launchctl bootstrap gui/\$(id -u) \\
-        ~/Library/LaunchAgents/com.{{orchestrator_lower}}.signal-fire.plist
+     # (Signal-fire system removed in v31. See system blueprint section
+     # "Removed in v31" for the rationale. Do not reintroduce any
+     # signal-schedule.sh / signal-fire-* scripts without an explicit
+     # reactivation decision.)
 
 3) VERIFY:
      # Canaries within 5 min:
