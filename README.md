@@ -162,6 +162,7 @@ This is a single-maintainer open-source project. The most useful security signal
 
 - **GitHub:** [github.com/ZQadus](https://github.com/ZQadus). Commit history on this repo and other repos shows operating posture (commit cadence, prior projects, response to issues).
 - **Portfolio:** [zakiqadus.co.uk](https://zakiqadus.co.uk). Public artifacts, shipped projects, current focus.
+- **LinkedIn:** [linkedin.com/in/zaki-qadus](https://linkedin.com/in/zaki-qadus). Professional history, current role, prior work.
 - **Community activity:** open GitHub Issues + Discussions are the public record. Read the maintainer's responses there to calibrate.
 
 If anything looks off in the above, do not install. Open an issue or send a question first.
