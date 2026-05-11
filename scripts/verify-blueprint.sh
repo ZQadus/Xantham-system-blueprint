@@ -30,6 +30,9 @@ FILES=(
   "xantham-templates-v31.md"
   "LICENSE"
   "README.md"
+  "SECURITY.md"
+  "ARCHITECTURE.md"
+  "COMPARISON.md"
 )
 
 # Cross-platform sha256 picker. macOS ships shasum; most Linux distros ship sha256sum.
