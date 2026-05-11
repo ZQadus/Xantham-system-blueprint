@@ -1,10 +1,18 @@
 # Xantham System
 
-> Self-installing personal AI orchestrator. Hand the blueprint to a fresh Claude Code session and it builds you a full multi-agent system. Built for someone managing multiple projects who wants to drive everything (research, code, deploys, writing, planning) from their phone via Telegram, with a team of AI specialists handling the actual work.
+> Self-installing personal AI orchestrator. Hand the blueprint to a fresh Claude Code session and it builds you a full multi-agent system in about an hour.
+>
+> Built for operators running multiple projects who want to drive research, code, deploys, and writing from their phone. Telegram is the front door, a crew of specialist agents does the actual work.
+
+## Documentation
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system map with Mermaid diagram, component descriptions, data flow, memory and safety cross-sections.
+- **[SECURITY.md](SECURITY.md)** — threat model, the three-bucket safety gate (hard-block / approval-gated / allowed), known limitations, vulnerability disclosure.
+- **[COMPARISON.md](COMPARISON.md)** — honest benchmark vs claude-financial-services, factory.ai, AutoGen, CrewAI, LangGraph, karpathy/llm-council. Where Xantham is behind, at parity, and ahead.
 
 ## What you get
 
-- A master orchestrator (your AI) plus a crew of 9 specialist agents (engineering, research, growth, deploy, writing, trading, business, human dynamics, plus the orchestrator)
+- A master orchestrator (your AI) plus a crew of 9 specialist agents (engineering, research, growth, social, deploy, writing, trading, business, human dynamics)
 - Telegram interface so you can run the system from your phone
 - Persistent memory that survives across sessions, with semantic search
 - Live shared whiteboard so multiple agents coordinate cleanly when running in parallel
@@ -77,27 +85,31 @@ Xantham is **multi-agent on top of that.** Instead of one AI doing everything, y
 
 ### Who's on the crew
 
-- **Engineer** -- writes and reviews code, ships builds, fixes bugs
-- **Research** -- competitive analysis, paper deep-dives, market intel
-- **Growth** -- ASO, launch playbooks, paid + organic strategy
-- **Social** -- platform-tactical content for Reddit, X, LinkedIn, TikTok
-- **Infra** -- deploys, CI/CD, DNS, monitoring, hosting
-- **Writing** -- long-form, decks, docs, emails, no AI tells
-- **Business** -- pricing, partnerships, contracts, legal
-- **Trading** -- strategy research, backtests, portfolio analysis (no live capital unless you wire it yourself)
-- **Human dynamics** -- negotiation, networking, cold outreach, presence
+- **Engineer**: writes and reviews code, ships builds, fixes bugs
+- **Research**: competitive analysis, paper deep-dives, market intel
+- **Growth**: ASO, launch playbooks, paid + organic strategy
+- **Social**: platform-tactical content for Reddit, X, LinkedIn, TikTok
+- **Infra**: deploys, CI/CD, DNS, monitoring, hosting
+- **Writing**: long-form, decks, docs, emails, no AI tells
+- **Business**: pricing, partnerships, contracts, legal
+- **Trading**: strategy research, backtests, portfolio analysis (no live capital unless you wire it yourself)
+- **Human dynamics**: negotiation, networking, cold outreach, presence
 
 The orchestrator is the boss. You talk to it. It routes work to the right specialist (or several at once), then reports back. Most tasks need one specialist. Bigger sprints get 3-5 specialists running in parallel in their own isolated working trees so they don't trample each other.
 
-### Three things this gives you over a regular Claude chat
+### Three things you get from this setup
 
-1. **Persistent memory.** A regular Claude session forgets you when you close the tab. Xantham writes notes to disk and to an AI Brain (NotebookLM) so the next session knows everything the last one did. Across days, weeks, months.
-2. **Parallel work.** A regular Claude is one thread. Xantham can run 5-16 specialists in parallel for big sprints. Your wall-clock time on a 4-hour build collapses to 45 minutes.
-3. **Safety hooks.** A regular Claude can in theory be talked into a destructive command. Xantham's safety gate physically refuses force-push to main, `rm -rf`, dropping a database, etc. Even if you tell it to. The hard-blocks are non-negotiable by design.
+1. **Persistent memory across sessions.** Every session writes structured notes to disk, plus an optional snapshot to an AI Brain (NotebookLM). When you open a fresh terminal next Tuesday, the orchestrator reads back yesterday's state in under 5 seconds. Days, weeks, months of work stay continuous.
+2. **5 to 16 specialists in parallel on big sprints.** Default is 5 to 8 working at once, each in its own git worktree so they don't trample each other. A 4-hour solo build collapses to roughly 45 minutes of wall-clock time when the work splits cleanly.
+3. **Hard-blocked destructive commands.** Force-push to main, `rm -rf` against your home directory, `DROP TABLE` against a database — the safety gate refuses these at the hook layer regardless of approval. Approval-gated commands (database migrations, etc.) still pause for your call. The hard-blocks are not configurable on purpose.
 
-### One thing to internalise before you install
+### One thing worth knowing before you install
 
-You're not "using" an AI assistant. You're **running a small operation** that happens to be entirely AI-driven. You're the operator. The orchestrator is your chief of staff. The specialists are your team. You direct, they execute, the system remembers. The mental model shift from "AI helper" to "AI operation" is the actual unlock. Most of the value of Xantham comes from leaning into that shift rather than treating it like a fancier ChatGPT.
+You're not using an AI assistant. You're running a small operation that happens to be entirely AI-driven, with you as the operator. The orchestrator is the one you talk to. It routes work to specialists, holds context across sessions, and pings you when something needs your call.
+
+In practice this looks different from a regular chat after about a week. You stop typing long prompts. You start typing short directions: "fix the bug on the login screen of NearbyMe", "draft a Reddit post for r/ClaudeAI about the wizard install", "summarise yesterday's research on agent orchestration". The orchestrator already knows the codebase, the project, your voice. It dispatches a specialist, the specialist works in background, you get a result on your phone.
+
+That is the shape of the thing.
 
 ## Before you start
 
@@ -268,6 +280,10 @@ Working on multiple things in parallel is the default. Telling Telegram "work on
 
 ## Files in this repo
 
+- **`README.md`**. This file. Start here.
+- **`ARCHITECTURE.md`**. System map with Mermaid diagram, component descriptions, data flow, memory and safety cross-sections.
+- **`SECURITY.md`**. Threat model, the three-bucket safety gate, known limitations, vulnerability disclosure.
+- **`COMPARISON.md`**. Benchmark table vs the most-cited public agent frameworks and orchestrators.
 - **`xantham-system-v31.md`** (~4900 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
 - **`xantham-templates-v31.md`** (~9100 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
 - **`archive/xantham-system-v30.md`** is the previous monolithic version (kept for upgrade-from-v30 reference).
@@ -276,7 +292,7 @@ Versions ship cumulatively. The latest pair on `main` is what the wizard install
 
 ## Modes
 
-- **Simple mode.** Orchestrator + 9 agents + Telegram + NotebookLM Brain + basic safety gate. Set up in ~20 minutes. £0/month plus your Claude.ai subscription.
+- **Simple mode.** Orchestrator + 9 specialists + Telegram + NotebookLM Brain + basic safety gate. Set up in ~20 minutes. £0/month plus your Claude.ai subscription.
 - **Advanced mode.** Simple plus the v31 power-user stack: E1 semantic memory (sqlite-vec + Ollama), E3 Agent Teams (live shared whiteboard), E4 Observability (per-tool-call audit JSONL + live viewer), E5 Hardened safety gate, plus the Amazing Memory layer (cognitive overlay with episodic + semantic + procedural memory, Profile bucket, dream consolidation pass, active-recall pre-turn entity lookup), plus auth failover (the canary that flips your Claude Code over to a paid API key if your Max OAuth ever suspends). ~45-60 minutes setup. £0/month for the local stack. ~$4/month if you enable the optional `dream` consolidation pass (~$1 per weekly run on Anthropic API).
 
 ## Both Mac and Windows are supported
@@ -285,14 +301,14 @@ Every install command in the blueprint has both Mac and Windows versions side by
 
 ## Versioning
 
-The repo name doesn't include a version. The files inside do. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-xantham.sh` from your installed orchestrator. The customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
+The repo name doesn't include a version. The files inside do. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-<your-orchestrator-name>.sh` from your installed orchestrator (the wizard names the upgrade script after the orchestrator you picked at Q1, e.g. `upgrade-myagent.sh` if you named yours MyAgent, `upgrade-jarvis.sh` if you named yours Jarvis). The customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
 
 ## What's new in v31
 
 - **Amazing Memory layer.** Cognitive overlay (episodic / semantic / procedural buckets, Karpathy three-bucket pattern with the Profile bucket as a first-class third leg), dream consolidation pass with hard $1 cost cap and dry-run default, pre-turn active-recall entity lookup with sub-50ms warm cache.
 - **Auth failover.** A 4th SLO canary watches your Claude Code OAuth health. If it degrades 3 times running, the system flips you over to a separately-billed API key without losing the session. Caps any future Anthropic OAuth outage from days to minutes.
 - **Wizard split.** v31 ships as two files. Landing (what humans read) plus templates appendix (what the install consumes). The single-monolith pattern is archived at `archive/xantham-system-v30.md`.
-- **Pre-hoc reflection skill.** Cortana now runs a 6-stage chain-pattern-interrupt before dispatching agents on fuzzy briefs or first-time multi-agent fan-outs. Catches wrong-direction dispatches before tokens are spent.
+- **Pre-hoc reflection skill.** Your orchestrator now runs a 6-stage chain-pattern-interrupt before dispatching agents on fuzzy briefs or first-time multi-agent fan-outs. Catches wrong-direction dispatches before tokens are spent.
 - **Hardened safety gate.** Force-push to protected branches becomes physically impossible, no approval can unlock it. CLI-rm whitelist covers npm rm, yarn remove, pnpm rm, brew uninstall, vercel env rm, etc.
 
 ## Sharing
