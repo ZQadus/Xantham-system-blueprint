@@ -3180,6 +3180,8 @@ After all questions are answered, generate files in this order. Each file comes 
 
 4. **Generate .claude/settings.json** from **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Standard Security)** OR **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
 
+   **Step 4 backup + sidecar (sentinel-gating, fixes Marco audit CG5).** If `~/.claude/settings.json` ALREADY EXISTS on the host (another Claude Code project on the same machine), copy it to `~/.claude/settings.json.pre-install` BEFORE writing the new one. Do NOT overwrite an existing `.pre-install` (preserve any older install's backup). Then `touch ~/.claude/.settings.json.xantham-managed` (mode `0644`) AFTER writing the new settings.json. The sidecar marker is what `scripts/uninstall.sh` reads to know it can safely jq-strip the `statusLine` block when the .pre-install backup is missing. Without the sidecar, uninstall refuses to touch settings.json. Mac/Linux: standard `cp` + `touch`. Windows (PowerShell): `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.pre-install"` + `New-Item -Path "$env:USERPROFILE\.claude\.settings.json.xantham-managed" -ItemType File`.
+
 5. **Generate hook scripts.** For each hook listed below, look up the matching **`## Template: .claude/hooks/<name>.sh`** section in `blueprints/xantham-templates-v31.md` and write the literal body to `.claude/hooks/<name>.sh`, substituting placeholders. Hook list: `safety-gate.sh` (always), `log-telegram-hook.sh` (only if `{{messaging}}`=telegram), `audit-log-hook.sh` (only if `{{security}}`=enterprise OR Advanced mode with E4 selected at Q18), `voice-lint.sh` (always; the de-personalised reply-quality lint), `stop-composer.sh` (always), `stop-verify-contract.sh` (always). After writing, `chmod +x` each. Mac/Linux: `chmod +x .claude/hooks/*.sh`. Windows (Git Bash): `chmod +x .claude/hooks/*.sh` works the same; on plain PowerShell the chmod is unnecessary because Git Bash interprets the shebang directly.
 
 6. **Generate skill bodies.** For each skill in **`blueprints/xantham-templates-v31.md` § Skill Templates**, write the literal body to `.claude/skills/<skill-name>/SKILL.md`. Substitute `{{orchestrator_name}}` / `{{orchestrator_lower}}` placeholders. Skills to generate: `<orchestrator_lower>-sync`, `<orchestrator_lower>-maintenance`, `<orchestrator_lower>-orchestration`, `<orchestrator_lower>-brain`, `<orchestrator_lower>-safety`, `<orchestrator_lower>-observability`, `<orchestrator_lower>-blueprint-updates`, plus any others in the Skill Templates section. <!-- TODO: cross-reference Kai-1's skill template section once it lands - skill list above is the contract; bodies come from blueprints/xantham-templates-v31.md. -->
@@ -4873,8 +4875,20 @@ Mac and Linux:
 ```bash
 # One-time setup (do this BEFORE you ever need it)
 mkdir -p ~/.config/claude
-echo "<your-anthropic-api-key>" > ~/.config/claude/api-key
-chmod 0600 ~/.config/claude/api-key
+
+# If an api-key file ALREADY exists, it was provisioned by another tool.
+# Leave it in place AND skip the sidecar write — uninstall keys off the
+# sidecar to know whether to prompt for removal. No sidecar = leave alone.
+if [ ! -f ~/.config/claude/api-key ]; then
+  echo "<your-anthropic-api-key>" > ~/.config/claude/api-key
+  chmod 0600 ~/.config/claude/api-key
+  # Sidecar marker so scripts/uninstall.sh knows THIS install provisioned it
+  # (fixes Marco audit CG5 — sentinel-gating on the api-key cleanup step).
+  touch ~/.config/claude/.api-key-installed-by-xantham
+  chmod 0600 ~/.config/claude/.api-key-installed-by-xantham
+else
+  echo "api-key already exists at ~/.config/claude/api-key (NOT provisioned by this wizard)"
+fi
 
 # Flip to API key when OAuth is degraded
 bash scripts/auth-fallback.sh use-api-key
@@ -4894,8 +4908,15 @@ Windows (PowerShell):
 ```powershell
 # One-time setup
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.config\claude" | Out-Null
-Set-Content -Path "$env:USERPROFILE\.config\claude\api-key" -Value "<your-anthropic-api-key>"
-icacls "$env:USERPROFILE\.config\claude\api-key" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+if (-not (Test-Path "$env:USERPROFILE\.config\claude\api-key")) {
+  Set-Content -Path "$env:USERPROFILE\.config\claude\api-key" -Value "<your-anthropic-api-key>"
+  icacls "$env:USERPROFILE\.config\claude\api-key" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+  # Sidecar marker so uninstall.sh knows THIS install provisioned the key
+  New-Item -ItemType File -Path "$env:USERPROFILE\.config\claude\.api-key-installed-by-xantham" -Force | Out-Null
+  icacls "$env:USERPROFILE\.config\claude\.api-key-installed-by-xantham" /inheritance:r /grant:r "$($env:USERNAME):(R)"
+} else {
+  Write-Host "api-key already exists at ~/.config/claude/api-key (NOT provisioned by this wizard)"
+}
 
 # Flip via Git Bash (the script is bash, runs identically on Windows)
 bash scripts/auth-fallback.sh use-api-key
@@ -4914,6 +4935,10 @@ Mac launchd schedule for the canary. Save the plist below as `~/Library/LaunchAg
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- XANTHAM-SENTINEL: launchd-plist-v31
+         This XML comment is content-grep'd by scripts/uninstall.sh before
+         removing the plist. Keeps uninstall from touching plists that just
+         happen to share the com.<orchestrator>. filename prefix. -->
     <key>Label</key>
     <string>com.{{orchestrator_name_lower}}.auth-canary</string>
 
