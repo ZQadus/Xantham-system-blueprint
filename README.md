@@ -337,3 +337,5 @@ MIT. See [LICENSE](LICENSE). Fork it, hand it to teammates, ship it inside your 
 ## Contact
 
 Open a GitHub issue. The maintainer reads them.
+
+For security vulnerabilities, use GitHub's private vulnerability reporting (per [SECURITY.md](SECURITY.md)) rather than a public issue, so the disclosure stays out of the public timeline until a fix lands.
