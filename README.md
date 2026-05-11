@@ -95,7 +95,7 @@ Xantham is **multi-agent on top of that.** Instead of one AI doing everything, y
 - **Trading**: strategy research, backtests, portfolio analysis (no live capital unless you wire it yourself)
 - **Human dynamics**: negotiation, networking, cold outreach, presence
 
-The orchestrator is the boss. You talk to it. It routes work to the right specialist (or several at once), then reports back. Most tasks need one specialist. Bigger sprints get 3-5 specialists running in parallel in their own isolated working trees so they don't trample each other.
+You talk to the orchestrator. It routes work to the right specialist or several at once, then reports back. Most tasks need one specialist. Bigger sprints fan out 2-3 specialists by default (up to 16 in Aggressive mode), each running in its own isolated working tree so they do not trample each other.
 
 ### Three things you get from this setup
 
@@ -105,11 +105,9 @@ The orchestrator is the boss. You talk to it. It routes work to the right specia
 
 ### One thing worth knowing before you install
 
-You're not using an AI assistant. You're running a small operation that happens to be entirely AI-driven, with you as the operator. The orchestrator is the one you talk to. It routes work to specialists, holds context across sessions, and pings you when something needs your call.
+The shift from "AI assistant" framing to "AI operation you run as the operator" is small in words and large in practice. The orchestrator is the thing you talk to. It routes work to specialists, holds context across sessions, and pings you when something needs your call.
 
-In practice this looks different from a regular chat after about a week. You stop typing long prompts. You start typing short directions: "fix the bug on the login screen of NearbyMe", "draft a Reddit post for r/ClaudeAI about the wizard install", "summarise yesterday's research on agent orchestration". The orchestrator already knows the codebase, the project, your voice. It dispatches a specialist, the specialist works in background, you get a result on your phone.
-
-That is the shape of the thing.
+In practice this looks different from a regular chat after about a week. Long prompts stop. Short directions take over: "fix the bug on the login screen of NearbyMe", "draft a Reddit post for r/ClaudeAI about the wizard install", "summarise yesterday's research on agent orchestration". The orchestrator already knows the codebase, the project, your voice. It dispatches a specialist, the specialist works in background, you get a result on your phone.
 
 ## Before you start
 
