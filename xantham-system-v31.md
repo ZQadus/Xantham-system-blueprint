@@ -2884,12 +2884,55 @@ Then present the user with the exact resume sequence:
 >
 > **4. Tell me "resumed".** I'll verify the plugin loaded + continue the install.
 
-If the user reports the resume failed (alias not found, session id stale), guide the recovery:
+If the user reports the resume failed (alias not found, session id stale), guide the recovery STEP BY STEP. Do not throw three options at them and walk away. Walk them through one at a time.
 
-> Three quick checks:
-> - If the alias was not found, your shell config did not pick up the launch alias yet. Run `source ~/.zshrc` (Mac) or `. $PROFILE` (Windows PowerShell) in the fresh terminal, then retry the alias.
-> - If `--resume <id>` errors with "session not found", the session expired or was cleaned up. Use `claude --continue` instead, it grabs the most recent session.
-> - If neither works, run `claude` fresh and tell me "starting fresh", I will re-read your install state from `data/runtime/install-state.json` and pick up where we left off.
+**Step 1: try sourcing the shell profile**
+
+> First, the alias is probably installed but your shell config did not pick it up in the new terminal. Try this:
+>
+> **Mac**: `source ~/.zshrc`
+> **Windows PowerShell**: `. $PROFILE`
+> **Linux (bash)**: `source ~/.bashrc`
+>
+> Then retry: `{{orchestrator_lower}}-resume`
+>
+> Did the alias work this time? (yes / no)
+
+**Step 2 (if step 1 still failed): use the regular Claude resume command as the fallback**
+
+> No problem. Use the regular Claude command instead, this brings you back to the same session AND keeps the install going under the same permissions:
+>
+> ```bash
+> cd {{install_dir}} && claude --dangerously-skip-permissions --resume {{session_id}}
+> ```
+>
+> Paste that into the fresh terminal. You should land back in the same conversation we were having.
+>
+> Once you are back in, tell me "alias didn't work" and I will fix it as the next step of the install. Don't worry about it now, the install continues and the alias gets re-wired before we finish.
+
+**Step 3 (if even step 2 fails because the session id is stale)**
+
+> The session expired or got cleaned up. Last resort, run a fresh session that picks up the most recent state:
+>
+> ```bash
+> cd {{install_dir}} && claude --dangerously-skip-permissions --continue
+> ```
+>
+> Or if even that does not work, start a fully fresh session:
+>
+> ```bash
+> cd {{install_dir}} && claude --dangerously-skip-permissions
+> ```
+>
+> When you are back in, tell me "starting fresh, install was at Q14 plugins". I will re-read your install state from `data/runtime/install-state.json` and pick up exactly where we left off.
+
+**After the user successfully resumes (any path), the FIRST thing the wizard does is verify**:
+
+1. The plugin actually loaded (check with `claude plugin list` or equivalent inside the session)
+2. The alias actually works in their fresh shell (run the alias name as a sanity check, if it fails again, fix the alias by inspecting their shell rc file, identifying which one their terminal actually sources, writing the alias line into the right file)
+3. The Telegram plugin specifically can reach the bot (test message via `/telegram:diagnose` or equivalent)
+
+Only when all three pass does the wizard move on to Q15. If any verification fails, fix it before continuing. This is the hand-holding step where "fix the alias issue" lives, so the user does not have to debug their own shell config.
 
 Store the session capture as `{{session_id}}` (for the prompt template above) and `{{resume_command}}` (the alias if available, else the `--resume` line).
 
