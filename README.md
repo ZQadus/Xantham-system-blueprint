@@ -288,6 +288,16 @@ A handful of explicit commands are worth learning early. All of them are typed d
 | `deploy <project>` | Promotes to production on Vercel (or the project's configured target). |
 | `nuke <project>` | Stash + clean the working tree. Requires explicit confirmation, never silent. |
 
+### Orchestration habits
+
+| Command | What it does |
+|---|---|
+| `sync habits` | Pulls the latest [`orchestration-habits.md`](orchestration-habits.md) from this repo and installs every habit + enforcement hook listed in the embedded manifest. Idempotent. Use after a fresh install, or whenever you want to upgrade to the latest discipline. |
+| `install habits` | Alias for `sync habits`. |
+| `update habits` | Alias for `sync habits`. |
+
+The orchestrator runs the install itself via the `xantham-sync-habits` skill. You do not type install commands. Verification runs after install; the orchestrator reports back on Telegram with installed counts and any failures.
+
 ### Context window management with `sync`
 
 This is the command that lets one Claude session cover a full day of work without context exhaustion.
@@ -361,8 +371,14 @@ Working on multiple things in parallel is the default. Telling Telegram "work on
 - **`ARCHITECTURE.md`**. System map with Mermaid diagram, component descriptions, data flow, memory and safety cross-sections.
 - **`SECURITY.md`**. Threat model, the three-bucket safety gate, known limitations, vulnerability disclosure.
 - **`COMPARISON.md`**. Benchmark table vs the most-cited public agent frameworks and orchestrators.
-- **`xantham-system-v31.md`** (~4900 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
-- **`xantham-templates-v31.md`** (~9100 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
+- **`xantham-system-v31.md`** (~5200 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
+- **`xantham-templates-v31.md`** (~10400 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
+- **`orchestration-habits.md`** (versioned, currently v1.0.0). Self-contained habits + manifest file. Drop into any orchestrator install. The `xantham-sync-habits` skill parses the manifest and installs every dependency autonomously when the user says `sync habits`.
+- **`install-xantham-habits.sh`**. CLI fallback installer for the habits layer. Use this for CI / scripted installs / brand-new repos that do not yet have an orchestrator agent loaded. Normal path is the `sync habits` command above.
+- **`.claude/hooks/`**. Five enforcement hooks shipped as actual files: `telegram-reply-reminder.sh`, `banned-language-gate.sh` + `.pl`, `stop-composer.sh` + `stop-verify-contract.sh`, `agent-dispatch-pre.sh` + `agent-dispatch-post.sh`. Pulled directly by the sync skill.
+- **`.claude/skills/xantham-sync-habits/SKILL.md`**. The skill that handles `sync habits` autonomously. Ships in this repo so a fresh install picks it up immediately.
+- **`.claude/skills/xantham-memory/`, `xantham-spec-kit-bridge/`, `xantham-ai-seo/`, `xantham-21st-bridge/`**. Four extra skill bodies that were referenced from the wizard step list but had no SKILL.md to drop. Now present as actual files.
+- **`Library/app-store-compliance/banned-language-list.md` + `banned-language-allowlist.md`**. Reference data the banned-language gate reads at runtime.
 - **`archive/xantham-system-v30.md`** is the previous monolithic version (kept for upgrade-from-v30 reference).
 
 Versions ship cumulatively. The latest pair on `main` is what the wizard install command points at.
