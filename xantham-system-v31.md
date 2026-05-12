@@ -865,6 +865,22 @@ To see more edges: graph view's settings panel → turn on "Show unresolved link
 
 ## Changelog
 
+### v31.3 - orchestration-habits port + autonomous habits sync (2026-05-12)
+
+- **New top-level file** `orchestration-habits.md` at the repo root. Self-contained, versioned (semver, `version: 1.0.0`), license-tagged, with stable kebab-case anchors (`#reply-discipline`, `#aggressive-parallelism`, `#council-pattern`, etc) so other skills can link via `[[orchestration-habits#anchor]]` and the link survives renames.
+- **Machine-readable manifest** embedded in the habits file. YAML fence under `## Manifest` lists every skill / plugin / hook / library-file / settings-patch / verify step the habits layer requires. Agent parses and runs.
+- **New skill** `<orchestrator>-sync-habits`. Triggers on `sync habits` / `install habits` / `update habits`. The skill fetches the latest manifest, runs every install via Bash itself, verifies, then reports back on the messaging channel. The user does not type install commands. Idempotent. Logs to `data/xantham-habits-install.log`.
+- **Five enforcement hooks now ship as actual files** in the public repo's `.claude/hooks/`:
+  - `telegram-reply-reminder.sh` (UserPromptSubmit — injects the TELEGRAM TURN reminder + writes per-turn contract)
+  - `banned-language-gate.sh` + `banned-language-gate.pl` (PreToolUse — blocks medical-claim words / marketing superlatives / AI tells)
+  - `stop-composer.sh` + `stop-verify-contract.sh` (Stop — verifies the per-turn contract was honoured; auto-logs corrections on violation)
+  - `agent-dispatch-pre.sh` + `agent-dispatch-post.sh` (PreToolUse|PostToolUse `Agent|Task` — live dispatch tracking)
+- **Four skill bodies added as actual files**: `xantham-memory`, `xantham-spec-kit-bridge`, `xantham-ai-seo`, `xantham-21st-bridge`. These were referenced from the wizard step list but had no SKILL.md body to drop in. Now present in `.claude/skills/<name>/SKILL.md`.
+- **Banned-language library** copied to `Library/app-store-compliance/banned-language-list.md` + `banned-language-allowlist.md`. The gate reads these at runtime.
+- **CLI fallback** `install-xantham-habits.sh` at repo root. Manual installer for CI / scripted installs / brand-new repos that do not yet have an orchestrator agent loaded. Dry-run flag, idempotent, --uninstall path restores backups.
+- **Reply discipline enforcement stack made explicit** in the habits file. Five mechanisms (UserPromptSubmit reminder, per-turn contract, Stop-side verify, correction promotion at 3x threshold, audit stream substrate) plus an opt-in sixth hard-block layer.
+- **Stale references removed** from this file: `scripts/preflight.sh`, `scripts/regenerate-setup-checklist.sh`, `scripts/uninstall.sh` (still templated; just untangled from broken refs), the dead proactive-daemon / signal-fire chain (already removed in v31 but a handful of stragglers slipped through).
+
 ### v31 - memory and meta-cognition cut
 
 - Profile bucket promoted to a first-class section (single `memory/profile_<user>.md`, mutable narrative, per-session updates via `scripts/update-profile.sh`). Karpathy three-bucket pattern explicit: Memory + Knowledge + Profile.
