@@ -28,6 +28,7 @@ HOOK_FILES=(
   "stop-composer.sh"
   "agent-dispatch-pre.sh"
   "agent-dispatch-post.sh"
+  "safety-gate.sh"
 )
 LIBRARY_FILES=(
   "Library/app-store-compliance/banned-language-list.md"
