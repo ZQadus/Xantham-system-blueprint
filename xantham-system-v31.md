@@ -819,7 +819,7 @@ Run all with `for t in tests/memory/test_*.sh; do bash "$t" || echo "FAIL: $t"; 
 
 Obsidian is a free local markdown editor + knowledge-graph viewer. Your `memory/`, `Library/`, `agent-memory/`, and `docs/` directories are all interconnected markdown, which is the exact format Obsidian was built for. Pointing an Obsidian vault at the project root gives you a graph view, backlinks, full-text search, and (with the Smart Connections plugin) semantic search over the whole knowledge base, all without writing a single line of code.
 
-Obsidian does NOT replace anything Cortana already does. It is a viewer for the same files Cortana reads + writes. Two interfaces over one source of truth.
+Obsidian does NOT replace anything your orchestrator already does. It is a viewer for the same files {{orchestrator_name}} reads + writes. Two interfaces over one source of truth.
 
 ### Why install it
 
@@ -827,21 +827,21 @@ Obsidian does NOT replace anything Cortana already does. It is a viewer for the 
 - **Backlinks per file.** Open any file, the right panel shows every other file that references it. Useful when refactoring memories or hunting connected concepts.
 - **Full-text search with rich previews.** Faster than `grep -r` for human reading. sqlite-vec is for agent recall; Obsidian search is for your browsing.
 - **Smart Connections plugin.** Local semantic search over the vault using Ollama. Different from sqlite-vec because it surfaces relations as you browse (right panel, real-time), not via command-line query. Two semantic-search systems on the same files: one for the orchestrator, one for you.
-- **Mobile editing (optional).** Obsidian Mobile lets you edit memory files from your phone. Not recommended for read-write if Cortana is also writing the same files (sync conflicts). View-only on mobile is fine.
+- **Mobile editing (optional).** Obsidian Mobile lets you edit memory files from your phone. Not recommended for read-write if your orchestrator is also writing the same files (sync conflicts). View-only on mobile is fine.
 
 ### What Obsidian does NOT need
 
 - Obsidian Sync (paid £4/mo). Skip it. Your vault is already in git, pushed to your private repo. Git history covers most of what Sync's version-history feature gives you.
 - Cloud accounts. Local-only is the cleanest privacy posture.
-- Always-on. Obsidian is launched on demand, not a daemon. Closing it doesn't break Cortana.
-- A separate MCP server. Cortana already has direct file access to the vault; an Obsidian MCP would couple two interfaces that work better as independent layers over the same files.
+- Always-on. Obsidian is launched on demand, not a daemon. Closing it doesn't break your orchestrator.
+- A separate MCP server. Your orchestrator already has direct file access to the vault; an Obsidian MCP would couple two interfaces that work better as independent layers over the same files.
 
 ### Installation (~5 min)
 
 1. **Install:** `brew install --cask obsidian` on Mac, `winget install Obsidian.Obsidian` on Windows, or download from https://obsidian.md.
 2. **Open vault:** launch Obsidian, click "Open folder as vault," navigate to your orchestrator project root (`~/Documents/{{orchestrator_name}}` or wherever you installed). Click Open. Trust the vault when prompted.
 3. **Pre-baked config (already in this repo):** the wizard ships a `.obsidian/` directory with sensible defaults (excluded files for noisy dirs, graph color groups by directory, core plugins enabled). First launch picks these up automatically. No manual settings walk needed.
-4. **Smart Connections (recommended):** Settings → Community plugins → Turn on → Browse → search "Smart Connections" → Install + Enable. On first run it'll ask which embedder. Pick **Ollama** + the `nomic-embed-text` model (matches what Cortana's E1 sqlite-vec uses, so the two semantic-search systems share an embedding space). If you don't have the model pulled yet: `ollama pull nomic-embed-text`. First-vault indexing takes 2-5 minutes.
+4. **Smart Connections (recommended):** Settings → Community plugins → Turn on → Browse → search "Smart Connections" → Install + Enable. On first run it'll ask which embedder. Pick **Ollama** + the `nomic-embed-text` model (matches what your orchestrator's E1 sqlite-vec uses, so the two semantic-search systems share an embedding space). If you don't have the model pulled yet: `ollama pull nomic-embed-text`. First-vault indexing takes 2-5 minutes.
 5. **Try it:** Cmd+G opens graph view. Cmd+Shift+F opens full-text search. Cmd+O jumps to any file by name. Click any file and the right panel shows backlinks.
 
 ### Pre-baked vault config (`.obsidian/` directory)
@@ -858,28 +858,225 @@ Workspace state (`workspace.json`, plugin caches) is gitignored per-machine.
 
 Most individual feedback / project memories are STANDALONE. They don't reference each other. The connections concentrate around hub files: `memory/MEMORY.md` (the index), `Library/<domain>/README.md` routers, `memory/profile_{{user_name_lower}}.md`. Filter the graph to one hub to see the proper hub-and-spoke. The orphan-looking nodes are real, they're just standalone rules.
 
-To see more edges: graph view's settings panel → turn on "Show unresolved links" + "Show orphans." Faded edges appear for links Obsidian's path resolver can't fully match (Cortana writes standard markdown links, not Obsidian wikilinks; resolution depends on path-from-current-file).
+To see more edges: graph view's settings panel → turn on "Show unresolved links" + "Show orphans." Faded edges appear for links Obsidian's path resolver can't fully match (your orchestrator writes standard markdown links, not Obsidian wikilinks; resolution depends on path-from-current-file).
+
+---
+
+
+## Reliability stack — supervisor + MCP observability (recommended, all modes)
+
+If you rely on the Telegram channel for daily use, install this. Without it, an MCP disconnect leaves you silently waiting at your phone with no way to know the orchestrator can't reach you. The stack catches the disconnect within ~30 seconds, recovers automatically, and surfaces a `/mcp-health` slash command so you can see what happened after the fact.
+
+Shipped 2026-05-13 after a real incident: the Telegram MCP plugin disconnected 3x in 3 hours during a heavy parallel-dispatch session. Each time the orchestrator was silent for ~20+ minutes before the user noticed — no logs, no auto-restart, no alert path. The MCP is the only channel from the orchestrator to your phone, so its liveness is mission-critical.
+
+### What you get
+
+Five layers, each independently useful and independently testable.
+
+1. **stdio-safe logging wrapper** (`scripts/telegram-mcp-wrap.sh`) — opt-in wrapper around the bun child that captures stderr to a daily log under `data/logs/telegram-mcp/` without touching stdin/stdout. Diagnostic when Layer 2 alone is not enough. Currently NOT enabled by default — flip on when the watchdog flags an issue you want to root-cause.
+2. **Health-probe watchdog** (`scripts/telegram-mcp-watchdog.sh`) — polls every 10s. Probes for `~/.claude/channels/telegram/bot.pid` + ps + lsof for the bun child. Writes one JSONL row per probe to `data/telegram-mcp-health.jsonl`. On Mac, runs via launchd (`~/Library/LaunchAgents/com.{{orchestrator_lower}}.telegram-mcp-watchdog.plist`); on Windows, via a Task Scheduler job. Streak counter tracks consecutive `down` probes.
+3. **Tiered auto-recovery** (same watchdog script) — streak=2 (≈20s degraded) fires a detection alert via Layer 4 with no process action. Streak=3 (≈30s degraded) reaps stale bun rooted at the plugin path (`pkill -f 'bun.*claude-plugins-official/external_plugins/telegram'`), writes `data/runtime/telegram-mcp-reinit-needed.flag`, fires Layer 4 alert. Critical: never kills the parent `claude` process. That's the supervisor's job (next section). Streak-based alerting (`==ALERT_AT`, not `>=`) prevents spam during long outages. Alert tags rate-limited to 20/day per tag.
+4. **Direct-curl alert path** (`scripts/notify-telegram-direct.sh`) — POSTs directly to `api.telegram.org/bot<TOKEN>/sendMessage` using the bot token from `~/.claude/channels/telegram/.env`. Bypasses the dead MCP entirely. This is the only escalation that survives an MCP outage.
+5. **`/mcp-health` slash command** (`scripts/mcp-health-report.sh`) — reports uptime %, disconnect count, longest gap, probe RTT p50/p95/p99 over a configurable window (default 24h; `--window 6h` / `--window 1h`; `--json` for raw).
+
+### Install (Mac)
+
+```bash
+# 1. Drop in the scripts (templates in xantham-templates-v31.md):
+#    scripts/telegram-mcp-wrap.sh
+#    scripts/telegram-mcp-watchdog.sh
+#    scripts/notify-telegram-direct.sh
+#    scripts/mcp-health-report.sh
+chmod +x scripts/telegram-mcp-wrap.sh scripts/telegram-mcp-watchdog.sh \
+         scripts/notify-telegram-direct.sh scripts/mcp-health-report.sh
+
+# 2. Make sure your Telegram bot token is at ~/.claude/channels/telegram/.env
+#    The plugin writes this on first connect. If missing, set it manually:
+#    echo 'TELEGRAM_BOT_TOKEN=<your-bot-token>' > ~/.claude/channels/telegram/.env
+#    echo 'TELEGRAM_CHAT_ID=<your-chat-id>' >> ~/.claude/channels/telegram/.env
+chmod 600 ~/.claude/channels/telegram/.env
+
+# 3. Install the watchdog as a launchd job via an AppleScript .app wrapper.
+#    Macos TCC blocks plain bash launchd jobs that touch ~/Documents/,
+#    so we wrap in an .app and grant Full Disk Access to that bundle.
+#    The wizard's scripts/install-launchd-wrappers.sh handles this end to end.
+bash scripts/install-launchd-wrappers.sh
+
+# 4. Grant Full Disk Access to the .app bundles in System Settings ->
+#    Privacy & Security -> Full Disk Access. Add each .app in ~/Applications/
+#    that starts with com.{{orchestrator_lower}}.
+
+# 5. Verify the watchdog is firing
+tail -f data/telegram-mcp-health.jsonl
+# You should see a new JSON row every ~10 seconds.
+
+# 6. Register /mcp-health as a slash command (CLAUDE.md commands table)
+#    Already wired in the v31 template; if you're upgrading, see the
+#    Commands section in xantham-templates-v31.md.
+```
+
+### Install (Windows, Git Bash or WSL2)
+
+```bash
+# Identical script drop-in. The launchd path is Mac-only; on Windows, register
+# the watchdog as a Task Scheduler job that runs at logon and stays alive.
+
+# 1. Same chmod + script drop-in steps as Mac.
+
+# 2. Register the watchdog as a recurring Task Scheduler task:
+#    Open Task Scheduler (taskschd.msc), Create Task (not Basic Task).
+#    General: name "{{orchestrator_lower}}-mcp-watchdog", "Run whether user is logged on
+#    or not" off, "Run with highest privileges" off (no admin needed).
+#    Triggers: At log on (of your user).
+#    Actions: Start a program
+#      Program: C:\Program Files\Git\bin\bash.exe
+#      Arguments: -c "while true; do bash 'C:/Users/<you>/Documents/MyAgent/scripts/telegram-mcp-watchdog.sh'; sleep 10; done"
+#    Settings: Allow task to be run on demand. If task fails, restart every 1 min,
+#    up to 999 times. Stop task if it runs longer than 30 days (default is fine).
+
+# 3. Verify the watchdog is firing
+tail -f data/telegram-mcp-health.jsonl
+```
+
+### Uninstall
+
+```bash
+# Mac
+launchctl unload ~/Library/LaunchAgents/com.{{orchestrator_lower}}.telegram-mcp-watchdog.plist
+rm ~/Library/LaunchAgents/com.{{orchestrator_lower}}.telegram-mcp-watchdog.plist
+rm -rf ~/Applications/com.{{orchestrator_lower}}.telegram-mcp-watchdog.app
+
+# Windows
+schtasks /Delete /TN "{{orchestrator_lower}}-mcp-watchdog" /F
+
+# All platforms - remove the scripts if you don't want them around
+rm scripts/telegram-mcp-{wrap,watchdog}.sh scripts/notify-telegram-direct.sh scripts/mcp-health-report.sh
+```
+
+### Verify
+
+```bash
+# 1. Watchdog is firing (look for fresh rows under 30s old)
+tail -1 data/telegram-mcp-health.jsonl | jq .timestamp
+
+# 2. /mcp-health report works end-to-end
+bash scripts/mcp-health-report.sh --window 1h
+
+# 3. Direct-curl alert path works (this WILL send a real Telegram message)
+bash scripts/notify-telegram-direct.sh test-alert "Reliability stack verify - $(date)"
+```
+
+---
+
+## Supervisor wrapper — zero-touch session recovery (recommended, all modes)
+
+Pairs with the MCP observability stack above. Without the supervisor, the auto-restart daemon below would kill the orchestrator's `claude` process on persistent MCP failure but leave you at a dead terminal with no way to re-enter the conversation. The supervisor wraps `claude` in a re-exec loop so any exit is followed by `claude --resume` on the same session.
+
+### What you get
+
+- **`bin/{{orchestrator_lower}}-launch.sh`** — supervisor wrapper that holds the TTY anchor while `claude` runs as a child. On non-clean exit (Tier-3 kill, crash, OOM), the wrapper immediately re-execs `claude --resume`. On clean exit (code 0, e.g. user typed `/exit`), the loop ends and the supervisor exits.
+- **Crash-loop protection.** 3 fast-failures in 60 seconds pauses the loop for 60s; 5 fast-failures total exits the supervisor with code 7. Prevents a tight crash loop from burning CPU.
+- **Emergency disable.** `touch ~/.{{orchestrator_lower}}-no-supervisor` — the loop checks for this marker each iteration and exits cleanly. Remove the file to re-enable.
+- **First-launch vs re-exec distinction.** First launch passes through the user's original args (so `{{orchestrator_lower}}` starts fresh and `{{orchestrator_lower}} --resume` does what it says). Subsequent re-execs after a non-clean exit force `--resume` so the new claude lands back in the killed session. Without this distinction, every fresh launch would silently resume the wrong session.
+
+### Install (Mac and Linux)
+
+```bash
+# 1. Drop in the supervisor wrapper (template in xantham-templates-v31.md)
+#    bin/{{orchestrator_lower}}-launch.sh
+mkdir -p bin
+chmod +x bin/{{orchestrator_lower}}-launch.sh
+
+# 2. Route your shell alias through the supervisor.
+#    Add to ~/.zshrc (or ~/.bashrc):
+#      <orchestrator>() {
+#        bash $HOME/Documents/MyAgent/bin/{{orchestrator_lower}}-launch.sh "$@"
+#      }
+#      <orchestrator>-resume() {
+#        bash $HOME/Documents/MyAgent/bin/{{orchestrator_lower}}-launch.sh --resume "$@"
+#      }
+#    Reload: source ~/.zshrc
+
+# 3. Verify the wrapper runs and starts claude
+<orchestrator>
+# You should see "[<orchestrator>-launch] supervisor starting (pid=...)" and then claude's
+# usual prompt. Type /exit; the wrapper logs "exit code 0, loop ending".
+```
+
+### Install (Windows, Git Bash)
+
+```bash
+# The supervisor is pure bash so it runs identically under Git Bash. The shell
+# function definition goes in ~/.bashrc (Git Bash uses bash, not PowerShell):
+<orchestrator>() {
+  bash "$HOME/Documents/MyAgent/bin/{{orchestrator_lower}}-launch.sh" "$@"
+}
+
+# If you want a PowerShell entry point too, drop a .ps1 wrapper at the same
+# location that just shells out:
+#   bash "$HOME\Documents\MyAgent\bin\<orchestrator>-launch.sh" $args
+# Save as <orchestrator>.ps1 in a directory on your $PATH.
+```
+
+### Tier-3 auto-restart self-heal (optional, requires supervisor)
+
+If you want zero-touch recovery from a persistent MCP failure (not just session-end), install the auto-restart daemon. When the watchdog writes `data/runtime/telegram-mcp-reinit-needed.flag` AND the orchestrator has been silent for ≥120s (idle gate, prevents kill-mid-task), the daemon SIGTERMs `claude`. The supervisor catches the non-zero exit and re-execs with `--resume`. State capture / restore makes the new session aware of pending Telegram replies.
+
+```bash
+# Mac install
+chmod +x scripts/<orchestrator>-auto-restart.sh scripts/<orchestrator>-session-checkpoint.sh
+# Wire the checkpoint into the Stop hook
+echo 'bash scripts/<orchestrator>-session-checkpoint.sh || true' >> scripts/session-end-sync.sh
+# Wire the daemon into launchd via the wrapper installer
+bash scripts/install-launchd-wrappers.sh  # picks up the new plist
+
+# Wire the SessionStart checkpoint-restore (extends your existing session-start hook)
+# In scripts/session-start-persistence-inject.sh, add the block that reads
+# data/runtime/<orchestrator>-checkpoint.json if mtime < 10 min and surfaces it as the
+# FIRST section of the persistent-state inject. Template in xantham-templates-v31.md.
+```
+
+### Tier-1 MCP hardening (recommended, baked into the supervisor)
+
+Two changes inside `bin/{{orchestrator_lower}}-launch.sh` target the two highest-volume Telegram MCP failure modes:
+
+1. **`export MCP_TIMEOUT=3600000`** — Claude Code's MCP client SIGTERMs healthy stdio MCP servers on a wall-clock keepalive timer (claude-code issue #40207, open since 28 Mar 2026, no upstream fix). Default is ~60s. Stretching to 3.6M ms (1h) means the kill happens at most once per hour rather than every minute. Keeps the bun MCP child alive long enough that the watchdog does not see a `no_pid_file` cascade on every keepalive boundary.
+2. **Pre-launch `pkill -f 'bun.*claude-plugins-official/external_plugins/telegram'`** — if a prior crash leaves a bun child rooted at the official Telegram plugin path, the new plugin instance fights it for the Telegram Bot API long-poll (HTTP 409 "Conflict: terminated by other getUpdates request") which crashes both. Killing any stale bun before the new claude launches guarantees a clean handoff. 500ms grace via `/bin/sleep 0.5` so the kernel reaps the dead child before claude tries to bind the same long-poll.
+
+Both fixes are reversible: unset `MCP_TIMEOUT` to revert (1); comment the pkill line to revert (2). Both are baked into the v31 supervisor template, no extra install step.
+
+### Uninstall (all platforms)
+
+```bash
+# Remove the shell function from ~/.zshrc / ~/.bashrc and reload.
+rm bin/{{orchestrator_lower}}-launch.sh
+launchctl unload ~/Library/LaunchAgents/com.{{orchestrator_lower}}.auto-restart.plist 2>/dev/null
+rm ~/Library/LaunchAgents/com.{{orchestrator_lower}}.auto-restart.plist 2>/dev/null
+rm scripts/<orchestrator>-auto-restart.sh scripts/<orchestrator>-session-checkpoint.sh 2>/dev/null
+```
+
+### Verify
+
+```bash
+# 1. Wrapper runs
+which <orchestrator>
+# Expect a shell function pointing at bin/{{orchestrator_lower}}-launch.sh
+
+# 2. MCP_TIMEOUT is exported during a launch (use a fresh subshell)
+bash -c 'env | grep MCP_TIMEOUT'
+
+# 3. Crash-loop protection triggers (this WILL pause for 60s after 3 fast crashes)
+#    Skip this in real installs unless you really want to test it.
+#    See xantham-templates-v31.md for the manual procedure.
+
+# 4. SessionStart checkpoint-restore block appears in the inject (if installed)
+bash scripts/session-start-persistence-inject.sh | head -20
+```
 
 ---
 
 
 ## Changelog
-
-### v31.3 - orchestration-habits port + autonomous habits sync (2026-05-12)
-
-- **New top-level file** `orchestration-habits.md` at the repo root. Self-contained, versioned (semver, `version: 1.0.0`), license-tagged, with stable kebab-case anchors (`#reply-discipline`, `#aggressive-parallelism`, `#council-pattern`, etc) so other skills can link via `[[orchestration-habits#anchor]]` and the link survives renames.
-- **Machine-readable manifest** embedded in the habits file. YAML fence under `## Manifest` lists every skill / plugin / hook / library-file / settings-patch / verify step the habits layer requires. Agent parses and runs.
-- **New skill** `<orchestrator>-sync-habits`. Triggers on `sync habits` / `install habits` / `update habits`. The skill fetches the latest manifest, runs every install via Bash itself, verifies, then reports back on the messaging channel. The user does not type install commands. Idempotent. Logs to `data/xantham-habits-install.log`.
-- **Five enforcement hooks now ship as actual files** in the public repo's `.claude/hooks/`:
-  - `telegram-reply-reminder.sh` (UserPromptSubmit — injects the TELEGRAM TURN reminder + writes per-turn contract)
-  - `banned-language-gate.sh` + `banned-language-gate.pl` (PreToolUse — blocks medical-claim words / marketing superlatives / AI tells)
-  - `stop-composer.sh` + `stop-verify-contract.sh` (Stop — verifies the per-turn contract was honoured; auto-logs corrections on violation)
-  - `agent-dispatch-pre.sh` + `agent-dispatch-post.sh` (PreToolUse|PostToolUse `Agent|Task` — live dispatch tracking)
-- **Four skill bodies added as actual files**: `xantham-memory`, `xantham-spec-kit-bridge`, `xantham-ai-seo`, `xantham-21st-bridge`. These were referenced from the wizard step list but had no SKILL.md body to drop in. Now present in `.claude/skills/<name>/SKILL.md`.
-- **Banned-language library** copied to `Library/app-store-compliance/banned-language-list.md` + `banned-language-allowlist.md`. The gate reads these at runtime.
-- **CLI fallback** `install-xantham-habits.sh` at repo root. Manual installer for CI / scripted installs / brand-new repos that do not yet have an orchestrator agent loaded. Dry-run flag, idempotent, --uninstall path restores backups.
-- **Reply discipline enforcement stack made explicit** in the habits file. Five mechanisms (UserPromptSubmit reminder, per-turn contract, Stop-side verify, correction promotion at 3x threshold, audit stream substrate) plus an opt-in sixth hard-block layer.
-- **Stale references removed** from this file: `scripts/preflight.sh`, `scripts/regenerate-setup-checklist.sh`, `scripts/uninstall.sh` (still templated; just untangled from broken refs), the dead proactive-daemon / signal-fire chain (already removed in v31 but a handful of stragglers slipped through).
 
 ### v31 - memory and meta-cognition cut
 
@@ -919,6 +1116,29 @@ To see more edges: graph view's settings panel → turn on "Show unresolved link
 - Core stays minimal (orchestrator + agents + Telegram + NotebookLM Brain + safety gate)
 - Extensions opt-in: E1 sqlite-vec semantic memory, E3 Agent Teams shared whiteboard, E4 Observability audit layer, E5 Hardened safety gate
 - Per-extension install + uninstall scripts, version-stamp file `.{{orchestrator_lower}}-blueprint-version`
+
+### v31.3 - reliability stack + Codex advisor + settings.json adoptions from 2026-05-12 / 2026-05-13 / 2026-05-14 upgrade slate
+
+- **Reliability stack (recommended, all modes) — Telegram MCP observability + supervisor.** Five-layer observability (`scripts/telegram-mcp-wrap.sh` stdio-safe logging wrapper, `scripts/telegram-mcp-watchdog.sh` 10s health-probe via launchd or Task Scheduler, tiered streak-based auto-recovery, `scripts/notify-telegram-direct.sh` direct-curl alert path bypassing dead MCP with 20/day cap per tag, `scripts/mcp-health-report.sh` + `/mcp-health` slash command). Streak=2 fires detection alert, streak=3 reaps stale bun + writes reinit flag. Never kills the parent `claude` process. Born from a real incident where the MCP disconnected 3x in 3 hours with no logs and no alert path; user silently waited 20+ minutes each time. New main-blueprint section "Reliability stack" above the Changelog covers the full install + uninstall + verify for Mac and Windows.
+- **Supervisor wrapper (recommended, all modes).** `bin/{{orchestrator_lower}}-launch.sh` wraps `claude` in a re-exec loop so any non-clean exit triggers `claude --resume` on the same session. Without this anchor, the auto-restart daemon below would kill claude on persistent MCP failure but leave the user at a dead terminal. First launch passes through user args (so a fresh start stays fresh); subsequent re-execs force `--resume`. Crash-loop protection: 3 fast-failures in 60s pauses for 60s, 5 fast-failures total exits with code 7. Emergency disable via `touch ~/.{{orchestrator_lower}}-no-supervisor`.
+- **Tier-3 auto-restart self-heal (optional, requires supervisor).** Daemon at `~/Library/LaunchAgents/com.{{orchestrator_lower}}.auto-restart.plist` polls every 30s. When watchdog writes `data/runtime/telegram-mcp-reinit-needed.flag` AND orchestrator is idle ≥120s (idle gate, prevents kill-mid-task), SIGTERMs `claude`. Supervisor catches the non-zero exit and re-execs `--resume`. `scripts/{{orchestrator_lower}}-session-checkpoint.sh` captures state every Stop hook to `data/runtime/{{orchestrator_lower}}-checkpoint.json`; `scripts/session-start-persistence-inject.sh` reads it and surfaces a "self-heal checkpoint" block as the FIRST section of the persistent-state inject when <10 min old. New session knows about pending replies, last project, recent commits.
+- **Tier-1 Telegram MCP hardening (baked into the supervisor template).** Two changes in `bin/{{orchestrator_lower}}-launch.sh`:
+  1. `export MCP_TIMEOUT=3600000` — neutralises claude-code issue #40207 keepalive SIGTERM (default ~60s default; stretched to 1h means once-per-hour at worst).
+  2. Pre-launch `pkill -f 'bun.*claude-plugins-official/external_plugins/telegram'` — prevents HTTP 409 Conflict on Telegram Bot API long-poll when a stale bun from a prior crash fights the new plugin. 500ms grace for kernel reap.
+- **Codex read-only advisor + ensemble pattern (optional, requires OpenAI API key).** `scripts/codex.sh` 7-subcommand wrapper (generate / debug / refactor / test / audit / architect + diff-review variants) — read-only Cortana-restrained interface to OpenAI's Codex CLI, output goes to stdout or a markdown sidecar, never touches files directly. `scripts/ensemble.sh` fans the same redacted prompt past your orchestrator + Codex with a synthesis report (agreements / disagreements / verdict). `{{orchestrator_lower}}-codex-ensemble` skill auto-fires BEFORE any high-stakes ship/deploy/migration: `ship <project>` / `deploy <project>` slash commands, Vercel/Cloudflare/Netlify/GH-Pages deploys, DB migrations (`prisma migrate deploy`, `supabase db push`, `wrangler d1 migrations apply`, etc.), `git push` of >50-line diffs touching `auth/`, `payments/`, `db/migrations/`, or `.env` files, explicit `ensemble <task>` invocation. Daily cap 20 runs + soft $5/day spend cap. Opt-out via env var. Daily release scans via launchd: `com.{{orchestrator_lower}}.anthropic-scan.plist` (09:07 local) + `com.{{orchestrator_lower}}.codex-scan.plist` (09:37 local). Subcommands `anthropic scan` / `codex scan` / `agentic scan` (both) trigger manually.
+- **Safety-gate hardening.** Three commits:
+  1. Expanded destructive-op coverage: Prisma reset, Postgres CLI delete, MongoDB destructive ops, Supabase/Neon/Wrangler/Vercel/AWS/GCP/Terraform/Kubernetes/Docker prune, Redis FLUSHDB/FLUSHALL. Skip-checks for `git commit` + `echo` so commit messages naming destructive ops in post-mortems don't trigger false-positive blocks.
+  2. Codex+ensemble bypass-flag hard-blocks: `--no-redact / --skip-redact / --unsafe / --dangerous / --bypass` blocked at both the wrapper arg-parse layer AND the Bash-tool gate layer (defense in depth).
+  3. Modern OpenAI key redaction: `scripts/redact-secrets.sh` adds `sk-proj-` (project-scoped) + `sk-svcacct-` (service-account) patterns, redacted to `REDACTED_OPENAI_PROJECT` / `REDACTED_OPENAI_SERVICE`. The legacy `sk-[A-Za-z0-9]{20,}` pattern didn't match the hyphenated modern shapes.
+  4. Per-invocation env-scrub on ensemble CLI calls to prevent cred leak when the wrapper subshells out.
+- **Claude Code v2.1.139 + v2.1.140 settings adoptions.**
+  - `skillOverrides` — explicit allowlist of skills to disable / restrict to name-only. Reduces context bloat on every session. Common installs flip 50+ default skills off and 5-10 to name-only.
+  - Hook `continueOnBlock` — lets a hook block a tool call AND let Claude Code keep going with a corrected prompt. Used by the banned-language gate to auto-log + retry.
+  - Hook `args` — pass static args into hook invocations from settings.json (cleaner than env-var smuggling).
+  - `CLAUDE_PROJECT_DIR` — Claude Code now exports this so hooks have a stable repo-root reference regardless of cwd.
+- **AI cost dashboard truth rule.** Estimator outputs from preview endpoints + cost-calc helpers are UPPER-BOUND, not actual. Trust the provider dashboard (Anthropic / OpenAI / Gemini) for real spend. Don't quote estimator numbers without flagging them as upper-bound.
+- **AI-spend-guard five-layer pattern.** Floor for any new AI callsite that calls an LLM API directly (not via your orchestrator). Layers: hard daily cap, per-IP rate limit, per-feature soft budget with telemetry at 80%, pre-call estimator gate, audit log JSONL with estimated + actual cost.
+- **Slash-command MCP-restart rule.** Slash commands that touch the plugin/MCP layer (`/mcp`, `/commands`, `/plugin marketplace add`, `/plugin install`) RESTART the Telegram MCP mid-session and drop in-flight inbound on the floor. Do NOT use these slash commands when the Telegram MCP is active. Workaround: use `claude plugin` from Bash instead — it doesn't traverse the restart path.
 
 ### v31.2 - infra hardening + perma-rules from 2026-05-09 / 2026-05-10 upgrade slate
 - **Banned-language gate hook** (`.claude/hooks/banned-language-gate.sh` + perl helper). PreToolUse blocks medical-claim words / marketing superlatives / AI-tells from leaking into orchestrator replies AND files written under `Library/`, `docs/`, app strings. Reads from `Library/app-store-compliance/banned-language-list.md` + allowlist. ~45ms per fire (60s cache). Configurable via `BANNED_LANG_GATE_PATHS` / `BANNED_LANG_GATE_DEBUG=1` / emergency bypass `BANNED_LANG_GATE_OFF=1`.
@@ -971,17 +1191,23 @@ Not documented. Core loop + safety gate + routing table existed from v1.
 1. Hand this file to a Claude Code session. Tell it: "install v31 in Simple mode" OR "install v31 in Advanced mode, all extensions."
 2. The session reads the Core section and walks you through it.
 3. If Advanced, it offers each remaining extension (E1, E3, E4, E5, E6) in sequence with the install steps above.
-4. When done, it writes `.{{orchestrator_lower}}-blueprint-version` with the installed version + which extensions are on.
+4. After core + extensions, the session offers the Reliability stack (recommended for any install with active Telegram use) and the Codex advisor (optional, requires OpenAI API key).
+5. When done, it writes `.{{orchestrator_lower}}-blueprint-version` with the installed version + which extensions are on + which reliability components are on.
 
 ### v30 → v31
 1. Tell Claude Code: "I'm on v30, upgrade me to v31."
-2. It reads `.{{orchestrator_lower}}-blueprint-version`. Then it walks four upgrade steps:
+2. It reads `.{{orchestrator_lower}}-blueprint-version`. Then it walks these upgrade steps:
    - **Profile bucket.** Create `memory/profile_<user>.md` with the v31 frontmatter scaffold if missing. Drop in `scripts/update-profile.sh`. Wire into `scripts/session-end-sync.sh`.
    - **Reflection skill.** Drop `.claude/skills/<orchestrator>-reflection/SKILL.md` from the template. No data migration.
    - **MCP additions.** Offer Reddit MCP Buddy, Pipedream, Consensus install. Skip if you already installed these manually. Karpathy plugin offered as Mode-Advanced opt-in.
    - **Auth failover.** Optional. Run only if you want OAuth fallback. Provision API key, add the canary script, schedule via launchd (Mac) or Task Scheduler (Windows).
+   - **v31.2 hardening (auto-applied).** Banned-language gate, per-agent MCP scoping, architectural-role tagging, agent-readiness audit script, reverse-prompt Monday self-improvement, per-person profile files, HTML greeting digest pilot, AI-SEO skill on ship, orphan MCP reaper, SessionEnd subprocess guard, AutoResearch wrapper, YouTube claim verification gate, spec-kit bridge skill.
+   - **v31.3 reliability stack (recommended).** Drop in `scripts/telegram-mcp-{wrap,watchdog}.sh`, `scripts/notify-telegram-direct.sh`, `scripts/mcp-health-report.sh`, `bin/{{orchestrator_lower}}-launch.sh` (supervisor wrapper with MCP_TIMEOUT + pre-launch pkill), `scripts/{{orchestrator_lower}}-auto-restart.sh`, `scripts/{{orchestrator_lower}}-session-checkpoint.sh`. Install launchd plists via `scripts/install-launchd-wrappers.sh` (or Task Scheduler equivalents on Windows). Grant Full Disk Access to the new `.app` wrappers on Mac. Wire the shell function in `~/.zshrc` / `~/.bashrc`. Add `/mcp-health` to CLAUDE.md commands.
+   - **v31.3 Codex advisor (optional).** Drop in `scripts/codex.sh` + `scripts/ensemble.sh`, install the OpenAI Codex CLI (`pip install codex-cli` or per upstream docs), provision an OpenAI API key, set `OPENAI_API_KEY` in `~/.zshrc`. Install the `{{orchestrator_lower}}-codex-ensemble` skill. Install daily release-scan launchd plists if you want the morning scans. Opt-out via `CORTANA_ENSEMBLE_DISABLED=1` (or your own orchestrator-prefixed env var).
+   - **v31.3 Claude Code v2.1.139+ settings.** Add `skillOverrides` block to `.claude/settings.json` (defaults disable 50+ low-relevance skills; flip the ones you want back to `name-only` or `enabled`). Update hooks to use `continueOnBlock` + `args` where appropriate. Update hook scripts to read `$CLAUDE_PROJECT_DIR` instead of computing repo root manually.
+   - **v31.3 safety-gate updates.** Sync the expanded destructive-op coverage + Codex bypass-flag hard-blocks + modern OpenAI key redaction patterns to both `.claude/hooks/safety-gate.sh` and `~/.claude/hooks/safety-gate.sh` via `bash scripts/sync-safety-gates.sh`.
 3. Removed in v31: any leftover `scripts/proactive-trigger-daemon.sh`, `scripts/proactive-daemon.sh`, `scripts/signal-schedule.sh`, `scripts/signal-fire-from-schedule.sh`, AppleScript `signal-fire-wrapper.applescript`. The upgrade walks an uninstall path: unload the launchd jobs, remove the `.app` wrappers from `~/Applications/`, archive the scripts to `scripts/archive/`. Telegram-signal.sh stays.
-4. Sets `blueprint_version: v31` in `.{{orchestrator_lower}}-blueprint-version`.
+4. Sets `blueprint_version: v31.3` in `.{{orchestrator_lower}}-blueprint-version`.
 
 ### v29 → v31
 1. Tell Claude Code: "I'm on v29, upgrade me to v31."
@@ -1006,9 +1232,9 @@ Not documented. Core loop + safety gate + routing table existed from v1.
 ### Version file format
 `.{{orchestrator_lower}}-blueprint-version` (YAML):
 ```yaml
-blueprint_version: v31
+blueprint_version: v31.3
 installed: 2026-04-21T01:00:00Z
-upgraded: 2026-05-05T10:35:00Z   # v30 -> v31 (Profile bucket + reflection skill + MCP additions + auth failover; signal-fire removed)
+upgraded: 2026-05-14T08:00:00Z   # v30 -> v31.3 (Profile bucket + reflection skill + MCP additions + auth failover + v31.2 hardening + reliability stack + Codex advisor + v2.1.139 settings; signal-fire removed)
 mode: advanced
 extensions:
   E1_sqlite_vec: true
@@ -1017,6 +1243,14 @@ extensions:
   E4_observability: true
   E5_hardened_safety: true
   E6_amazing_memory: true
+reliability:
+  mcp_observability: true         # 5-layer Telegram MCP watchdog + alert path
+  supervisor_wrapper: true        # bin/<orchestrator>-launch.sh re-exec loop
+  tier3_auto_restart: true        # idle-gated kill-and-resume daemon (requires supervisor)
+  tier1_mcp_hardening: true       # MCP_TIMEOUT + pre-launch pkill, baked into supervisor
+codex:
+  codex_advisor: false            # scripts/codex.sh + scripts/ensemble.sh (requires OpenAI API key)
+  daily_scans: false              # daily Anthropic + Codex agentic release scans via launchd
 ```
 
 ---
@@ -4956,7 +5190,7 @@ Mac launchd schedule for the canary. Save the plist below as `~/Library/LaunchAg
     <!-- XANTHAM-SENTINEL: launchd-plist-v31
          This XML comment is content-grep'd by scripts/uninstall.sh before
          removing the plist. Keeps uninstall from touching plists that just
-         happen to share the com.<orchestrator>. filename prefix. -->
+         happen to share the com.{{orchestrator_lower}}. filename prefix. -->
     <key>Label</key>
     <string>com.{{orchestrator_name_lower}}.auth-canary</string>
 

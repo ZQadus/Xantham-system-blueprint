@@ -143,6 +143,8 @@ When user sends `sync <project>`, `sync all`, or `wrapup`:
 
 When user sends `healthcheck`, run `bash scripts/healthcheck.sh` and send the output.
 
+When user sends `mcp-health` or `/mcp-health`, run `bash scripts/mcp-health-report.sh` (default window 24h; accept `--window 6h` / `--window 1h` / `--json` arg). Send the output. If the Telegram MCP itself is dead, fall back to `bash scripts/notify-telegram-direct.sh mcp-health "<output>"` so the report still reaches the user.
+
 When user sends `history <query>`, run `bash scripts/history.sh "<query>" [--from YYYY-MM-DD] [--to YYYY-MM-DD]` and send results.
 
 <!-- IF brain=yes -->
@@ -10359,4 +10361,934 @@ echo ""
 echo "  Read .{{orchestrator_lower}}-blueprint-version. Regenerate SETUP-CHECKLIST.md per"
 echo "  the Post-install verification section of the public blueprint,"
 echo "  including a checklist item for every component currently installed."
+```
+
+---
+
+
+## Template: bin/{{orchestrator_lower}}-launch.sh (v31.3 supervisor wrapper)
+
+Wraps `claude` in a re-exec loop so that any non-clean exit triggers `claude --resume` on the same session. Pairs with the Tier-3 auto-restart daemon: the daemon kills claude on persistent MCP failure, the supervisor brings it back, the user lands in the same conversation. Also exports `MCP_TIMEOUT` and pre-kills stale bun MCP children before launch (Tier-1 hardening, see the Reliability stack section in xantham-system-v31.md).
+
+```bash
+#!/usr/bin/env bash
+# {{orchestrator_lower}}-launch.sh — supervisor wrapper for the {{orchestrator_name}} claude session.
+#
+# Wraps `claude` in a re-exec loop so that if claude dies (whether killed by
+# the MCP watchdog's auto-restart daemon, or by a Bun MCP crash, or by any
+# other non-clean exit), the loop immediately relaunches with --resume and
+# lands us back in the same session.
+#
+# Usage:
+#   bash $HOME/Documents/MyAgent/bin/{{orchestrator_lower}}-launch.sh
+#
+# Or, install as a shell function in ~/.zshrc / ~/.bashrc:
+#   {{orchestrator_lower}}() { bash $HOME/Documents/MyAgent/bin/{{orchestrator_lower}}-launch.sh "$@"; }
+#
+# Clean exit (don't relaunch):
+#   - claude exits with code 0 (e.g. user typed /exit cleanly)
+#   - User presses Ctrl+C twice within 2 seconds in the wrapper
+#   - The marker file ~/.{{orchestrator_lower}}-quit exists at loop start
+#
+# Auto-relaunch (loop continues):
+#   - claude exits with code != 0 (crashed, killed by watchdog, OOM-killed, etc)
+#
+# Crash-loop protection:
+#   - 3 fast-failures in 60 seconds pauses the loop for 60s
+#   - 5 fast-failures total exits the wrapper with code 7
+#
+# Logs:   logs/{{orchestrator_lower}}-launch.log
+# Disable: touch ~/.{{orchestrator_lower}}-no-supervisor
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$HOME/Documents/MyAgent}"
+LOG_FILE="$REPO_ROOT/logs/{{orchestrator_lower}}-launch.log"
+QUIT_MARKER="$HOME/.{{orchestrator_lower}}-quit"
+DISABLE_MARKER="$HOME/.{{orchestrator_lower}}-no-supervisor"
+
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
+touch "$LOG_FILE"
+
+CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
+command -v "$CLAUDE_BIN" >/dev/null 2>&1 || CLAUDE_BIN="$(command -v claude 2>/dev/null || echo "")"
+if [ -z "$CLAUDE_BIN" ]; then
+  echo "[{{orchestrator_lower}}-launch] ERROR: claude CLI not found on PATH" >&2
+  exit 2
+fi
+
+# Crash-loop tracking
+FAST_FAILURE_WINDOW=60
+FAST_FAILURE_CAP=3
+FAST_FAILURE_PAUSE=60
+MAX_TOTAL_FAST_FAILURES=5
+fast_failure_count=0
+last_fast_failure_ts=0
+total_fast_failures=0
+
+CHANNELS="${CHANNELS:-plugin:telegram@claude-plugins-official}"
+EXTRA_FLAGS="${EXTRA_FLAGS:---dangerously-skip-permissions}"
+
+# --- Tier-1 Telegram-MCP hardening (v31.3, 2026-05-14).
+#
+# 1) MCP_TIMEOUT extends Claude Code's MCP-client keepalive from ~60s to 1h.
+#    claude-code issue #40207 documents the client SIGTERMing healthy stdio
+#    MCP servers on that timer; stretching it means the kill happens at most
+#    once per hour, not every minute.
+# 2) Pre-launch pkill of stale bun MCP children rooted at the Telegram plugin
+#    path. If a prior session crashed and left a bun child alive, the new
+#    plugin instance fights it for the Telegram Bot API long-poll (HTTP 409),
+#    which crashes both. Killing any stale bun before claude launches
+#    guarantees a clean handoff.
+export MCP_TIMEOUT="${MCP_TIMEOUT:-3600000}"
+PLUGIN_BUN_PATTERN='bun.*claude-plugins-official/external_plugins/telegram'
+if pgrep -f "$PLUGIN_BUN_PATTERN" >/dev/null 2>&1; then
+  pkill -f "$PLUGIN_BUN_PATTERN" 2>/dev/null
+  /bin/sleep 0.5 2>/dev/null
+fi
+
+log() {
+  local ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "[$ts] $*" >> "$LOG_FILE"
+  echo "[$ts] $*" >&2
+}
+
+last_sigint_ts=0
+trap_ctrl_c() {
+  local now=$(date +%s)
+  if (( now - last_sigint_ts < 2 )); then
+    log "Ctrl+C twice within 2s, exiting supervisor cleanly"
+    rm -f "$QUIT_MARKER" 2>/dev/null
+    exit 0
+  fi
+  last_sigint_ts=$now
+  log "Ctrl+C once (press again within 2s to exit supervisor)"
+}
+trap trap_ctrl_c INT
+
+log "supervisor starting (pid=$$, claude=$CLAUDE_BIN)"
+
+first_iteration=1
+user_args=("$@")
+
+while true; do
+  if [ -f "$DISABLE_MARKER" ]; then
+    log "disable marker $DISABLE_MARKER exists, exiting"
+    exit 3
+  fi
+  if [ -f "$QUIT_MARKER" ]; then
+    log "quit marker $QUIT_MARKER detected, removing + exiting"
+    rm -f "$QUIT_MARKER"
+    exit 0
+  fi
+
+  if [ "$first_iteration" -eq 1 ]; then
+    launch_args=("${user_args[@]}")
+  else
+    launch_args=("${user_args[@]}")
+    has_resume=0
+    for a in "${launch_args[@]}"; do
+      [ "$a" = "--resume" ] && has_resume=1
+    done
+    [ "$has_resume" -eq 0 ] && launch_args+=("--resume")
+  fi
+
+  iteration_start_ts=$(date +%s)
+  log "launching claude --channels $CHANNELS $EXTRA_FLAGS ${launch_args[*]}"
+  "$CLAUDE_BIN" --channels "$CHANNELS" $EXTRA_FLAGS "${launch_args[@]}"
+  exit_code=$?
+  iteration_duration=$(( $(date +%s) - iteration_start_ts ))
+
+  log "claude exited with code $exit_code after ${iteration_duration}s"
+
+  if [ "$exit_code" -eq 0 ]; then
+    log "exit code 0, loop ending"
+    exit 0
+  fi
+
+  # Non-clean exit: count toward crash-loop budget if fast.
+  if [ "$iteration_duration" -lt "$FAST_FAILURE_WINDOW" ]; then
+    fast_failure_count=$(( fast_failure_count + 1 ))
+    total_fast_failures=$(( total_fast_failures + 1 ))
+    log "fast-failure ($fast_failure_count this window, $total_fast_failures total)"
+    if [ "$total_fast_failures" -ge "$MAX_TOTAL_FAST_FAILURES" ]; then
+      log "ERROR: $MAX_TOTAL_FAST_FAILURES fast-failures, supervisor exiting (operator must investigate)"
+      exit 7
+    fi
+    if [ "$fast_failure_count" -ge "$FAST_FAILURE_CAP" ]; then
+      log "pausing ${FAST_FAILURE_PAUSE}s after $FAST_FAILURE_CAP fast-failures"
+      /bin/sleep "$FAST_FAILURE_PAUSE"
+      fast_failure_count=0
+    fi
+  else
+    fast_failure_count=0
+  fi
+
+  first_iteration=0
+done
+```
+
+---
+
+
+## Template: scripts/telegram-mcp-watchdog.sh (v31.3 layer 2 + 3)
+
+Polls every 10s via launchd (Mac) or Task Scheduler (Windows). Probes for the Telegram MCP bot.pid + ps + lsof. Writes one JSONL row per probe. Streak-based recovery: streak=2 alerts via direct-curl, streak=3 reaps the stale bun + writes the reinit flag + alerts again. Never kills the parent `claude` process.
+
+```bash
+#!/usr/bin/env bash
+# telegram-mcp-watchdog.sh — 10s health probe + tiered auto-recovery for
+# the Telegram MCP plugin. Pairs with scripts/notify-telegram-direct.sh for
+# the alert path that bypasses the (potentially dead) MCP.
+#
+# Wire via launchd on Mac:
+#   ~/Library/LaunchAgents/com.{{orchestrator_lower}}.telegram-mcp-watchdog.plist
+# Wire via Task Scheduler on Windows. Example trigger in xantham-system-v31.md.
+#
+# State:
+#   data/telegram-mcp-health.jsonl       — one row per probe
+#   data/runtime/telegram-mcp-streak     — current consecutive-down streak
+#   data/runtime/telegram-mcp-reinit-needed.flag  — set on streak=3 (Tier-3 trigger)
+#
+# Streak tiers:
+#   streak=2 (≈20s degraded) → detection alert via notify-telegram-direct.sh
+#   streak=3 (≈30s degraded) → reap stale bun + write reinit flag + alert again
+#
+# Critical: NEVER kills the parent `claude` process. That belongs to the
+# auto-restart daemon (see {{orchestrator_lower}}-auto-restart.sh) which has an idle gate.
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PID_FILE="$HOME/.claude/channels/telegram/bot.pid"
+HEALTH_LOG="$REPO_ROOT/data/telegram-mcp-health.jsonl"
+STREAK_FILE="$REPO_ROOT/data/runtime/telegram-mcp-streak"
+REINIT_FLAG="$REPO_ROOT/data/runtime/telegram-mcp-reinit-needed.flag"
+NOTIFY="$REPO_ROOT/scripts/notify-telegram-direct.sh"
+PLUGIN_BUN_PATTERN='bun.*claude-plugins-official/external_plugins/telegram'
+
+mkdir -p "$(dirname "$HEALTH_LOG")" "$(dirname "$STREAK_FILE")"
+ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+status="up"
+reason=""
+pid=""
+probe_start_ms=$(date +%s%3N 2>/dev/null || echo 0)
+
+# Layer 1: bot.pid file exists?
+if [ ! -f "$PID_FILE" ]; then
+  status="down"; reason="no_pid_file"
+else
+  pid="$(cat "$PID_FILE" 2>/dev/null | head -1 | tr -d '[:space:]')"
+  if [ -z "$pid" ]; then
+    status="down"; reason="empty_pid_file"
+  elif ! kill -0 "$pid" 2>/dev/null; then
+    status="down"; reason="pid_not_running"
+  else
+    # Layer 2: process command-line matches the plugin pattern?
+    cmdline=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    if ! echo "$cmdline" | grep -qE "$PLUGIN_BUN_PATTERN"; then
+      status="down"; reason="wrong_cmdline"
+    fi
+  fi
+fi
+
+probe_end_ms=$(date +%s%3N 2>/dev/null || echo 0)
+rtt_ms=$(( probe_end_ms - probe_start_ms ))
+
+# Append health row
+printf '{"ts":"%s","status":"%s","reason":"%s","pid":"%s","rtt_ms":%d}\n' \
+  "$ts" "$status" "$reason" "$pid" "$rtt_ms" >> "$HEALTH_LOG"
+
+# Streak management
+current_streak=0
+[ -f "$STREAK_FILE" ] && current_streak=$(cat "$STREAK_FILE" 2>/dev/null | tr -d '[:space:]')
+[[ "$current_streak" =~ ^[0-9]+$ ]] || current_streak=0
+
+if [ "$status" = "up" ]; then
+  echo 0 > "$STREAK_FILE"
+  exit 0
+fi
+
+new_streak=$(( current_streak + 1 ))
+echo "$new_streak" > "$STREAK_FILE"
+
+# Streak tier triggers (== not >= so we don't spam every 10s during a long outage)
+if [ "$new_streak" -eq 2 ]; then
+  bash "$NOTIFY" mcp-degraded "Telegram MCP degraded (streak=2, reason=$reason)" || true
+elif [ "$new_streak" -eq 3 ]; then
+  # Reap stale bun rooted at the plugin path. Never kill the parent claude.
+  if pgrep -f "$PLUGIN_BUN_PATTERN" >/dev/null 2>&1; then
+    pkill -f "$PLUGIN_BUN_PATTERN" 2>/dev/null || true
+  fi
+  touch "$REINIT_FLAG"
+  bash "$NOTIFY" mcp-reinit "Telegram MCP reinit-needed flag set (streak=3, reason=$reason). Stale bun reaped. Tier-3 auto-restart will fire on next idle gate." || true
+fi
+```
+
+---
+
+
+## Template: scripts/notify-telegram-direct.sh (v31.3 layer 4)
+
+Curl POST directly to `api.telegram.org` using the bot token from `~/.claude/channels/telegram/.env`. Bypasses the (potentially dead) MCP entirely. Hard cap of 20 notifications per tag per day so a stuck loop can't drain your Telegram rate limit.
+
+```bash
+#!/usr/bin/env bash
+# notify-telegram-direct.sh — direct-curl alert path that bypasses the MCP.
+#
+# Usage: notify-telegram-direct.sh <tag> <message>
+#   tag:     short identifier for rate-limiting (e.g. "mcp-degraded", "auth-fail")
+#   message: the body to send
+#
+# Reads ~/.claude/channels/telegram/.env (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID).
+# Hard cap: 20 notifications per tag per day. State at data/runtime/telegram-mcp-alert-counts.jsonl.
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+TAG="${1:-untagged}"
+MSG="${2:-}"
+[ -z "$MSG" ] && { echo "usage: $0 <tag> <message>" >&2; exit 1; }
+
+ENV_FILE="$HOME/.claude/channels/telegram/.env"
+[ -r "$ENV_FILE" ] || { echo "ERROR: $ENV_FILE missing or unreadable" >&2; exit 2; }
+
+# Source the env file in a subshell-safe way
+TELEGRAM_BOT_TOKEN="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]')"
+TELEGRAM_CHAT_ID="$(grep -E '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]')"
+[ -z "$TELEGRAM_BOT_TOKEN" ] && { echo "ERROR: TELEGRAM_BOT_TOKEN missing from $ENV_FILE" >&2; exit 3; }
+[ -z "$TELEGRAM_CHAT_ID" ]    && { echo "ERROR: TELEGRAM_CHAT_ID missing from $ENV_FILE" >&2; exit 3; }
+
+# Daily rate cap
+COUNT_FILE="$REPO_ROOT/data/runtime/telegram-mcp-alert-counts.jsonl"
+mkdir -p "$(dirname "$COUNT_FILE")"
+today=$(date -u +%Y-%m-%d)
+key="$today:$TAG"
+count=$(grep -F "$key" "$COUNT_FILE" 2>/dev/null | tail -1 | sed -E 's/.*"count":([0-9]+).*/\1/' || echo 0)
+[[ "$count" =~ ^[0-9]+$ ]] || count=0
+if [ "$count" -ge 20 ]; then
+  echo "rate-limit: tag '$TAG' already at 20 alerts today, dropping" >&2
+  exit 0
+fi
+new_count=$(( count + 1 ))
+printf '{"ts":"%s","tag":"%s","count":%d}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$new_count" >> "$COUNT_FILE"
+
+# Post to Telegram. -m 10 keeps us responsive if the API is slow.
+curl -sS -m 10 -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  -d "chat_id=${TELEGRAM_CHAT_ID}" \
+  -d "text=[${TAG}] ${MSG}" \
+  -d "disable_web_page_preview=true" \
+  >/dev/null
+
+echo "alert sent (tag=$TAG, count=$new_count/20 today)" >&2
+```
+
+---
+
+
+## Template: scripts/mcp-health-report.sh (v31.3 layer 5)
+
+Reads `data/telegram-mcp-health.jsonl` over a window and reports uptime %, disconnect count, longest gap, probe RTT p50/p95/p99. Wired to the `/mcp-health` slash command in CLAUDE.md.
+
+```bash
+#!/usr/bin/env bash
+# mcp-health-report.sh — human-readable health summary over a window.
+#
+# Usage:
+#   mcp-health-report.sh [--window <duration>] [--json]
+#   --window  24h (default), 6h, 1h
+#   --json    raw JSON instead of human-readable
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+HEALTH_LOG="$REPO_ROOT/data/telegram-mcp-health.jsonl"
+
+WINDOW="24h"
+JSON=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --window) WINDOW="$2"; shift 2 ;;
+    --json)   JSON=1; shift ;;
+    *) echo "unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+case "$WINDOW" in
+  24h) window_secs=86400 ;;
+  6h)  window_secs=21600 ;;
+  1h)  window_secs=3600 ;;
+  *)   echo "ERROR: --window must be one of: 24h, 6h, 1h" >&2; exit 1 ;;
+esac
+
+[ -r "$HEALTH_LOG" ] || { echo "no health log at $HEALTH_LOG"; exit 0; }
+
+# Cutoff timestamp in seconds since epoch
+cutoff=$(( $(date +%s) - window_secs ))
+
+# AWK pass: extract status + ts within window, compute uptime % + counts
+# Uses the ISO-8601 timestamp; macOS + BSD date are quirky so we parse manually.
+awk -v cutoff="$cutoff" '
+function iso_to_epoch(s,   y, mo, d, h, mi, se) {
+  if (match(s, /([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})/, m)) {
+    y=m[1]+0; mo=m[2]+0; d=m[3]+0; h=m[4]+0; mi=m[5]+0; se=m[6]+0;
+    # Approximate epoch (UTC, no DST)
+    return mktime(y" "mo" "d" "h" "mi" "se" UTC")
+  }
+  return 0
+}
+{
+  if (match($0, /"ts":"([^"]+)"/, t)) {
+    epoch = iso_to_epoch(t[1])
+    if (epoch < cutoff) next
+    total++
+    if (match($0, /"status":"([^"]+)"/, s)) {
+      if (s[1] == "up") up++
+      else { down++ }
+    }
+    if (match($0, /"rtt_ms":([0-9]+)/, r)) {
+      rtts[total] = r[1]+0
+    }
+  }
+}
+END {
+  if (total == 0) {
+    printf "no probes in window\n"
+    exit
+  }
+  pct = (up * 100.0) / total
+  # Sort RTTs for percentile
+  n = asort(rtts)
+  p50 = rtts[int(n*0.5)]
+  p95 = rtts[int(n*0.95)]
+  p99 = rtts[int(n*0.99)]
+  printf "MCP health (last %s)\n", "'"$WINDOW"'"
+  printf "  probes:     %d\n", total
+  printf "  uptime:     %.2f%% (%d up / %d down)\n", pct, up, down
+  printf "  RTT p50/95/99: %d/%d/%d ms\n", p50, p95, p99
+}
+' "$HEALTH_LOG"
+```
+
+---
+
+
+## Template: scripts/{{orchestrator_lower}}-auto-restart.sh (v31.3 Tier-3 self-heal)
+
+Polls every 30s via launchd. When the watchdog has written `data/runtime/telegram-mcp-reinit-needed.flag` AND the orchestrator is idle ≥120s (no recent Stop hook), SIGTERMs the parent `claude` process. The supervisor (`bin/{{orchestrator_lower}}-launch.sh`) catches the non-zero exit and re-execs `--resume` on the same session.
+
+```bash
+#!/usr/bin/env bash
+# {{orchestrator_lower}}-auto-restart.sh — Tier-3 self-heal daemon.
+#
+# Fires the kill ONLY when:
+#   1. data/runtime/telegram-mcp-reinit-needed.flag exists
+#   2. The orchestrator has been idle for >= IDLE_GATE_SECS (default 120s)
+#
+# Idle is computed from the mtime of data/runtime/last-stop-hook.txt, which
+# the Stop hook writes on every reply. If the file is missing, assume idle.
+#
+# Wire via launchd on Mac:
+#   ~/Library/LaunchAgents/com.{{orchestrator_lower}}.auto-restart.plist
+# StartInterval 30 (poll every 30 seconds).
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$HOME/Documents/MyAgent}"
+REINIT_FLAG="$REPO_ROOT/data/runtime/telegram-mcp-reinit-needed.flag"
+LAST_STOP="$REPO_ROOT/data/runtime/last-stop-hook.txt"
+LOG_FILE="$REPO_ROOT/logs/{{orchestrator_lower}}-auto-restart.log"
+IDLE_GATE_SECS="${IDLE_GATE_SECS:-120}"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+  local ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "[$ts] $*" >> "$LOG_FILE"
+}
+
+# Quick exit if no flag
+[ -f "$REINIT_FLAG" ] || exit 0
+
+# Idle gate
+now=$(date +%s)
+if [ -f "$LAST_STOP" ]; then
+  last_stop_ts=$(stat -f %m "$LAST_STOP" 2>/dev/null || stat -c %Y "$LAST_STOP" 2>/dev/null || echo "$now")
+  idle_secs=$(( now - last_stop_ts ))
+else
+  idle_secs=999999  # assume idle if file missing
+fi
+
+if [ "$idle_secs" -lt "$IDLE_GATE_SECS" ]; then
+  log "flag set but idle=${idle_secs}s < gate=${IDLE_GATE_SECS}s, waiting"
+  exit 0
+fi
+
+# Find the claude process. Prefer the one being supervised by our launch script.
+# Look for the foreground claude session, not headless `claude -p` children.
+claude_pid=""
+for p in $(pgrep -f '^claude( |$)' 2>/dev/null); do
+  # Skip claude -p headless invocations
+  if ! ps -p "$p" -o command= 2>/dev/null | grep -qE 'claude.*-p( |$)'; then
+    claude_pid="$p"
+    break
+  fi
+done
+
+if [ -z "$claude_pid" ]; then
+  log "no foreground claude process found, clearing flag"
+  rm -f "$REINIT_FLAG"
+  exit 0
+fi
+
+log "idle=${idle_secs}s >= ${IDLE_GATE_SECS}s + flag set, SIGTERM claude pid=$claude_pid"
+kill -TERM "$claude_pid" 2>/dev/null || true
+rm -f "$REINIT_FLAG"
+
+# The supervisor catches the non-zero exit and re-execs --resume.
+```
+
+---
+
+
+## Template: scripts/{{orchestrator_lower}}-session-checkpoint.sh (v31.3 state capture)
+
+Writes a JSON snapshot to `data/runtime/{{orchestrator_lower}}-checkpoint.json` on every Stop hook (active project, recent telegram tail, working dir, git head, top reflections). Mode 0600. Read by `scripts/session-start-persistence-inject.sh` at SessionStart to surface a "self-heal checkpoint" block as the FIRST section of the inject when <10 min old.
+
+```bash
+#!/usr/bin/env bash
+# {{orchestrator_lower}}-session-checkpoint.sh — capture state for Tier-3 self-heal.
+#
+# Wire into scripts/session-end-sync.sh (the Stop hook):
+#   bash scripts/{{orchestrator_lower}}-session-checkpoint.sh || true
+#
+# Output:
+#   data/runtime/{{orchestrator_lower}}-checkpoint.json (mode 0600)
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+OUT="$REPO_ROOT/data/runtime/{{orchestrator_lower}}-checkpoint.json"
+
+mkdir -p "$(dirname "$OUT")"
+
+ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+git_head="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo "")"
+git_branch="$(cd "$REPO_ROOT" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+pwd_now="$REPO_ROOT"
+
+# Active project: first non-empty line of data/runtime/inbound.txt, fallback to ""
+active_project=""
+if [ -f "$REPO_ROOT/data/runtime/inbound.txt" ]; then
+  # Cheap heuristic: scan for project names from docs/projects.md
+  if [ -f "$REPO_ROOT/docs/projects.md" ]; then
+    inbound="$(head -200 "$REPO_ROOT/data/runtime/inbound.txt" 2>/dev/null || true)"
+    while IFS= read -r p; do
+      [ -z "$p" ] && continue
+      if echo "$inbound" | grep -iqF "$p"; then
+        active_project="$p"
+        break
+      fi
+    done < <(grep -oE '^\s*[-*]\s+\*\*([A-Za-z0-9_-]+)' "$REPO_ROOT/docs/projects.md" 2>/dev/null | sed -E 's/^[^*]*\*\*//')
+  fi
+fi
+
+# Recent commits (top 5)
+recent_commits="$(cd "$REPO_ROOT" && git log --oneline -5 2>/dev/null | sed 's/"/\\"/g' | awk 'BEGIN{ORS=","}{printf "\"%s\"", $0}' | sed 's/,$//')"
+[ -z "$recent_commits" ] && recent_commits=""
+
+# Latest reflection (first 5 non-empty lines, escaped)
+latest_reflection=""
+latest_reflection_file="$(ls -t "$REPO_ROOT"/data/reflections/*.md 2>/dev/null | head -1 || true)"
+if [ -n "$latest_reflection_file" ]; then
+  latest_reflection="$(head -5 "$latest_reflection_file" 2>/dev/null | tr '\n' ' ' | sed 's/"/\\"/g')"
+fi
+
+cat > "$OUT" <<JSON
+{
+  "ts": "$ts",
+  "git_head": "$git_head",
+  "git_branch": "$git_branch",
+  "pwd": "$pwd_now",
+  "active_project": "$active_project",
+  "recent_commits": [$recent_commits],
+  "latest_reflection": "$latest_reflection"
+}
+JSON
+chmod 600 "$OUT" 2>/dev/null
+
+# Touch the last-stop-hook marker the auto-restart daemon reads for idle detection.
+touch "$REPO_ROOT/data/runtime/last-stop-hook.txt"
+```
+
+---
+
+
+## Template: scripts/codex.sh (v31.3 optional Codex advisor)
+
+Read-only Cortana-restrained wrapper around OpenAI's Codex CLI. Output to stdout or a markdown sidecar, never touches files directly. 7 subcommands. Requires OpenAI API key + Codex CLI installed locally. Pairs with the `{{orchestrator_lower}}-codex-ensemble` skill.
+
+```bash
+#!/usr/bin/env bash
+# codex.sh — read-only Codex advisor. Output never modifies files directly.
+#
+# Subcommands:
+#   status                       Check Codex install + auth
+#   preflight                    Verify env + redact-secrets coverage
+#   generate <prompt>            Code generation
+#   debug <prompt>               Debugging assistance
+#   refactor <prompt>            Refactor suggestion
+#   test <prompt>                Test scaffolding
+#   audit <prompt>               Code review
+#   architect <prompt>           Architectural advice
+#   review-uncommitted           Review the current uncommitted diff
+#   review-vs-main               Review HEAD vs main
+#   review-commit <sha>          Review a specific commit
+#
+# Hard constraints:
+#   * Every prompt is piped through scripts/redact-secrets.sh first
+#   * Bypass flags (--no-redact / --unsafe / --bypass) are refused at this layer
+#     AND hard-blocked by the safety-gate hook
+#   * Output goes to stdout or data/runtime/codex-output-<ts>.md, NEVER edits files
+
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+REDACT="$REPO_ROOT/scripts/redact-secrets.sh"
+CODEX_BIN="${CODEX_BIN:-codex}"
+
+# Refuse bypass flags at the wrapper layer (defense in depth; safety-gate also blocks)
+for arg in "$@"; do
+  case "$arg" in
+    --no-redact|--skip-redact|--unsafe|--dangerous|--bypass)
+      echo "ERROR: bypass flag '$arg' is refused. Codex wrapper is read-only by design." >&2
+      exit 1
+      ;;
+  esac
+done
+
+cmd="${1:-status}"; shift || true
+
+case "$cmd" in
+  status)
+    if command -v "$CODEX_BIN" >/dev/null 2>&1; then
+      echo "codex CLI: $(command -v "$CODEX_BIN")"
+      "$CODEX_BIN" --version 2>/dev/null || true
+    else
+      echo "ERROR: codex CLI not on PATH. Install per upstream docs."
+      exit 2
+    fi
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+      echo "WARN: OPENAI_API_KEY not set in env"
+    else
+      echo "OPENAI_API_KEY: set (length=${#OPENAI_API_KEY})"
+    fi
+    ;;
+  preflight)
+    bash "$0" status
+    [ -x "$REDACT" ] && echo "redact-secrets.sh: ok" || { echo "ERROR: $REDACT missing or not executable"; exit 3; }
+    ;;
+  generate|debug|refactor|test|audit|architect)
+    prompt="$*"
+    [ -z "$prompt" ] && { echo "usage: codex.sh $cmd <prompt>"; exit 1; }
+    redacted="$(echo "$prompt" | bash "$REDACT")"
+    "$CODEX_BIN" "$redacted"
+    ;;
+  review-uncommitted)
+    diff_text="$(cd "$REPO_ROOT" && git diff)"
+    redacted="$(echo "$diff_text" | bash "$REDACT")"
+    echo "$redacted" | "$CODEX_BIN" "Review this diff for correctness, safety, and style. Be specific."
+    ;;
+  review-vs-main)
+    diff_text="$(cd "$REPO_ROOT" && git diff main...HEAD)"
+    redacted="$(echo "$diff_text" | bash "$REDACT")"
+    echo "$redacted" | "$CODEX_BIN" "Review HEAD vs main. Be specific."
+    ;;
+  review-commit)
+    sha="${1:-}"; [ -z "$sha" ] && { echo "usage: codex.sh review-commit <sha>"; exit 1; }
+    diff_text="$(cd "$REPO_ROOT" && git show "$sha")"
+    redacted="$(echo "$diff_text" | bash "$REDACT")"
+    echo "$redacted" | "$CODEX_BIN" "Review this commit. Be specific."
+    ;;
+  *)
+    echo "unknown subcommand: $cmd"
+    echo "see header for usage"
+    exit 1
+    ;;
+esac
+```
+
+---
+
+
+## Template: scripts/ensemble.sh (v31.3 optional ensemble pattern)
+
+Fans the same redacted prompt past your orchestrator (via `claude -p`) AND Codex. Surfaces agreements / disagreements / verdict. Cap-aware: daily 20 runs + soft $5/day Claude spend cap. Skill `{{orchestrator_lower}}-codex-ensemble` auto-fires before high-stakes ship/deploy/migrate triggers; this is the worker behind it.
+
+```bash
+#!/usr/bin/env bash
+# ensemble.sh — two-model double-check. Claude + Codex on the same prompt.
+#
+# Usage:
+#   ensemble.sh <prompt>
+#
+# Output: data/runtime/ensemble-<ts>.md with:
+#   - Original prompt (redacted)
+#   - Claude verdict
+#   - Codex verdict
+#   - Synthesis (agreements / disagreements / Cortana's recommendation)
+#
+# Caps:
+#   - 20 runs/day hard cap
+#   - $5/day soft Claude spend cap (warns but does not block)
+#
+# Opt-out: set CORTANA_ENSEMBLE_DISABLED=1 in env to short-circuit to no-op.
+
+set -uo pipefail
+
+if [ "${CORTANA_ENSEMBLE_DISABLED:-0}" = "1" ]; then
+  echo "ensemble disabled via CORTANA_ENSEMBLE_DISABLED=1, no-op"
+  exit 0
+fi
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+REDACT="$REPO_ROOT/scripts/redact-secrets.sh"
+COUNT_FILE="$REPO_ROOT/data/runtime/ensemble-counts.jsonl"
+prompt="$*"
+[ -z "$prompt" ] && { echo "usage: ensemble.sh <prompt>"; exit 1; }
+
+# Refuse bypass flags
+for arg in "$@"; do
+  case "$arg" in
+    --no-redact|--no-cap|--unsafe|--dangerous|--bypass)
+      echo "ERROR: bypass flag '$arg' refused" >&2; exit 1 ;;
+  esac
+done
+
+mkdir -p "$(dirname "$COUNT_FILE")"
+today=$(date -u +%Y-%m-%d)
+count=$(grep -c "\"day\":\"$today\"" "$COUNT_FILE" 2>/dev/null || echo 0)
+if [ "$count" -ge 20 ]; then
+  echo "ensemble: daily cap (20) reached, refusing"
+  exit 2
+fi
+printf '{"day":"%s","ts":"%s"}\n' "$today" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$COUNT_FILE"
+
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+OUT="$REPO_ROOT/data/runtime/ensemble-$ts.md"
+redacted="$(echo "$prompt" | bash "$REDACT")"
+
+# Env-scrub each CLI invocation so wrapper env doesn't leak across the
+# Claude/Codex boundary.
+claude_out="$(env -i PATH="$PATH" HOME="$HOME" claude -p "$redacted" 2>&1 || echo "[claude failed]")"
+codex_out="$(env -i PATH="$PATH" HOME="$HOME" OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+              bash "$REPO_ROOT/scripts/codex.sh" audit "$redacted" 2>&1 || echo "[codex failed]")"
+
+{
+  echo "# Ensemble run $ts"
+  echo
+  echo "## Prompt (redacted)"
+  echo
+  echo "\`\`\`"
+  echo "$redacted"
+  echo "\`\`\`"
+  echo
+  echo "## Claude verdict"
+  echo
+  echo "$claude_out"
+  echo
+  echo "## Codex verdict"
+  echo
+  echo "$codex_out"
+  echo
+  echo "## Synthesis"
+  echo
+  echo "Pending Cortana review. Compare the two verdicts for agreements / disagreements / clearly-wrong calls."
+} > "$OUT"
+
+echo "$OUT"
+```
+
+---
+
+
+## Template: launchd plist com.{{orchestrator_lower}}.telegram-mcp-watchdog.plist (Mac only)
+
+Wraps the watchdog script in a launchd job that polls every 10s. The plist points at an AppleScript `.app` wrapper to clear macOS TCC (Full Disk Access required on the bundle, not the bare bash script). Generate the `.app` wrapper via `scripts/install-launchd-wrappers.sh`.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.{{orchestrator_lower}}.telegram-mcp-watchdog</string>
+    <key>Program</key>
+    <string>/Users/{{username}}/Applications/com.{{orchestrator_lower}}.telegram-mcp-watchdog.app/Contents/MacOS/applet</string>
+    <key>StartInterval</key>
+    <integer>10</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/{{username}}/Documents/MyAgent/logs/telegram-mcp-watchdog.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/{{username}}/Documents/MyAgent/logs/telegram-mcp-watchdog.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUN_FROM_LAUNCHD</key>
+        <string>true</string>
+    </dict>
+</dict>
+</plist>
+```
+
+Same pattern for `com.{{orchestrator_lower}}.auto-restart.plist` (StartInterval 30) and `com.{{orchestrator_lower}}.anthropic-scan.plist` / `com.{{orchestrator_lower}}.codex-scan.plist` (StartCalendarInterval with Hour/Minute keys).
+
+---
+
+
+## Template patch: scripts/redact-secrets.sh — modern OpenAI keys (v31.3)
+
+Existing template covers Anthropic, Stripe, GitHub, Slack, Telegram-bot, AWS, URL-token. v31.3 adds two more patterns for the modern OpenAI key shapes:
+
+```bash
+# Modern OpenAI keys (sk-proj-, sk-svcacct-). Add to scripts/redact-secrets.sh
+# alongside the existing sk-[A-Za-z0-9]{20,} pattern.
+sed -E -e 's/sk-proj-[-_A-Za-z0-9]{20,}/REDACTED_OPENAI_PROJECT/g' \
+       -e 's/sk-svcacct-[-_A-Za-z0-9]{20,}/REDACTED_OPENAI_SERVICE/g'
+```
+
+Order matters: put these BEFORE the legacy `sk-[A-Za-z0-9]{20,}` rule so the longer/specific patterns match first. Verify with the secret-scan smoke test against all three OpenAI shapes + `sk-ant-` (Anthropic, must remain unaffected).
+
+---
+
+
+## Template patch: .claude/hooks/safety-gate.sh — v31.3 destructive-op coverage + Codex bypass-flag blocks
+
+Two patch areas to apply to the existing safety-gate.sh template:
+
+### A. Expanded destructive ops
+
+Add these patterns to the existing destructive-command match list (block + require explicit user approval):
+
+- **Prisma** — `prisma migrate reset`, `prisma db push --force-reset`
+- **Postgres CLI** — `psql .* -c .*DROP `, `psql .* -c .*TRUNCATE `, `psql .* -c .*DELETE FROM ` (with no WHERE)
+- **MongoDB** — `mongo .* db.dropDatabase`, `mongosh .* dropDatabase`, `db\..*\.remove\({}\)`
+- **Supabase** — `supabase db reset`, `supabase db reset --linked`
+- **Neon** — `neon branch delete`, `neon project delete`
+- **Wrangler** — `wrangler kv:bulk delete`, `wrangler d1 delete`, `wrangler r2 bucket delete`
+- **Vercel** — `vercel rm`, `vercel project rm`
+- **AWS** — `aws s3 rb`, `aws s3 rm .* --recursive`, `aws rds delete-db-instance`
+- **GCP** — `gcloud compute instances delete`, `gcloud sql instances delete`
+- **Terraform** — `terraform destroy`, `terraform apply -destroy`
+- **Kubernetes** — `kubectl delete namespace`, `kubectl delete pvc`
+- **Docker** — `docker system prune -a -f`, `docker volume rm`, `docker image prune -a -f`
+- **Redis** — `FLUSHDB`, `FLUSHALL`
+
+Skip-checks: any `git commit` or `echo` invocation should be exempted so commit messages naming the above ops in post-mortems don't false-positive block.
+
+### B. Codex / ensemble bypass-flag hard-blocks
+
+```bash
+# Block bypass flags on the Codex + ensemble wrappers (defense in depth; the
+# wrappers also refuse these at their own arg-parse layer).
+if echo "$cmd" | grep -qE '(scripts/codex\.sh|scripts/ensemble\.sh) .*(\-\-no-redact|\-\-skip-redact|\-\-unsafe|\-\-dangerous|\-\-bypass|\-\-no-cap)'; then
+  emit_deny "bypass flag on codex/ensemble wrapper is hard-blocked"
+  exit 2
+fi
+```
+
+The hook block is defense in depth: a typo'd flag at the Bash-tool layer never reaches the wrapper.
+
+After patching either gate, sync to the global gate at `~/.claude/hooks/safety-gate.sh` via `bash scripts/sync-safety-gates.sh`. Drift between project and global means destructive commands slip through in other projects.
+
+---
+
+
+## Template: .claude/skills/{{orchestrator_lower}}-codex-ensemble/SKILL.md (v31.3 optional)
+
+Skill description that auto-fires the ensemble before high-stakes operations.
+
+```markdown
+---
+name: {{orchestrator_lower}}-codex-ensemble
+description: Use BEFORE any high-stakes ship/deploy/migration. Fires on `ship <project>` / `deploy <project>` slash commands, any Vercel/Cloudflare/GitHub-Pages/Netlify deploy, any database migration (prisma migrate deploy, supabase db push, wrangler d1 migrations apply, etc.), any `git push` of diffs >50 lines touching auth/, payments/, db/migrations/, or /.env files, and on explicit `ensemble <task>` invocation. Runs the same redacted prompt through Claude AND Codex via scripts/ensemble.sh and surfaces agreements + disagreements + verdict on Telegram. Opt-out via CORTANA_ENSEMBLE_DISABLED=1.
+---
+
+# {{orchestrator_lower}}-codex-ensemble
+
+Two-model double-check before any high-stakes ship/deploy/migration. Loaded automatically when one of these triggers fires:
+
+- `ship <project>` / `deploy <project>` slash command
+- Vercel / Cloudflare / Netlify / GitHub-Pages deploy command
+- Any database migration (`prisma migrate deploy`, `supabase db push`, `wrangler d1 migrations apply`, etc.)
+- `git push` of >50 lines touching `auth/`, `payments/`, `db/migrations/`, or `.env`
+- Explicit `ensemble <task>` invocation
+
+## What it does
+
+1. Constructs a redacted prompt summarising the change.
+2. Calls `bash scripts/ensemble.sh "<prompt>"` which fans the prompt past Claude (`claude -p`) AND Codex (`scripts/codex.sh audit`).
+3. Reports back on Telegram with the synthesis: agreements, disagreements, the orchestrator's verdict.
+4. If a disagreement is blocking-grade (security, irreversibility, data loss), surfaces a "WAIT" recommendation and asks the user before proceeding.
+
+## Caps
+
+- 20 runs/day (hard cap in `scripts/ensemble.sh`)
+- $5/day soft Claude spend cap (warns)
+- Opt-out: set `CORTANA_ENSEMBLE_DISABLED=1` in env to short-circuit to no-op
+
+## Output
+
+Each run writes `data/runtime/ensemble-<ts>.md` for later review. The Telegram message shows the synthesis only; full transcripts stay on disk.
+```
+
+---
+
+
+## Template: settings.json — v31.3 skillOverrides + hook continueOnBlock
+
+Claude Code v2.1.139+ adds `skillOverrides` for surgical skill control + hook `continueOnBlock` so a blocked tool call can be auto-corrected without breaking the conversation. Add these blocks to the existing `.claude/settings.json` template.
+
+```jsonc
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  // ... existing keys ...
+
+  // v31.3: surgical skill control. Pick the ones you don't want loaded on every session.
+  // Each entry is { "name": "<skill-id>", "mode": "disabled" | "name-only" }.
+  // "disabled" removes from context entirely; "name-only" keeps the name visible
+  // but skips the body until explicitly invoked.
+  "skillOverrides": [
+    // Example: low-relevance skills you've decided don't apply to your work
+    { "name": "skills:apple-hig-designer", "mode": "disabled" },
+    { "name": "skills:swift-concurrency", "mode": "disabled" },
+    // Example: skills you want available but not auto-loaded
+    { "name": "frontend-design:frontend-design", "mode": "name-only" }
+  ],
+
+  // v31.3: hook continueOnBlock lets a blocked tool call retry with a corrected prompt.
+  // Used by the banned-language gate to auto-log + retry instead of just failing.
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_telegram_telegram__reply",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/banned-language-gate.sh",
+            "continueOnBlock": true,
+            "args": ["--auto-log-corrections"]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Note: `$CLAUDE_PROJECT_DIR` is exported by Claude Code v2.1.139+ and points at the repo root regardless of cwd. Use it in hook commands instead of computing the repo root in the script.
+
 ```
