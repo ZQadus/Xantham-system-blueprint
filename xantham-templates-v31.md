@@ -11214,7 +11214,7 @@ Skill description that auto-fires the ensemble before high-stakes operations.
 ```markdown
 ---
 name: {{orchestrator_lower}}-codex-ensemble
-description: Use BEFORE any high-stakes ship/deploy/migration. Fires on `ship <project>` / `deploy <project>` slash commands, any Vercel/Cloudflare/GitHub-Pages/Netlify deploy, any database migration (prisma migrate deploy, supabase db push, wrangler d1 migrations apply, etc.), any `git push` of diffs >50 lines touching auth/, payments/, db/migrations/, or /.env files, and on explicit `ensemble <task>` invocation. Runs the same redacted prompt through Claude AND Codex via scripts/ensemble.sh and surfaces agreements + disagreements + verdict on Telegram. Opt-out via CORTANA_ENSEMBLE_DISABLED=1.
+description: Run a Claude + Codex two-model double-check on a high-stakes decision via `scripts/ensemble.sh`. Does NOT auto-fire on every ship/deploy/migration. Invoke ONLY when the orchestrator judges it useful (irreversible decision, security/payments/auth surface, large schema migration, big architectural call, low confidence in own answer) OR when the user explicitly asks via `ensemble <task>` / `get a second opinion` / `run the ensemble on this`. Pairs with {{orchestrator_lower}}-codex-reviewer (per-commit sibling). Opt-out via CORTANA_ENSEMBLE_DISABLED=1.
 ---
 
 # {{orchestrator_lower}}-codex-ensemble
@@ -11255,7 +11255,7 @@ Sibling to the ensemble skill. Auto-fires AFTER specialist-agent completion + BE
 ```markdown
 ---
 name: {{orchestrator_lower}}-codex-reviewer
-description: Use AFTER any specialist agent (your code/infra/research agents) finishes a build or edit task and BEFORE the orchestrator commits the work. Runs `scripts/codex.sh review-uncommitted <project_dir>` on the staged + unstaged diff, surfaces P0/P1 findings, and the orchestrator iterates inline before commit. Pairs with {{orchestrator_lower}}-codex-ensemble (which fires BEFORE high-stakes ship/deploy) — this fires BEFORE every commit on any specialist-agent build. Opt-out via CORTANA_CODEX_REVIEW_DISABLED=1 (rename env-var for your fork as needed).
+description: Run a Codex second-pass review on a staged + unstaged diff using `scripts/codex.sh review-uncommitted <project_dir>`. Does NOT auto-fire on every specialist-agent build. Invoke ONLY when the orchestrator judges it useful (high-stakes diff, regulated/security-sensitive area, unfamiliar codebase, suspected blind spot) OR when the user explicitly asks via `codex review` / `review <project>` / `get codex on this`. Pairs with {{orchestrator_lower}}-codex-ensemble (release-scoped sibling). Opt-out via CORTANA_CODEX_REVIEW_DISABLED=1 (rename env-var prefix for your fork as needed).
 architectural_role: trunk
 compatibility: "Claude Code only"
 allowed-tools: "Read Grep Bash(bash scripts/codex.sh:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(cat:*) Bash(ls:*)"
