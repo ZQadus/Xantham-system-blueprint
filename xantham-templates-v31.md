@@ -11248,6 +11248,118 @@ Each run writes `data/runtime/ensemble-<ts>.md` for later review. The Telegram m
 ---
 
 
+## Template: .claude/skills/{{orchestrator_lower}}-codex-reviewer/SKILL.md (v31.3 optional)
+
+Sibling to the ensemble skill. Auto-fires AFTER specialist-agent completion + BEFORE commit. Runs `scripts/codex.sh review-uncommitted` on the diff with fresh eyes from a different training distribution.
+
+```markdown
+---
+name: {{orchestrator_lower}}-codex-reviewer
+description: Use AFTER any specialist agent (your code/infra/research agents) finishes a build or edit task and BEFORE the orchestrator commits the work. Runs `scripts/codex.sh review-uncommitted <project_dir>` on the staged + unstaged diff, surfaces P0/P1 findings, and the orchestrator iterates inline before commit. Pairs with {{orchestrator_lower}}-codex-ensemble (which fires BEFORE high-stakes ship/deploy) — this fires BEFORE every commit on any specialist-agent build. Opt-out via CORTANA_CODEX_REVIEW_DISABLED=1 (rename env-var for your fork as needed).
+architectural_role: trunk
+compatibility: "Claude Code only"
+allowed-tools: "Read Grep Bash(bash scripts/codex.sh:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(cat:*) Bash(ls:*)"
+metadata:
+  pattern: 5
+  pattern_name: "Builder-then-reviewer double-loop"
+  notes: "Wrapper refuses --no-redact / --unsafe / --bypass at arg-parse. Daily cap shared with codex-ensemble (20 calls/day) protects runaway cost. ~$0.05 per review."
+---
+
+# Codex reviewer — second-pass review of every specialist-agent build
+
+The orchestrator dispatches specialist agents (your code/infra/research agents) for build work. The agent that wrote the code cannot catch its own blind spots. Codex sees the diff with fresh eyes + a different training distribution + a different bias profile. The two together catch what either misses alone.
+
+## When this skill fires automatically
+
+Auto-fire AFTER specialist-agent completion + BEFORE the commit:
+
+1. **Any specialist-agent completion that touched code, config, schema, scripts, or hooks.** Run `bash scripts/codex.sh review-uncommitted <project_dir>` on the agent's staged + unstaged diff.
+2. **Any in-session orchestrator edit that touched 3+ files.** Same pattern — review before commit.
+3. **Any `git add` of 50+ lines of diff** in a project the orchestrator owns. The review fires before the matching `git commit`.
+4. **Explicit user invocation** — user types `codex review` or `review <project>`.
+
+## When to skip
+
+- `CORTANA_CODEX_REVIEW_DISABLED=1` is set (quiet build session).
+- The diff is <30 lines AND touches only doc files (README, agent-instructions, HANDOFF, blueprint markdown). Review adds little.
+- The diff is purely memory / episodic / log files. Not code.
+- The daily codex cap is already at zero remaining (shared with ensemble).
+- This commit is the inline fix for a previous codex finding (avoid ping-pong loops — finish the iteration cleanly).
+
+## How to dispatch
+
+```bash
+bash scripts/codex.sh review-uncommitted <project_dir>
+```
+
+The wrapper:
+1. Reads the project's staged + unstaged + untracked diff.
+2. Redacts secrets via `scripts/redact-secrets.sh` before sending.
+3. Posts to Codex with a "review this diff, flag P0/P1/P2 issues" prompt.
+4. Writes the response to `data/research/codex-reviews/YYYY-MM-DD-HHMMSS-<project>-uncommitted.md`.
+5. Logs the call to `data/codex-calls.jsonl` (cost trail).
+
+For a longer-range review:
+
+```bash
+bash scripts/codex.sh review-vs-main <project_dir> main
+bash scripts/codex.sh review-commit <sha> <project_dir>
+```
+
+## How to interpret findings
+
+- **P0 (blocks ship).** Crash, security hole, broken contract, wrong regulatory citation, data loss path. Fix inline + re-run codex review to confirm clean.
+- **P1 (fix before submit).** Real bug, edge case, force unwrap, missing test, performance trap, UX regression. Apply inline unless out of scope.
+- **P2 (polish / nit / opinion).** Doc drift, style preference. Note in commit message; rarely apply in same commit.
+- **No findings.** "Tracked changes look generally safe." Commit. Done.
+
+## Iteration loop
+
+If P0 is found:
+
+1. Apply the fix inline (or ask the relevant specialist to).
+2. Re-run `scripts/codex.sh review-uncommitted` on the new state.
+3. Loop until codex returns either zero P0 or a P0 judged to be a false positive (rare; document the reasoning).
+
+Cap the loop at 3 rounds. After round 3, escalate to the user with the unresolved finding.
+
+## Caveats
+
+- **Codex sometimes hallucinates issues.** Especially around language-specific idioms. Verify each finding before applying.
+- **Codex sometimes misses real issues.** The pass is not exhaustive. Treat it as a second opinion, not a guarantor.
+- **Stale Codex output is dangerous.** Always re-run after applying a fix.
+- **Daily cap shared with ensemble.** 20 codex calls/day total.
+
+## When to use this vs {{orchestrator_lower}}-codex-ensemble
+
+| Situation | Which skill |
+|---|---|
+| Specialist agent finished a build, about to commit | **{{orchestrator_lower}}-codex-reviewer** (this skill) |
+| About to `ship` / `deploy` / migrate a database | **{{orchestrator_lower}}-codex-ensemble** (sibling skill) |
+| Inline orchestrator edit, <30 lines | Skip both |
+| Doc-only change | Skip both |
+
+Reviewer is per-commit and diff-scoped. Ensemble is per-release and decision-scoped. Complementary, not redundant.
+
+## Cost model
+
+- Wrapper config floor: read-only, no exec, no file writes (enforced by `~/.codex/config.toml`).
+- Per call cost: ~$0.03-0.07 depending on diff size.
+- Daily soft cap: 20 calls/day (shared with ensemble).
+- Audit trail: `data/codex-calls.jsonl` rolls per call.
+
+## Output contract
+
+The reviewer writes:
+
+1. A markdown sidecar at `data/research/codex-reviews/<ts>-<project>-uncommitted.md`
+2. A JSONL entry in `data/codex-calls.jsonl`
+3. A stdout summary that the orchestrator inspects to drive the iteration loop
+```
+
+---
+
+
 ## Template: settings.json — v31.3 skillOverrides + hook continueOnBlock
 
 Claude Code v2.1.139+ adds `skillOverrides` for surgical skill control + hook `continueOnBlock` so a blocked tool call can be auto-corrected without breaking the conversation. Add these blocks to the existing `.claude/settings.json` template.
