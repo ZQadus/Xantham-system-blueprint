@@ -483,11 +483,15 @@ Approval-gated (blocked until you write to `approved.txt`):
 - `git reset --hard`, `clean -f`, `branch -D`
 - `git rebase -i`, `rebase --onto`, `commit --amend`
 - `git checkout -- .`, `git restore .`, `stash drop/clear`
+- `git stash pop` / `stash apply` (overwrite-on-pop vector) — added v31.1
+- `git stash` chained with a branch-switch in one command — added v31.1
+- `git checkout <ref> -- <path>` / `git restore --source=<ref>` over the working tree — added v31.1
+- `git add -A` / `git add .` / `--all` (broad-staging deletes unrelated files) — added v31.1
 - `git worktree remove --force`
 - `rm` with any flag
 - `DROP TABLE`, `TRUNCATE`, `DELETE FROM` without WHERE
 - `sudo` anything
-- Edits to `.env` / SSH keys / GPG keys
+- Edits to `.env` / SSH keys / GPG keys (the guard reads `tool_input.file_path` — earlier builds read the wrong key and the guard was silently dead; fixed v31.1)
 
 **Cost**
 $0. Bash regex.
@@ -591,6 +595,33 @@ echo "$HARD_PAYLOAD" | bash ~/.claude/hooks/safety-gate.sh >/dev/null 2>&1
 
 echo "OK: E5 installed"
 ```
+
+---
+
+### E5.1 - Opus 4.8 model-defense layer (v31.1, added 2026-06-01)
+
+**Purpose**
+Defends against the failure classes that surfaced with Opus 4.8: git-repo corruption, fabricated completion ("tests pass" with no test run), long-context hallucination/misattribution, runaway loops, and dropped turns. Built on the principle the issue tracker proved: a rule in a prompt does NOT bind the model (a user with "NEVER run git stash drop" in their config watched 4.8 do it anyway). So every defense is a HOOK or a deterministic script, not prose.
+
+**Components (all ship with passing self-tests; layered on top of E5):**
+
+1. **Git data-loss blocks** — the E5 gate gains: `stash pop`/`apply`, chained `stash`+branch-switch, `checkout <ref> -- <path>` / `restore --source` over a dirty tree, and broad-staging (`git add -A`/`.`). Self-test: `scripts/test-git-stash-gate.sh`. Also fixes a dead-guard bug: read `tool_input.file_path` (not `.path`) so the secrets-file guard on Write/Edit actually fires — `scripts/test-filepath-key.sh`.
+
+2. **Fabricated-completion gate** — `.claude/hooks/verify-trace.sh` (PostToolUse on Bash) logs verification commands; `.claude/hooks/reply-verify-gate.sh` (PreToolUse on the outbound-message tool) flags a "shipped/passing/deployed" claim with no verification recorded that turn. WARN-ONLY by default (never blocks a user reply); env `REPLY_VERIFY_ENFORCE=1` to hard-block, `REPLY_VERIFY_OFF=1` to bypass. Self-test: `scripts/test-reply-verify-gate.sh`.
+
+3. **Transcript grounding** — `scripts/verify-transcript-claims.sh` (+`.py`): every quote/attribution is substring-checked (3-tier exact / whitespace-normalized / difflib fuzzy ≥0.90) against the real source before entering memory or a message. `scripts/transcript-attribution.sh` reads the speaker from the structured `sender` label of the system's own message history, never inferred. Self-test: 22 cases. Skill: `cortana-transcript-grounding`.
+
+4. **Non-killing loop detector** — `.claude/hooks/loop-detector.sh` (PostToolUse Bash): same command 3×/300s fires a direct owner-ping (cap-limited). NEVER auto-kills (an auto-restart daemon that killed live work is deliberately unloaded). Self-test: `scripts/test-loop-detector.sh`. Policy: do NOT enable UltraCode / xhigh dynamic workflows until a spend cap ships; keep per-agent `max_tokens` capped.
+
+5. **Pre-merge deletion guard** — `scripts/safe-merge-check.sh <branch>`: reports the real deletions a branch makes relative to its merge-base (not the misleading two-dot diff) + flags shared-config edits, before merging any agent/worktree branch.
+
+6. **Regression watch** — the nightly model-scan folds in a problem-check (issue tracker + status page + chatter), surfacing up to 5 `[ISSUE]`-tagged lines in the digest + the durable ledger, so the next regression is caught proactively.
+
+7. **Never-silent fallback** — the Stop-time contract verifier fires a direct-curl owner ping (bypasses a dead message channel) when a turn that owed a reply emitted none — defends the malformed-tool_use bug that drops the whole turn.
+
+**Cost** $0 (bash + stdlib python). **Token usage** near-zero (hooks run outside the model).
+
+**Why it's a distinct layer:** these are reactive defenses tied to a specific model generation's failure modes. They sit on top of E5's general destructive-op gate and can be lifted/retuned as the model improves, without touching the core gate.
 
 ---
 
@@ -1091,7 +1122,7 @@ bash scripts/session-start-persistence-inject.sh | head -20
 - Operating principles section added near the top: built-to-scale rule (back-compat-first, designed for 100x current load from day one), reply-first rule, verify-before-claiming-done rule, plan-before-code rule.
 - Troubleshooting block added: macOS 15 TCC blocks launchd-spawned bash from executing scripts under `~/Documents/`. AppleScript .app wrapper recipe + new-mac re-enable steps included.
 - `telegram-signal.sh` reframed. It survives v31 as a generic Telegram alert utility used by the auth canary alert path. Cross-referenced from the auth-failover section.
-- Removed in v31: `scripts/proactive-trigger-daemon.sh`, `scripts/proactive-daemon.sh`, `scripts/signal-schedule.sh`, `scripts/signal-fire-from-schedule.sh`, AppleScript `signal-fire-wrapper.applescript`, all proactive-trigger and signal-fire references as live systems. The systems were deleted in early May 2026 and never come back without an explicit decision to revive them.
+- Removed in v31: `proactive-trigger-daemon.sh`, `proactive-daemon.sh`, `signal-schedule.sh`, `signal-fire-from-schedule.sh` (all formerly under `scripts/`), AppleScript `signal-fire-wrapper.applescript`, all proactive-trigger and signal-fire references as live systems. The systems were deleted in early May 2026 and never come back without an explicit decision to revive them.
 - sqlite-vec chunk count reference updated. Mature installs run 1000-1500 chunks across `memory/`, `agent-memory/`, and `docs/`.
 
 ### v30 - production-ready public release
@@ -1140,6 +1171,14 @@ bash scripts/session-start-persistence-inject.sh | head -20
 - **AI cost dashboard truth rule.** Estimator outputs from preview endpoints + cost-calc helpers are UPPER-BOUND, not actual. Trust the provider dashboard (Anthropic / OpenAI / Gemini) for real spend. Don't quote estimator numbers without flagging them as upper-bound.
 - **AI-spend-guard five-layer pattern.** Floor for any new AI callsite that calls an LLM API directly (not via your orchestrator). Layers: hard daily cap, per-IP rate limit, per-feature soft budget with telemetry at 80%, pre-call estimator gate, audit log JSONL with estimated + actual cost.
 - **Slash-command MCP-restart rule.** Slash commands that touch the plugin/MCP layer (`/mcp`, `/commands`, `/plugin marketplace add`, `/plugin install`) RESTART the Telegram MCP mid-session and drop in-flight inbound on the floor. Do NOT use these slash commands when the Telegram MCP is active. Workaround: use `claude plugin` from Bash instead — it doesn't traverse the restart path.
+
+### v31.4 - reflexion self-critique + wearable channel + dashboard feeders from 2026-05-16 / 2026-05-31 upgrade slate
+
+- **Reflexion post-reply self-critique (optional, all modes).** Async LLM judge runs after every Telegram reply. Hook `.claude/hooks/reflexion-post-reply.sh` fires on PostToolUse of the reply tool and never blocks the reply path. `scripts/reflexion/reflexion-judge.sh` scores the response against the active-recall output + the verify-sync trail + the published-repo-first / reconcile-before-claiming patterns; misses land in `data/reflexion-misses.jsonl`; `scripts/reflexion/check-promotion-thresholds.sh` auto-promotes a category to corrections after 3 misses; `scripts/reflexion/review.sh` is the manual review entry. Covered by the `{{orchestrator_lower}}-reflexion` skill. Opt-out via `CORTANA_REFLEXION_DISABLED=1` (rename namespace for your fork). Tests: `scripts/test-reflexion-judge.sh`.
+- **VisionClaude / wearable-glasses channel (optional, Advanced mode).** Capture wire for a wearable (reference hardware Meta Ray-Ban Wayfarer Gen 2). Install helpers `scripts/install-glasses-bootstrap.sh` + `scripts/install-visionclaude-launchd.sh` + `scripts/patch-zshrc-glasses-preflight.sh`; runtime preflight `scripts/visionclaude-preflight.sh`; channel-server inbox at `$HOME/.claude/channels/visionclaude/inbox/`. Covered by the `{{orchestrator_lower}}-glasses` skill. Tests: `scripts/test-glasses-mcp.sh`, `scripts/test-visionclaude-mdns.sh`. Mac/host side proven; the on-device client is a per-fork build.
+- **Mobile dashboard Daily-tab data feeders (optional, dashboard installs only).** `scripts/dashboard-state/refresh-tfl-cache.sh` (30-min-TTL transit/line-status cache wired into `build-snapshot.sh`) + `scripts/dashboard-state/push-event.sh` (Command Deck push events to the Cloudflare Worker). Tests: `scripts/dashboard-state/test/test-push-event.sh` + `scripts/dashboard-state/test/cf-worker.notify.test.mjs`.
+- **Codex structured-findings schema.** `scripts/codex-schemas/review-findings.schema.json` is the JSON contract the `{{orchestrator_lower}}-codex-reviewer` skill parses when invoked with `--json` (verdict + severity + file/line), so the orchestrator can act on structured review output rather than scraping prose.
+- **Self-test coverage scripts.** Harness checks shipped for the active-recall fixes (`scripts/test-active-recall-fixes.sh`), the bge-m3 embedding path (`scripts/test-bge-m3-embedding.sh`), blueprint export (`scripts/test-export-blueprint.sh`), hybrid memory-search (`scripts/test-memory-search-hybrid.sh`), the secret redactor (`scripts/test-redact-secrets.sh`), and the safety gate (`scripts/test-safety-gate.sh`).
 
 ### v31.2 - infra hardening + perma-rules from 2026-05-09 / 2026-05-10 upgrade slate
 - **Banned-language gate hook** (`.claude/hooks/banned-language-gate.sh` + perl helper). PreToolUse blocks medical-claim words / marketing superlatives / AI-tells from leaking into orchestrator replies AND files written under `Library/`, `docs/`, app strings. Reads from `Library/app-store-compliance/banned-language-list.md` + allowlist. ~45ms per fire (60s cache). Configurable via `BANNED_LANG_GATE_PATHS` / `BANNED_LANG_GATE_DEBUG=1` / emergency bypass `BANNED_LANG_GATE_OFF=1`.
@@ -1207,7 +1246,7 @@ Not documented. Core loop + safety gate + routing table existed from v1.
    - **v31.3 Codex advisor (optional).** Drop in `scripts/codex.sh` + `scripts/ensemble.sh`, install the OpenAI Codex CLI (`pip install codex-cli` or per upstream docs), provision an OpenAI API key, set `OPENAI_API_KEY` in `~/.zshrc`. Install the `{{orchestrator_lower}}-codex-ensemble` skill. Install daily release-scan launchd plists if you want the morning scans. Opt-out via `CORTANA_ENSEMBLE_DISABLED=1` (or your own orchestrator-prefixed env var).
    - **v31.3 Claude Code v2.1.139+ settings.** Add `skillOverrides` block to `.claude/settings.json` (defaults disable 50+ low-relevance skills; flip the ones you want back to `name-only` or `enabled`). Update hooks to use `continueOnBlock` + `args` where appropriate. Update hook scripts to read `$CLAUDE_PROJECT_DIR` instead of computing repo root manually.
    - **v31.3 safety-gate updates.** Sync the expanded destructive-op coverage + Codex bypass-flag hard-blocks + modern OpenAI key redaction patterns to both `.claude/hooks/safety-gate.sh` and `~/.claude/hooks/safety-gate.sh` via `bash scripts/sync-safety-gates.sh`.
-3. Removed in v31: any leftover `scripts/proactive-trigger-daemon.sh`, `scripts/proactive-daemon.sh`, `scripts/signal-schedule.sh`, `scripts/signal-fire-from-schedule.sh`, AppleScript `signal-fire-wrapper.applescript`. The upgrade walks an uninstall path: unload the launchd jobs, remove the `.app` wrappers from `~/Applications/`, archive the scripts to `scripts/archive/`. Telegram-signal.sh stays.
+3. Removed in v31: any leftover `proactive-trigger-daemon.sh`, `proactive-daemon.sh`, `signal-schedule.sh`, `signal-fire-from-schedule.sh` (all formerly under `scripts/`), AppleScript `signal-fire-wrapper.applescript`. The upgrade walks an uninstall path: unload the launchd jobs, remove the `.app` wrappers from `~/Applications/`, archive the scripts to `scripts/archive/`. Telegram-signal.sh stays.
 4. Sets `blueprint_version: v31.3` in `.{{orchestrator_lower}}-blueprint-version`.
 
 ### v29 → v31
@@ -1665,7 +1704,7 @@ Move-Item SETUP-CHECKLIST.md data\SETUP-CHECKLIST.md.done
 
 The next fresh session will not re-prompt you to verify.
 
-If a future install adds new components (extension upgrade, new MCP server, new hook), regenerate the checklist with `bash scripts/regenerate-setup-checklist.sh` so the new items get verified before the next real session.
+If a future install adds new components (extension upgrade, new MCP server, new hook), regenerate the checklist with the wizard-generated `regenerate-setup-checklist.sh` helper (written under `scripts/` at install time) so the new items get verified before the next real session.
 ```
 
 The wizard's last action before saying "install complete" should be: write this file (with `<agent-name>` substituted), confirm the file exists, and tell the user explicitly:
@@ -2351,7 +2390,7 @@ Memories accumulate. Once a quarter:
 - Delete invalidates the post-commit hook auto-removes the chunk from sqlite-vec
 ```
 
-### `scripts/regenerate-setup-checklist.sh` - for when new components arrive
+### `regenerate-setup-checklist.sh` (wizard-generated under `scripts/`) - for when new components arrive
 
 The wizard writes a stub:
 
@@ -2383,7 +2422,7 @@ After install, the wizard writes all of these files. **Gate the SETUP-CHECKLIST 
 5. `PITFALLS.md` (anti-patterns)
 6. `MEMORY-HYGIENE.md` (memory rules)
 7. `scripts/upgrade-{{orchestrator_lower}}.sh` (future bump path)
-8. `scripts/regenerate-setup-checklist.sh` (regen helper)
+8. `regenerate-setup-checklist.sh` under `scripts/` (regen helper)
 
 **Project root - on partial failure (any Generation Order step 1-18 errored):**
 - `DIAGNOSTIC-CHECKLIST.md` REPLACES `SETUP-CHECKLIST.md`. Lists every failed step with retry hints.
@@ -2550,11 +2589,11 @@ esac
 
 If `OS=unknown`, ask the user once: "I could not detect your OS. Are you on Mac, Windows, or Linux?" Store as `{{os}}`.
 
-**Step 2.** Run the preflight probe. Generate `scripts/preflight.sh` from the body below now, mark it `+x`, and execute it. The wizard then parses MISSING lines.
+**Step 2.** Run the preflight probe. Generate the `preflight.sh` probe (written under `scripts/`) from the body below now, mark it `+x`, and execute it. The wizard then parses MISSING lines.
 
 ```bash
 #!/usr/bin/env bash
-# scripts/preflight.sh - hard gate before the install wizard proceeds.
+# preflight.sh (lives under scripts/) - hard gate before the install wizard proceeds.
 # Exit 0 = all prereqs present. Exit 1 = at least one missing (printed to stdout).
 set -u
 
@@ -3433,7 +3472,7 @@ After all questions are answered, generate files in this order. Each file comes 
 
 4. **Generate .claude/settings.json** from **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Standard Security)** OR **`blueprints/xantham-templates-v31.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
 
-   **Step 4 backup + sidecar (sentinel-gating, fixes Marco audit CG5).** If `~/.claude/settings.json` ALREADY EXISTS on the host (another Claude Code project on the same machine), copy it to `~/.claude/settings.json.pre-install` BEFORE writing the new one. Do NOT overwrite an existing `.pre-install` (preserve any older install's backup). Then `touch ~/.claude/.settings.json.xantham-managed` (mode `0644`) AFTER writing the new settings.json. The sidecar marker is what `scripts/uninstall.sh` reads to know it can safely jq-strip the `statusLine` block when the .pre-install backup is missing. Without the sidecar, uninstall refuses to touch settings.json. Mac/Linux: standard `cp` + `touch`. Windows (PowerShell): `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.pre-install"` + `New-Item -Path "$env:USERPROFILE\.claude\.settings.json.xantham-managed" -ItemType File`.
+   **Step 4 backup + sidecar (sentinel-gating, fixes Marco audit CG5).** If `~/.claude/settings.json` ALREADY EXISTS on the host (another Claude Code project on the same machine), copy it to `~/.claude/settings.json.pre-install` BEFORE writing the new one. Do NOT overwrite an existing `.pre-install` (preserve any older install's backup). Then `touch ~/.claude/.settings.json.xantham-managed` (mode `0644`) AFTER writing the new settings.json. The sidecar marker is what the wizard-provisioned `uninstall.sh` (under `scripts/`) reads to know it can safely jq-strip the `statusLine` block when the .pre-install backup is missing. Without the sidecar, uninstall refuses to touch settings.json. Mac/Linux: standard `cp` + `touch`. Windows (PowerShell): `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.pre-install"` + `New-Item -Path "$env:USERPROFILE\.claude\.settings.json.xantham-managed" -ItemType File`.
 
 5. **Generate hook scripts.** For each hook listed below, look up the matching **`## Template: .claude/hooks/<name>.sh`** section in `blueprints/xantham-templates-v31.md` and write the literal body to `.claude/hooks/<name>.sh`, substituting placeholders. Hook list: `safety-gate.sh` (always), `log-telegram-hook.sh` (only if `{{messaging}}`=telegram), `audit-log-hook.sh` (only if `{{security}}`=enterprise OR Advanced mode with E4 selected at Q18), `voice-lint.sh` (always; the de-personalised reply-quality lint), `stop-composer.sh` (always), `stop-verify-contract.sh` (always). After writing, `chmod +x` each. Mac/Linux: `chmod +x .claude/hooks/*.sh`. Windows (Git Bash): `chmod +x .claude/hooks/*.sh` works the same; on plain PowerShell the chmod is unnecessary because Git Bash interprets the shebang directly.
 
@@ -5135,7 +5174,7 @@ mkdir -p ~/.config/claude
 if [ ! -f ~/.config/claude/api-key ]; then
   echo "<your-anthropic-api-key>" > ~/.config/claude/api-key
   chmod 0600 ~/.config/claude/api-key
-  # Sidecar marker so scripts/uninstall.sh knows THIS install provisioned it
+  # Sidecar marker so the uninstall.sh helper (under scripts/) knows THIS install provisioned it
   # (fixes Marco audit CG5 — sentinel-gating on the api-key cleanup step).
   touch ~/.config/claude/.api-key-installed-by-xantham
   chmod 0600 ~/.config/claude/.api-key-installed-by-xantham
@@ -5189,7 +5228,7 @@ Mac launchd schedule for the canary. Save the plist below as `~/Library/LaunchAg
 <plist version="1.0">
 <dict>
     <!-- XANTHAM-SENTINEL: launchd-plist-v31
-         This XML comment is content-grep'd by scripts/uninstall.sh before
+         This XML comment is content-grep'd by the uninstall.sh helper (under scripts/) before
          removing the plist. Keeps uninstall from touching plists that just
          happen to share the com.{{orchestrator_lower}}. filename prefix. -->
     <key>Label</key>

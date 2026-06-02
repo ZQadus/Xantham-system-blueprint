@@ -371,8 +371,8 @@ Working on multiple things in parallel is the default. Telling Telegram "work on
 - **`ARCHITECTURE.md`**. System map with Mermaid diagram, component descriptions, data flow, memory and safety cross-sections.
 - **`SECURITY.md`**. Threat model, the three-bucket safety gate, known limitations, vulnerability disclosure.
 - **`COMPARISON.md`**. Benchmark table vs the most-cited public agent frameworks and orchestrators.
-- **`xantham-system-v31.md`** (~5200 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
-- **`xantham-templates-v31.md`** (~10400 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
+- **`xantham-system-v31.md`** (~5400 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
+- **`xantham-templates-v31.md`** (~11400 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
 - **`orchestration-habits.md`** (versioned, currently v1.0.0). Self-contained habits + manifest file. Drop into any orchestrator install. The `xantham-sync-habits` skill parses the manifest and installs every dependency autonomously when the user says `sync habits`.
 - **`install-xantham-habits.sh`**. CLI fallback installer for the habits layer. Use this for CI / scripted installs / brand-new repos that do not yet have an orchestrator agent loaded. Normal path is the `sync habits` command above.
 - **`.claude/hooks/`**. Five enforcement hooks shipped as actual files: `telegram-reply-reminder.sh`, `banned-language-gate.sh` + `.pl`, `stop-composer.sh` + `stop-verify-contract.sh`, `agent-dispatch-pre.sh` + `agent-dispatch-post.sh`. Pulled directly by the sync skill.
@@ -403,6 +403,7 @@ The repo name doesn't include a version. The files inside do. Commit history sho
 - **Wizard split.** v31 ships as two files. Landing (what humans read) plus templates appendix (what the install consumes). The single-monolith pattern is archived at `archive/xantham-system-v30.md`.
 - **Pre-hoc reflection skill.** Your orchestrator now runs a 6-stage chain-pattern-interrupt before dispatching agents on fuzzy briefs or first-time multi-agent fan-outs. Catches wrong-direction dispatches before tokens are spent.
 - **Hardened safety gate.** Force-push to protected branches becomes physically impossible, no approval can unlock it. CLI-rm whitelist covers npm rm, yarn remove, pnpm rm, brew uninstall, vercel env rm, etc.
+- **Model-defense layer (v31.1).** A reactive set of hooks and deterministic scripts that close the data-loss and fabricated-completion failure modes that surfaced with newer model generations: the gate now also blocks `git stash pop`/`apply`, chained stash-and-switch, `checkout`/`restore` over a dirty tree, and broad `git add -A`/`.`; a warn-only reply-verify gate flags "shipped / passing" claims with no verification recorded; a non-killing loop detector pings you when the same command repeats; transcript grounding substring-checks every quote against its source; and a pre-merge guard reports a branch's real deletions before you merge it. Every defense is a hook or a script, not a prompt rule. See the E5.1 section of `xantham-system-v31.md` and `SECURITY.md`.
 
 ## Sharing
 
