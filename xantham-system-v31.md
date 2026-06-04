@@ -106,7 +106,9 @@ The orchestrator runs under a small set of cross-project rules. They apply to ev
 
 **Plan before code on multi-file changes.** Anything that touches three or more files, adds a new feature, or introduces a new dependency gets a written plan before code. Cheaper to redirect on a paragraph than on 200 lines.
 
-These four show up again in the orchestration skill, the safety skill, and several feedback memories. They are the floor, not advice.
+**Skill and plugin first.** Before executing any task, check whether an installed skill or plugin fits, and route to it. Making that match is the orchestrator's core job, not a nicety — for every task, not only design work. Do not hand-roll what a skill does better: brainstorming, planning, frontend/design, animation, deploy, mobile, documents, debugging, verification each have a dedicated skill or plugin that beats an ad-hoc attempt. When dispatching a specialist sub-agent, name the skills it should invoke. Sibling rule: before framing any upgrade as "build custom X", check for a published repo/package first and default to install/wrap or fork/adapt.
+
+These five show up again in the orchestration skill, the safety skill, and several feedback memories. They are the floor, not advice.
 
 ### Memory system
 - `memory/MEMORY.md` - index, auto-loaded at session start (capped at 200 lines per Anthropic Auto Dream convention)
@@ -492,6 +494,9 @@ Approval-gated (blocked until you write to `approved.txt`):
 - `DROP TABLE`, `TRUNCATE`, `DELETE FROM` without WHERE
 - `sudo` anything
 - Edits to `.env` / SSH keys / GPG keys (the guard reads `tool_input.file_path` — earlier builds read the wrong key and the guard was silently dead; fixed v31.1)
+
+MCP database-tool protection (added v31.2 — "never lose a database"):
+The gate also intercepts destructive **MCP tool calls**, not only bash. For Neon / Supabase MCP servers it approval-gates project/branch destruction (`delete_project`, `delete_branch`, `merge_branch`, `reset`) and `DROP` / `TRUNCATE` / `DELETE`-without-`WHERE` found inside the SQL-bearing fields of the run/migration tools (Neon `run_sql`, `run_sql_transaction`, `prepare_database_migration`, `complete_database_migration`; Supabase `execute_sql`, `apply_migration`). It **normalizes the SQL first** (strips comments + collapses whitespace) so obfuscated payloads can't slip past a naive substring match, and it **self-protects** — edits to the gate file itself are blocked. Verification lesson: prove it by firing a **real** destructive MCP call against a throwaway database (e.g. an actual `DROP` via `run_sql_transaction`, then confirm the table still exists), never with simulated/fake field names — a gate "passing" on invented payloads gives false confidence.
 
 **Cost**
 $0. Bash regex.
