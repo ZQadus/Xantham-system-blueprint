@@ -178,6 +178,104 @@ Carveout: any dot-prefixed subdirectory under `memory/.<name>/` (e.g. `memory/.p
 
 ---
 
+## The plugin + skill stack we run
+
+The orchestrator is deliberately a thin operational layer. Most of the heavy lifting — design, animation, mobile, deploy, docs, research — is delegated to installed **skills** and **plugins** rather than hand-rolled. The operating principle is skill/plugin-first: before executing any task, check whether an installed skill or plugin already does it better, and route to it. That matching is the orchestrator's core job. Hand-rolling what a skill does better is the most common way to waste a session.
+
+This section lists the marketplaces and plugins this build leans on. Everything here is generic and optional — install only what your work needs. None of it carries personal config; the commands below are the public install lines.
+
+### How install works
+
+Plugins are distributed through **marketplaces** (a git repo or registry of plugins). You add a marketplace once, then install plugins from it:
+
+```bash
+# Add a marketplace (once)
+claude plugin marketplace add <owner/repo>
+
+# Install a plugin from any added marketplace
+claude plugin install <plugin>@<marketplace>
+
+# List what's installed / available
+claude plugin list
+```
+
+Run these from a normal terminal via the `claude plugin` CLI, **not** the in-session `/plugin` slash command — slash commands that touch the plugin/MCP layer restart the Telegram MCP mid-session and drop in-flight inbound (see the v31.3 changelog note). The CLI path does not traverse that restart.
+
+### Marketplaces we add
+
+| Marketplace | Add command (`claude plugin marketplace add ...`) | What it brings |
+|---|---|---|
+| superpowers | `obra/superpowers` | Brainstorming, planning, TDD, systematic debugging, git worktrees, parallel-agent dispatch |
+| document-skills | `anthropics/skills` | docx / pptx / xlsx / pdf authoring, frontend-design, skill-creator, brand + theme tooling |
+| vercel | `vercel/plugins` | Deploy, env, Next.js, shadcn, functions, firewall, AI SDK — the full Vercel surface |
+| expo | `expo/plugins` | Native UI, EAS build / update / deploy, native modules, Tailwind/NativeWind setup |
+| core-3d-animation | `community/core-3d-animation` | GSAP + ScrollTrigger, Three.js, React Three Fiber, Babylon.js, Motion |
+| animation-components | `community/animation-components` | Magic UI + React Bits libraries, Anime.js, Lottie, React Spring, scroll-reveal |
+| ui-ux-pro-max | `community/ui-ux-pro-max` | 50+ styles, 161 palettes, 57 font pairings, design review/build for web + mobile |
+| impeccable | `community/impeccable` | Design / redesign / audit / polish for interfaces, live browser iteration |
+| react-native-best-practices | `software-mansion/rn-skills` | New-Architecture RN performance, Reanimated, gesture, brownfield migration |
+| swiftui-pro | `community/swiftui` | SwiftUI review, Liquid Glass, concurrency, performance audit, view refactor |
+| codex | `community/codex` | OpenAI Codex second-model review / rescue subagent (judgment-based) |
+| caveman | `community/caveman` | Token-compressed communication + commit / review modes for long sessions |
+| watch | `bradautomates/claude-video` | Download + transcribe + frame-extract any video, then answer questions about it |
+| notebooklm | `community/notebooklm` | Full programmatic NotebookLM (create notebooks, sources, podcasts, downloads) |
+| frontend-design | `community/frontend-design` | Distinctive production-grade frontend that avoids generic AI aesthetics |
+
+(Exact marketplace slugs vary by fork; `claude plugin marketplace list` shows what you already have. The point is the *shape*: add the marketplace, then pull the plugins below.)
+
+### Plugins we install, grouped by job
+
+**Orchestration / meta**
+- `superpowers:brainstorming` — `claude plugin install superpowers@superpowers` · explore intent + requirements before any creative or build work.
+- `superpowers:writing-plans` / `superpowers:executing-plans` — turn a spec into a reviewed, step-checkpointed plan.
+- `superpowers:systematic-debugging` — reproduce → hypothesise → instrument → fix → regression-test, instead of guess-fix-pray.
+- `superpowers:using-git-worktrees` + `superpowers:dispatching-parallel-agents` — isolated worktrees and clean fan-out when running multiple agents at once.
+- `superpowers:verification-before-completion` — evidence before any "done / fixed / passing" claim.
+- `codex:rescue` / `code-review` — `claude plugin install codex@codex` · a second-model pass on high-stakes diffs and stuck investigations.
+
+**Design / UI**
+- `ui-ux-pro-max:ui-ux-pro-max` — `claude plugin install ui-ux-pro-max@ui-ux-pro-max` · plan/build/review UI with a large style + palette + font-pairing library.
+- `impeccable:impeccable` — `claude plugin install impeccable@impeccable` · design, redesign, audit, polish, live browser iteration.
+- `frontend-design:frontend-design` — `claude plugin install frontend-design@frontend-design` · distinctive production-grade components.
+- `redesign-skill` / `soft-skill` / `taste-skill` — upgrade an existing UI to premium quality and block cheap AI-default patterns.
+- `document-skills:frontend-design` — `claude plugin install document-skills@document-skills` · the same lens for artifacts, posters, and landing pages.
+
+**Animation / 3D**
+- `core-3d-animation:motion-framer` — `claude plugin install core-3d-animation@core-3d-animation` · React motion components, gestures, layout + exit animations.
+- `core-3d-animation:gsap-scrolltrigger` — scroll-driven timelines, pinning, scrubbing, parallax.
+- `core-3d-animation:threejs-webgl` / `core-3d-animation:react-three-fiber` / `core-3d-animation:babylonjs-engine` — real 3D scenes, configurators, immersive web.
+- `animation-components:animated-component-libraries` — `claude plugin install animation-components@animation-components` · Magic UI + React Bits prebuilt animated components.
+- `animation-components:lottie-animations` / `animation-components:animejs` / `animation-components:react-spring-physics` — designer Lottie JSON, SVG morphing, physics-based motion.
+
+**Mobile**
+- `expo:building-native-ui` — `claude plugin install expo@expo` · Expo Router fundamentals, styling, navigation, native tabs (default stack for new mobile apps).
+- `expo:expo-deployment` / `expo:eas-update-insights` — ship to the stores, watch OTA rollout health.
+- `expo:expo-module` / `expo:expo-tailwind-setup` / `expo:use-dom` — native modules, NativeWind, web-in-webview migration.
+- `react-native-best-practices:react-native-best-practices` — `claude plugin install react-native-best-practices@react-native-best-practices` · New-Architecture performance, Reanimated, gesture, FlashList.
+- `swiftui-pro:swiftui-pro` + `swiftui-liquid-glass` — `claude plugin install swiftui-pro@swiftui` · native iOS review, Liquid Glass, concurrency.
+
+**Build / deploy**
+- `vercel:deploy` / `vercel:deployments-cicd` — `claude plugin install vercel@vercel` · preview + production deploys, promote, rollback, inspect.
+- `vercel:env-vars` / `vercel:nextjs` / `vercel:shadcn` / `vercel:vercel-functions` — env management, App Router, shadcn, serverless/edge functions.
+- `vercel:vercel-firewall` / `vercel:auth` — WAF + rate limiting, and Clerk/Auth0 auth wiring.
+
+**Docs**
+- `document-skills:docx` / `document-skills:pptx` / `document-skills:xlsx` / `document-skills:pdf` — `claude plugin install document-skills@document-skills` · real Office + PDF authoring and extraction.
+- `document-skills:doc-coauthoring` / `document-skills:internal-comms` — structured doc co-authoring and company-format internal comms.
+- `document-skills:theme-factory` / `document-skills:brand-guidelines` — consistent theming and brand application across artifacts.
+
+**Channel**
+- `watch:watch` — `claude plugin install watch@watch` · watch any video URL or local file, transcribe, and answer questions about its content.
+- `notebooklm` — `claude plugin install notebooklm@notebooklm` · full programmatic NotebookLM, including podcast generation and multi-format downloads, for the second-brain layer.
+
+**Research / media**
+- `deep-research` — fan-out web search + adversarial verification + a cited report.
+- `document-skills:algorithmic-art` / `document-skills:canvas-design` — generative art and static visual design when a deliverable needs original artwork.
+
+> Rule of thumb: if a job has a plugin (deploy → vercel, mobile → expo, brainstorm → superpowers, design → ui-ux-pro-max / impeccable, video → watch), route to it and name the plugin in the dispatch. Only hand-roll when no published skill or plugin fits, and write down the fit-gap when you do.
+
+---
+
 ## Extensions (opt-in - Advanced mode)
 
 Each extension is self-contained. Install only the ones you want. Uninstall by removing its section from your config.
@@ -1002,6 +1100,52 @@ bash scripts/mcp-health-report.sh --window 1h
 bash scripts/notify-telegram-direct.sh test-alert "Reliability stack verify - $(date)"
 ```
 
+### CPU-runaway reaper (recommended on Mac)
+
+A narrow launchd guard that kills **orphaned** runaway `bun` / `node` processes before they cook your machine. Added after a real incident: a marketplace/plugin refresh replaced the official plugins directory and orphaned the old Telegram MCP server, whose working directory was then deleted out from under it. The orphaned `bun` process hot-looped on errors at 99% CPU for 40 minutes, draining battery and heating the Mac, with no parent to clean it up.
+
+The reaper is deliberately the opposite of a broad killer — it can only ever touch garbage:
+
+- **Kill criteria (all must hold, re-confirmed after a 4s settle):** `PPID == 1` (orphaned) **AND** the command is `bun` or `node` **AND** `%CPU > 90` on two samples ~4s apart (sustained, not a spike).
+- **What it cannot touch:** the live `claude` session, MCP servers, background agents, and any real build or dev server — all of those have a **living parent** (`PPID != 1`). A brief spike is filtered by the second sample. This is the key contrast with a broad auto-restart daemon: orphan-only means it physically cannot kill working, parented processes.
+- **Lives OUTSIDE `~/Documents` on purpose.** macOS TCC blocks launchd-spawned bash from running scripts under `~/Documents/`, so the reaper script sits at `~/.claude/{{orchestrator_lower}}-cpu-reaper.sh` (bash-3.2 safe — no `mapfile`).
+- **Schedule:** `~/Library/LaunchAgents/com.{{orchestrator_lower}}.cpu-reaper.plist`, `StartInterval` 60s, `RunAtLoad`. Load via `launchctl bootstrap gui/$(id -u) <plist>`.
+- **Logging:** every kill (and only kills) is appended to `~/.claude/{{orchestrator_lower}}-cpu-reaper.log`. Read-only otherwise; always exits 0.
+
+```bash
+# Install (Mac)
+# 1. Drop the reaper script outside ~/Documents (template in xantham-templates-v31.md)
+#    ~/.claude/{{orchestrator_lower}}-cpu-reaper.sh
+chmod +x ~/.claude/{{orchestrator_lower}}-cpu-reaper.sh
+
+# 2. Load the launchd agent
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.{{orchestrator_lower}}.cpu-reaper.plist
+
+# 3. Verify it's loaded
+launchctl list | grep cpu-reaper
+
+# Uninstall
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.{{orchestrator_lower}}.cpu-reaper.plist
+```
+
+> Why orphan-only matters: a previous broad auto-restart daemon was unloaded after it killed live agent work three times in one session. The reaper exists precisely so heat/runaway protection can't repeat that mistake — it never reaches a process that has a living parent.
+
+### Don't kill a working agent on transcript-idle alone
+
+A behavioural rule, not a script, but it belongs with the reliability stack because it prevents the most expensive false-positive in agent supervision.
+
+**A background agent running a single long tool call — a re-scrape, a full build, a long test or deploy — writes NOTHING to its transcript/output file until that call returns.** So an output file that has been idle for an hour or two can be a perfectly healthy agent deep in one long operation, not a hung one.
+
+Never declare an agent stalled or kill it based on transcript-idle time alone. Before killing or declaring an agent dead, check **real** progress:
+
+1. **Commits landing?** `git log` on its branch — new commits mean alive and productive.
+2. **Artifacts appearing?** result JSONs, build outputs, exports with recent mtimes.
+3. **Process activity?** `ps` for its child processes (node / chromium / scrape) burning CPU or recently active.
+4. **Side-effects advancing?** row counts climbing, files growing.
+5. **Just ask it** — send a status request; a live agent replies.
+
+Only kill if multiple of these show genuinely no movement AND there is no live worker process. When in doubt, let a cost-capped agent finish rather than killing mid-operation. (This is the same principle the CPU reaper encodes structurally: don't kill working processes.)
+
 ---
 
 ## Supervisor wrapper — zero-touch session recovery (recommended, all modes)
@@ -1014,6 +1158,7 @@ Pairs with the MCP observability stack above. Without the supervisor, the auto-r
 - **Crash-loop protection.** 3 fast-failures in 60 seconds pauses the loop for 60s; 5 fast-failures total exits the supervisor with code 7. Prevents a tight crash loop from burning CPU.
 - **Emergency disable.** `touch ~/.{{orchestrator_lower}}-no-supervisor` — the loop checks for this marker each iteration and exits cleanly. Remove the file to re-enable.
 - **First-launch vs re-exec distinction.** First launch passes through the user's original args (so `{{orchestrator_lower}}` starts fresh and `{{orchestrator_lower}} --resume` does what it says). Subsequent re-execs after a non-clean exit force `--resume` so the new claude lands back in the killed session. Without this distinction, every fresh launch would silently resume the wrong session.
+- **Default flags, and the `--remote-control` lesson.** The supervisor's default launch flags live in an overridable `EXTRA_FLAGS` env var (default: skip-permissions + always-latest model). One flag was deliberately **removed**: `--remote-control`, which had been added to keep Claude Code Remote Control on for every session so you could attach from the web or mobile app. It was dropped because the persistent remote-control connection it holds open per session is a sustained battery and heat drain on the host. The important gotcha: setting `remoteControlAtStartup: false` in `settings.json` was **not** enough to disable it, because the explicit CLI flag on the launch line overrides the settings key. The CLI flag wins, so the fix was to remove the flag from the supervisor defaults, not to flip the setting. Re-enable per-session when you actually need it via the supervisor's `EXTRA_FLAGS` override (`EXTRA_FLAGS="... --remote-control --remote-control-session-name-prefix <name>"`; rename the env var to your own orchestrator prefix for your fork). The name-prefix flag immediately after guarantees the optional `[name]` value is never accidentally satisfied by a stray prompt token on the launch line.
 
 ### Install (Mac and Linux)
 
@@ -1113,6 +1258,13 @@ bash scripts/session-start-persistence-inject.sh | head -20
 
 
 ## Changelog
+
+### v31.5 - plugin roster + cpu-reaper + supervisor remote-control removal + don't-kill-on-idle (2026-06-06)
+
+- **Plugin + skill stack documented.** New section "The plugin + skill stack we run" (before Extensions) makes the skill/plugin-first operating principle concrete: the marketplaces this build adds and the plugins it installs, grouped by job (orchestration, design, animation/3D, mobile, build/deploy, docs, channel, research/media), each with its public `claude plugin install` line. Routing to a plugin beats hand-rolling; hand-roll only when nothing fits and the fit-gap is written down.
+- **CPU-runaway reaper (recommended on Mac).** New always-on launchd guard `com.{{orchestrator_lower}}.cpu-reaper` (script at `~/.claude/{{orchestrator_lower}}-cpu-reaper.sh`, outside `~/Documents` for TCC, 60s interval). Kills only **orphaned** (`PPID == 1`) `bun`/`node` processes pinning a core at `>90%` across two samples ~4s apart. Cannot touch the live session, MCP servers, background agents, or any parented build — orphan-only by design, the structural opposite of the broad auto-restart daemon that was unloaded for killing live work. Born from a real overheating incident where a plugin refresh orphaned the old Telegram MCP server and it hot-looped at 99% CPU for 40 minutes.
+- **Supervisor `--remote-control` removed from default flags.** The always-on remote-control connection was a sustained battery/heat drain. Key lesson recorded: `settings.json remoteControlAtStartup:false` does NOT win against an explicit `--remote-control` CLI flag on the launch line — the flag overrides the setting, so the fix is to drop the flag from the supervisor defaults. Re-enable per-session via `EXTRA_FLAGS`.
+- **Don't-kill-on-transcript-idle rule.** A background agent running one long tool call writes nothing to its transcript until that call returns, so transcript-idle time is not a death signal. Codified the real-progress checklist (commits / artifacts / process activity / side-effects / just-ask-it) to run before declaring any agent stalled. Recorded after a working agent was killed 71% through a long re-scrape on transcript-idle alone.
 
 ### v31 - memory and meta-cognition cut
 
