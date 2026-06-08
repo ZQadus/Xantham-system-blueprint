@@ -12,7 +12,7 @@ How Xantham stacks up against the most-cited public agent frameworks and orchest
 | Parallel agents | Yes, 2-3 default, up to 16 in Aggressive mode on Max 20x, in isolated worktrees | Yes, Managed Agents primitive | Yes, droid swarms | Yes, group chat patterns | Yes, hierarchical or parallel crews | Yes, supervisor / fork-at-checkpoint | No, sequential council |
 | Safety hooks | PreToolUse gate, hard-block / approval / audit buckets | Inherits Claude Code permissions | Inherits Claude Code permissions | None native | None native | None native | None |
 | Telegram interface | First-class, default install | No | No | DIY | DIY | DIY | No |
-| Observability layer | Per-tool-call JSONL audit log, telegram-tail digest | Cowork plugin telemetry | Built-in dashboard (paid) | DIY | Native event stream + telemetry | LangSmith (paid SaaS) | None |
+| Observability layer | Per-tool-call JSONL audit log, telegram-tail digest | Inherits Claude Code logs, no dedicated layer | Built-in dashboard (paid) | DIY | Native event stream + telemetry | LangSmith (paid SaaS) | None |
 | Self-installing blueprint | Yes, single paste runs full wizard | No, manual `/plugin install` per agent | No | No | No | No | No |
 | License | MIT | Apache-2.0 | Proprietary (free trial month) | MIT | MIT | MIT | Not declared in repo |
 | Primary use case | Solo operator running multiple projects from a phone | Vertical finance reference impl (Anthropic) | Commercial coding agent for engineering teams | General multi-agent research, .NET / Python apps | Role-playing autonomous crews for ops | Production agent graphs with state machines | Side-by-side multi-LLM evaluation |

@@ -220,6 +220,7 @@ Run these from a normal terminal via the `claude plugin` CLI, **not** the in-ses
 | watch | `bradautomates/claude-video` | Download + transcribe + frame-extract any video, then answer questions about it |
 | notebooklm | `community/notebooklm` | Full programmatic NotebookLM (create notebooks, sources, podcasts, downloads) |
 | frontend-design | `community/frontend-design` | Distinctive production-grade frontend that avoids generic AI aesthetics |
+| compound-engineering | `EveryInc/compound-engineering-plugin` | Structured plan → review → work → codify methodology (org-maintained), maps onto the orchestration loop |
 
 (Exact marketplace slugs vary by fork; `claude plugin marketplace list` shows what you already have. The point is the *shape*: add the marketplace, then pull the plugins below.)
 
@@ -232,6 +233,7 @@ Run these from a normal terminal via the `claude plugin` CLI, **not** the in-ses
 - `superpowers:using-git-worktrees` + `superpowers:dispatching-parallel-agents` — isolated worktrees and clean fan-out when running multiple agents at once.
 - `superpowers:verification-before-completion` — evidence before any "done / fixed / passing" claim.
 - `codex:rescue` / `code-review` — `claude plugin install codex@codex` · a second-model pass on high-stakes diffs and stuck investigations.
+- `compound-engineering` — `claude plugin install compound-engineering@compound-engineering-plugin` · structured plan → review → work → codify loops that slot straight onto the orchestration cycle.
 
 **Design / UI**
 - `ui-ux-pro-max:ui-ux-pro-max` — `claude plugin install ui-ux-pro-max@ui-ux-pro-max` · plan/build/review UI with a large style + palette + font-pairing library.
@@ -258,6 +260,9 @@ Run these from a normal terminal via the `claude plugin` CLI, **not** the in-ses
 - `vercel:deploy` / `vercel:deployments-cicd` — `claude plugin install vercel@vercel` · preview + production deploys, promote, rollback, inspect.
 - `vercel:env-vars` / `vercel:nextjs` / `vercel:shadcn` / `vercel:vercel-functions` — env management, App Router, shadcn, serverless/edge functions.
 - `vercel:vercel-firewall` / `vercel:auth` — WAF + rate limiting, and Clerk/Auth0 auth wiring.
+
+**Code intelligence**
+- `codegraph` — `npx @colbymchenry/codegraph install` (an MCP server, not a marketplace plugin) · builds a local call-graph + impact map of the codebase, so agents answer "what calls this" and "what breaks if I change it" without re-scanning every file. Runs fully on-device, no cloud, no API key.
 
 **Docs**
 - `document-skills:docx` / `document-skills:pptx` / `document-skills:xlsx` / `document-skills:pdf` — `claude plugin install document-skills@document-skills` · real Office + PDF authoring and extraction.

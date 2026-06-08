@@ -91,7 +91,7 @@ graph TD
 
 A typical end-to-end turn:
 
-1. **Operator types on phone.** "Ship NearbyMe."
+1. **Operator types on phone.** "Ship Acme."
 2. **Telegram routes** the message via its servers to your bot, which the local Telegram MCP plugin receives.
 3. **Claude Code session reads** the inbound message as a tool result (the plugin tags it with `chat_id`, `message_id`, `user`, `ts`).
 4. **Orchestrator parses** the command. For `ship <project>`, it loads the orchestrator-named AI-SEO skill (auto-fires on ship; named `<orchestrator_lower>-ai-seo` after your install wizard runs), checks the project's HANDOFF.md, and decides whether to dispatch a specialist or run inline.

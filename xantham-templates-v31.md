@@ -4510,7 +4510,7 @@ You can override the default per file by editing the frontmatter. A particularly
 Run it weekly, or when the greeting digest flags stale items. The output looks like:
 
 ```
-STALE: memory/project_nearbyme.md (verified 2026-04-12, TTL 2 days, 29 days overdue)
+STALE: memory/project_acme.md (verified 2026-04-12, TTL 2 days, 29 days overdue)
 STALE: memory/reference_supabase_config.md (verified 2025-11-05, TTL 180 days, 7 days overdue)
 ```
 
@@ -7930,8 +7930,8 @@ printf '%s\t%s\t%s\n' "$NOW" "$INPUT_KEY" "$output_b64" >> "$CACHE_FILE"
 # Entity types:
 #   1. URL host (from any http/https link)
 #   2. Project name (matched against docs/projects.md folder mapping, including
-#      hyphenated prefix aliases. e.g. "wahb-worker" matches the folder
-#      wahb-worker-minutes-cadence-repmapping)
+#      hyphenated prefix aliases. e.g. "acme-api" matches the folder
+#      acme-api-billing-service-v2)
 #   3. Named person (matched against the people block in
 #      memory/profile_{{user_name_lower}}.md)
 #   4. File path (anything matching a `like/this.ext` pattern)
@@ -7989,8 +7989,8 @@ printf '%s\n' "$input_no_urls" \
 # Each folder yields:
 #   - the folder basename (last `/` segment)
 #   - hyphenated prefixes of that basename. e.g.
-#     wahb-worker-minutes-cadence-repmapping -> wahb-worker, wahb-worker-minutes,
-#     wahb-worker-minutes-cadence, wahb-worker-minutes-cadence-repmapping
+#     acme-api-billing-service-v2 -> acme-api, acme-api-billing,
+#     acme-api-billing-service, acme-api-billing-service-v2
 # Match each alias case-insensitively at word boundaries against the input;
 # emit the LONGEST matching alias for each folder so memory-search gets the
 # most-specific token.
