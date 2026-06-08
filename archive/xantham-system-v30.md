@@ -1163,7 +1163,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 
 ## What is NOT in git (must be backed up separately)
 
-- `data/runtime/` (Telegram bot token, persona state, lock files) - gitignored, contains secrets
+- `data/runtime/` (Telegram bot token, session state, lock files) - gitignored, contains secrets
 - `data/vector-memory.db` (sqlite-vec semantic index) - gitignored, regenerable but takes minutes
 - `~/.claude/` (Claude Code CLI auth, hook installs at user scope) - never in any repo
 - Shell profile (`~/.zshrc` / `~/.bashrc` / PowerShell `$PROFILE`) - terminal aliases live here
@@ -1172,7 +1172,7 @@ If you push regularly, losing your Mac means cloning the repo + reinstalling dep
 ## Recommended backup approach
 
 1. **Push the repo to GitHub on every meaningful change** (the post-commit hook + your sync rhythm handle this if you stay disciplined)
-2. **Each Sunday:** ask your agent: "back up my runtime folder." It zips `data/runtime/` (which holds your Telegram bot token, persona state, lock files) and drops a date-stamped copy at `~/Documents/<your-orchestrator>-backups/`. To restore, ask: "restore runtime from last Sunday's backup." If you'd rather hold the backup off-machine, copy the dated zip to an encrypted external drive or a password manager attachment.
+2. **Each Sunday:** ask your agent: "back up my runtime folder." It zips `data/runtime/` (which holds your Telegram bot token, session state, lock files) and drops a date-stamped copy at `~/Documents/<your-orchestrator>-backups/`. To restore, ask: "restore runtime from last Sunday's backup." If you'd rather hold the backup off-machine, copy the dated zip to an encrypted external drive or a password manager attachment.
 3. **Document your shell aliases** in this file so you can recreate them on a fresh machine.
 
 ## Restoring on a new Mac
@@ -1507,7 +1507,7 @@ Every box matters. The Windows alias quirk is the most common silently-broken it
 
 ## Do not delete `data/runtime/`
 
-That directory has your Telegram bot token, persona state, and lock files. Losing it forces you to re-pair everything. Back it up weekly per BACKUP-AND-RECOVERY.md.
+That directory has your Telegram bot token, session state, and lock files. Losing it forces you to re-pair everything. Back it up weekly per BACKUP-AND-RECOVERY.md.
 
 ## Do not run `git push --force` on main
 
@@ -1545,7 +1545,7 @@ The agent saves memory automatically. You usually don't need to think about it. 
 ## What is gitignored (locally only)
 
 - `data/vector-memory.db` (regenerable from `bash scripts/embed-memories.sh`)
-- `data/runtime/*` (secrets, persona state, lock files)
+- `data/runtime/*` (secrets, session state, lock files)
 - `data/audit/*.jsonl` (you can archive these via `bash scripts/audit-archive.sh 30` to push older ones into git)
 - `data/youtube-watch-queue.jsonl` and `data/youtube-playlists.jsonl` (local ops state)
 - `infra/*/.env` (API keys)
@@ -4306,7 +4306,7 @@ echo "=== $passed/$total checks passed ==="
 
 ## Template: scripts/verify-runtime-perms.sh
 
-`data/runtime/*` files hold secrets (Telegram bot token, persona state) and per-turn contracts. They MUST be mode 0600 - world-readable runtime files mean any local user can lift the bot token. This script audits them.
+`data/runtime/*` files hold secrets (Telegram bot token, session state) and per-turn contracts. They MUST be mode 0600 - world-readable runtime files mean any local user can lift the bot token. This script audits them.
 
 ```bash
 #!/usr/bin/env bash
@@ -6081,7 +6081,7 @@ exit $DRIFTED
 
 ## Template: .claude/hooks/voice-lint.sh
 
-`PreToolUse hook for the Telegram reply tool. Reads the draft reply text and applies hardcoded universal voice rules. Blocks (exit 2) on hard violations, warns on soft. De-personalised from the maintainer's persona-specific lint hook — persona-specific rules (heart-emoji enforcement, persona pet-names, persona register leak detection, lowercase-opening) were dropped because they only make sense when a single named persona is in play. Rules retained are universally applicable across any orchestrator name and any user.`
+`PreToolUse hook for the Telegram reply tool. Reads the draft reply text and applies hardcoded universal voice rules. Blocks (exit 2) on hard violations, warns on soft. De-personalised from the maintainer's voice-specific lint hook — voice-specific rules (heart-emoji enforcement, pet-names, register leak detection, lowercase-opening) were dropped because they only make sense when a single named voice is in play. Rules retained are universally applicable across any orchestrator name and any user.`
 
 ```bash
 #!/usr/bin/env bash
@@ -6099,15 +6099,15 @@ exit $DRIFTED
 #   "WARN: <rule-name>. Snippet: ..."
 #
 # DE-PERSONALISATION NOTE
-# This hook was de-personalised from the maintainer's persona-specific lint.
-# DROPPED rules (persona-specific, do not generalise):
+# This hook was de-personalised from the maintainer's voice-specific lint.
+# DROPPED rules (voice-specific, do not generalise):
 #   - missing-signature           (required a specific trailing emoji on every reply)
 #   - thing-term              (banned specific intimate-register noun forms)
-#   - banned-self-descriptor  (banned a fixed list of persona self-state words)
-#   - persona-emoji-leak      (cross-persona emoji bleed detection)
-#   - persona-lowercase-open  (forced uppercase opening on a specific persona)
-#   - persona-pet-name        (banned persona-affectionate pet names)
-#   - persona-register-leak   (banned vocabulary specific to one persona register)
+#   - banned-self-descriptor  (banned a fixed list of self-state words)
+#   - voice-emoji-leak      (cross-voice emoji bleed detection)
+#   - voice-lowercase-open  (forced uppercase opening on a specific voice)
+#   - voice-pet-name        (banned affectionate pet names)
+#   - voice-register-leak   (banned vocabulary specific to one voice register)
 #   - wellness-poke           (warned on specific intimate-care phrasings)
 # RETAINED rules (universal, every orchestrator wants these):
 #   - em-dash             (block U+2014 — AI tell)
@@ -7669,7 +7669,7 @@ Create topic folders as needed. Each folder contains numbered chapters:
 
 > Skills auto-load when the orchestrator's task description matches the skill's frontmatter `description` field. Do NOT hand-edit the descriptions — the auto-load matcher reads them verbatim.
 
-> **What's included:** seven core skills (sync, maintenance, orchestration, brain, safety, observability, blueprint-updates) plus one optional (youtube-queue) gated on `media_queue=yes`. Persona-specific skills from the maintainer's tree are intentionally excluded — voice/tone discipline lives in feedback-memory seeds (see "Starter Memory Seeds" below) so users can shape their own orchestrator voice without inheriting someone else's.
+> **What's included:** seven core skills (sync, maintenance, orchestration, brain, safety, observability, blueprint-updates) plus one optional (youtube-queue) gated on `media_queue=yes`. Voice-specific skills from the maintainer's tree are intentionally excluded — voice/tone discipline lives in feedback-memory seeds (see "Starter Memory Seeds" below) so users can shape their own orchestrator voice without inheriting someone else's.
 
 ---
 

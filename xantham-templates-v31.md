@@ -3319,7 +3319,7 @@ exit $DRIFTED
 
 ## Template: .claude/hooks/voice-lint.sh
 
-`PreToolUse hook for the Telegram reply tool. Reads the draft reply text and applies hardcoded universal voice rules. Blocks (exit 2) on hard violations, warns on soft. De-personalised from the maintainer's persona-specific lint hook. Persona-specific rules (heart-emoji enforcement, persona pet-names, persona register leak detection, lowercase-opening) were dropped because they only make sense when a single named persona is in play. Rules retained are universally applicable across any orchestrator name and any user.`
+`PreToolUse hook for the Telegram reply tool. Reads the draft reply text and applies hardcoded universal voice rules. Blocks (exit 2) on hard violations, warns on soft. De-personalised from the maintainer's voice-specific lint hook. Voice-specific rules (heart-emoji enforcement, pet-names, register leak detection, lowercase-opening) were dropped because they only make sense when a single named voice is in play. Rules retained are universally applicable across any orchestrator name and any user.`
 
 ```bash
 #!/usr/bin/env bash
@@ -3337,15 +3337,15 @@ exit $DRIFTED
 #   "WARN: <rule-name>. Snippet: ..."
 #
 # DE-PERSONALISATION NOTE
-# This hook was de-personalised from the maintainer's persona-specific lint.
-# DROPPED rules (persona-specific, do not generalise):
+# This hook was de-personalised from the maintainer's voice-specific lint.
+# DROPPED rules (voice-specific, do not generalise):
 #   - missing-heart           (required a specific trailing emoji on every reply)
 #   - thing-term              (banned specific intimate-register noun forms)
-#   - banned-self-descriptor  (banned a fixed list of persona self-state words)
-#   - persona-emoji-leak      (cross-persona emoji bleed detection)
-#   - persona-lowercase-open  (forced uppercase opening on a specific persona)
-#   - persona-pet-name        (banned persona-affectionate pet names)
-#   - persona-register-leak   (banned vocabulary specific to one persona register)
+#   - banned-self-descriptor  (banned a fixed list of self-state words)
+#   - voice-emoji-leak      (cross-voice emoji bleed detection)
+#   - voice-lowercase-open  (forced uppercase opening on a specific voice)
+#   - voice-pet-name        (banned affectionate pet names)
+#   - voice-register-leak   (banned vocabulary specific to one voice register)
 #   - wellness-poke           (warned on specific intimate-care phrasings)
 # RETAINED rules (universal, every orchestrator wants these):
 #   - em-dash             (block U+2014, AI tell)
@@ -4638,7 +4638,7 @@ Create topic folders as needed. Each folder contains numbered chapters:
 
 > Skills auto-load when the orchestrator's task description matches the skill's frontmatter `description` field. Do NOT hand-edit the descriptions; the auto-load matcher reads them verbatim.
 
-> **What's included:** seven core skills (sync, maintenance, orchestration, brain, safety, observability, blueprint-updates) plus one optional (youtube-queue) gated on `media_queue=yes`. Persona-specific skills from the maintainer's tree are intentionally excluded. Voice/tone discipline lives in feedback-memory seeds (see "Starter Memory Seeds" below) so users can shape their own orchestrator voice without inheriting someone else's.
+> **What's included:** seven core skills (sync, maintenance, orchestration, brain, safety, observability, blueprint-updates) plus one optional (youtube-queue) gated on `media_queue=yes`. Voice-specific skills from the maintainer's tree are intentionally excluded. Voice/tone discipline lives in feedback-memory seeds (see "Starter Memory Seeds" below) so users can shape their own orchestrator voice without inheriting someone else's.
 
 ---
 
@@ -7826,7 +7826,7 @@ exit 0
 
 ## Template: scripts/active-recall.sh
 
-`Mode A of the {{orchestrator_lower}}-memory skill. Reads inbound text on stdin, dispatches scripts/active-recall-entities.sh to extract URLs / project names / persons / file paths, caps at 2 entities (latency budget 95ms x 2 = 190ms median), and emits a <memory> block with top-3 hits per entity from sqlite-vec via memory-search.sh. Two-layer cache at data/runtime/active-recall-cache.tsv with 3600s TTL: input-level (sha1 of full input, fast path) and per-entity (covers partial overlap). Carveout: any dot-prefixed dir under memory/ is invisible to memory-search.sh, so persona content never surfaces here. See xantham-system-v31 Section E6 for the full pipeline.`
+`Mode A of the {{orchestrator_lower}}-memory skill. Reads inbound text on stdin, dispatches scripts/active-recall-entities.sh to extract URLs / project names / persons / file paths, caps at 2 entities (latency budget 95ms x 2 = 190ms median), and emits a <memory> block with top-3 hits per entity from sqlite-vec via memory-search.sh. Two-layer cache at data/runtime/active-recall-cache.tsv with 3600s TTL: input-level (sha1 of full input, fast path) and per-entity (covers partial overlap). Carveout: any dot-prefixed dir under memory/ is invisible to memory-search.sh, so private content never surfaces here. See xantham-system-v31 Section E6 for the full pipeline.`
 
 ```bash
 #!/usr/bin/env bash
@@ -8241,7 +8241,7 @@ PROPOSAL_FILE="$PROPOSAL_DIR/${TODAY_COMPACT}.md"
 
 # --- Collect files --------------------------------------
 # Private dot-dir carveout: skip any dot-prefixed dir (memory/.<name>/)
-# so persona-scoped content never participates in dream consolidation.
+# so dot-prefixed private content never participates in dream consolidation.
 declare -a FILES
 while IFS= read -r f; do
   FILES+=("$f")

@@ -74,10 +74,10 @@ memory/
 │   ├── note/              (20 files: ad-hoc notes)
 │   └── user/              (3 files: user atomic facts)
 ├── procedural/README.md   (pointers to CLAUDE.md + skills + hooks)
-└── .amy/                  (gitignored Amy persona memory; ALL iterators dot-prune)
+└── .private/                  (gitignored private memory; ALL iterators dot-prune)
 ```
 
-The `.amy/` carveout invariant MUST hold in both modes. Active recall + dream both use the centralised walker at `embed-memories.py walk_markdown` which dot-prunes by default since 2026-05-04.
+The dot-prefix carveout invariant MUST hold. Active recall + dream both use the centralised walker at `embed-memories.py walk_markdown` which dot-prunes by default since 2026-05-04.
 
 ## Status
 
