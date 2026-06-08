@@ -3828,7 +3828,7 @@ This section documents how the system works after setup. Claude reads it to unde
 
 One Claude Code session. One CLAUDE.md. That is the system.
 
-Claude Code starts in the project root and reads CLAUDE.md. The file declares who the orchestrator is, the agent roster, the routing table, the core loop, the safety rules, and the active command list. Agents are not separate processes. They are personas inside the same session, sharing the same context window and the same model. Routing to the engineer agent is a voice shift, not a network call.
+Claude Code starts in the project root and reads CLAUDE.md. The file declares who the orchestrator is, the agent roster, the routing table, the core loop, the safety rules, and the active command list. Agents are not separate processes. They are agent voices inside the same session, sharing the same context window and the same model. Routing to the engineer agent is a voice shift, not a network call.
 
 **Components.** CLAUDE.md (one file, ~150 lines, loaded every turn). Memory directory `memory/` (flat markdown, one file per fact, indexed by `MEMORY.md`). SQLite at `data/audit.db` (logs, history, optional sqlite-vec embeddings). A handful of bash hooks under `.claude/hooks/`. Optionally a Telegram bot polling for inbound messages.
 
