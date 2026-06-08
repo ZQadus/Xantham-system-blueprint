@@ -25,7 +25,7 @@ DO NOT invoke active recall for: greetings (`hi`, `hey`, `gm`, `sup`), one-word 
 When triggered, the orchestrator should:
 
 1. Read inbound text (from `data/runtime/inbound.txt` if Stop hook captured it, otherwise from the latest user message).
-2. Run `bash scripts/active-recall-entities.sh` (Task 16) — emits entities one per line. Person names match the watch-list in `memory/profile/*.md` (currently nigel, danielle, hannah, olena, rhys, hosa).
+2. Run `bash scripts/active-recall-entities.sh` (Task 16) — emits entities one per line. Person names match the watch-list in `memory/profile/*.md` (e.g. alex, sam, jordan, casey).
 3. For each entity (cap 2), run `bash scripts/memory-search.sh "<entity>"` and dedup hits. Person matches surface the corresponding `memory/profile/<person>.md` first because file basename strongly signals.
 4. Inject the formatted `<memory>` block into Xantham's context BEFORE generating the reply.
 

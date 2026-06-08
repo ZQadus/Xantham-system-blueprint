@@ -75,6 +75,21 @@ The system is general-purpose. Anything Claude Code can do, your specialist crew
 
 The bigger principle: anything you'd type into a Claude conversation, you can route through this system, with the difference that it remembers across sessions, runs specialist agents in parallel, and ships safely.
 
+## Plugins it ships with
+
+The system comes preloaded with a curated stack of Claude Code plugins, and they're a big part of why the output holds up. You don't configure any of them. The orchestrator routes each task to whichever plugin fits, so a design job goes to a design plugin, a mobile build goes to a mobile plugin, and you get specialist-grade work without touching settings.
+
+- **Design and UI**: impeccable, ui-ux-pro-max, frontend-design.
+- **Animation and 3D**: animation-components, core-3d-animation, swiftui-animation.
+- **Mobile (iOS, React Native, Expo)**: expo, react-native-best-practices, the Software Mansion RN skills, swiftui-pro, swift-lsp.
+- **Engineering discipline**: superpowers, the andrej-karpathy coding guidelines, codex (a second model for independent review), compound-engineering (structured plan, review, work loops).
+- **Code intelligence**: codegraph (a local call-graph and impact map of your codebase, so agents answer "what calls this" and "what breaks if I change it" without re-reading every file, runs fully on-device, no cloud).
+- **Deploy and infra**: vercel.
+- **Docs and content**: document-skills.
+- **Ops and interface**: telegram (drive the whole thing from your phone), watch (video understanding), caveman (token compression).
+
+The stack grows over time as new notable tools ship, and adding a plugin is one command.
+
 ## New to agentic AI? Read this first
 
 If you've used ChatGPT or the Claude.ai web chat, you already know what an AI conversation looks like. You type, it answers. Useful, but you have to drive every step.
@@ -103,11 +118,23 @@ You talk to the orchestrator. It routes work to the right specialist or several 
 2. **2-3 specialists in parallel by default, up to 16 in Aggressive mode on Max 20x.** The Balanced default (recommended for most installers) fans out 2-3 specialists when work decomposes cleanly. Aggressive mode runs 5-16 in their own git worktrees on big sprints, gated by the 5-hour Max 20x rolling rate limit. A 4-hour solo build collapses to roughly 45 minutes of wall-clock time when the work splits cleanly.
 3. **Hard-blocked destructive commands.** The safety gate refuses force-push to main, `rm -rf` against your home directory, and `DROP TABLE` against a database, regardless of approval. Approval-gated commands (database migrations and similar) still pause for your call. The hard-blocks are not configurable on purpose.
 
+### It writes its own skills
+
+Here's the part that makes the system worth more the longer you run it. It doesn't just use the skills it ships with. It writes new ones.
+
+A hook watches how you actually work. When the same multi-step pattern shows up again and again, the system drafts a brand-new skill from that pattern and proposes it to you on Telegram. You approve it with one command and it becomes permanent. So a workflow you repeated five times by hand becomes a single routine the orchestrator runs from then on. The system gets sharper the more you use it instead of sitting still.
+
+Skill-first is the default everywhere. Before doing any task, the orchestrator checks whether an existing skill or plugin already does it better, and routes there rather than hand-rolling the work. That check is its core job, not an afterthought.
+
+The specialist crew compounds the same way. Each agent carries its own skills and its own memory, so the engineer remembers your codebase conventions, the writer remembers your voice, and that expertise stacks up session after session.
+
+This is the durable advantage. Most setups give you a fixed bundle of prompts that's as good on day one as it'll ever be. This one manufactures its own capabilities and improves itself. The version you run in three months knows things the version you installed today never did.
+
 ### One thing worth knowing before you install
 
 The shift from "AI assistant" framing to "AI operation you run as the operator" is small in words and large in practice. The orchestrator is the thing you talk to. It routes work to specialists, holds context across sessions, and pings you when something needs your call.
 
-In practice this looks different from a regular chat after about a week. Long prompts stop. Short directions take over: "fix the bug on the login screen of NearbyMe", "draft a Reddit post for r/ClaudeAI about the wizard install", "summarise yesterday's research on agent orchestration". The orchestrator already knows the codebase, the project, your voice. It dispatches a specialist, the specialist works in background, you get a result on your phone.
+In practice this looks different from a regular chat after about a week. Long prompts stop. Short directions take over: "fix the bug on the login screen of Acme", "draft a Reddit post for r/ClaudeAI about the wizard install", "summarise yesterday's research on agent orchestration". The orchestrator already knows the codebase, the project, your voice. It dispatches a specialist, the specialist works in background, you get a result on your phone.
 
 ## Before you start
 
@@ -263,7 +290,7 @@ Full reference + commit-pinning options at [`docker/README.md`](docker/README.md
 
 ## How to use it
 
-Day-to-day, you drive Xantham from Telegram. Plain English works for most things ("what's the status on project X", "ship the portfolio", "fix the bug in NearbyMe", "draft a Reddit post for r/ClaudeAI"). The orchestrator routes to the right specialist and reports back.
+Day-to-day, you drive Xantham from Telegram. Plain English works for most things ("what's the status on project X", "ship the portfolio", "fix the bug in Acme", "draft a Reddit post for r/ClaudeAI"). The orchestrator routes to the right specialist and reports back.
 
 A handful of explicit commands are worth learning early. All of them are typed directly into Telegram.
 
@@ -343,13 +370,13 @@ Other greetings that fire the same protocol: `hey`, `hello`, `morning`, `yo`, `g
 
 If you want to skip the digest and jump straight to a specific project, just say `status <project>` instead. Same picking-back-up data, scoped to one project.
 
-If something is on fire and you need to skip everything, lead with the actual request: "deploy the portfolio" or "fix the bug in NearbyMe" works. The orchestrator will recognise it as a task, not a greeting, and route immediately.
+If something is on fire and you need to skip everything, lead with the actual request: "deploy the portfolio" or "fix the bug in Acme" works. The orchestrator will recognise it as a task, not a greeting, and route immediately.
 
 ### Multi-project setup
 
 The orchestrator lives in its own directory (e.g. `~/Documents/Xantham`). Projects can live anywhere on your machine. The orchestrator learns where each one lives from `docs/projects.md` (registered automatically the first time you create a new project, or by running `bash scripts/register-project.sh <folder> <description> [stack]`).
 
-Working on multiple things in parallel is the default. Telling Telegram "work on NearbyMe and the portfolio in parallel" dispatches two agents in their own working trees so they don't trample each other. The orchestrator coordinates the merge back.
+Working on multiple things in parallel is the default. Telling Telegram "work on Acme and the portfolio in parallel" dispatches two agents in their own working trees so they don't trample each other. The orchestrator coordinates the merge back.
 
 ### Pattern that works for most operators
 

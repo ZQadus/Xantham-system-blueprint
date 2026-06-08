@@ -134,5 +134,5 @@ Should return the llm.txt content, not a paywall / login redirect.
 
 ## Pilot status (2026-05-10)
 
-- NearbyMe: shipped. All 5 files live in `public/` + JSON-LD wired into `src/app/layout.tsx`.
+- Acme: shipped. All 5 files live in `public/` + JSON-LD wired into `src/app/layout.tsx`.
 - Other projects: audit-only run pending. See `data/research/2026-05-10-ai-seo-audit-across-projects.md`.

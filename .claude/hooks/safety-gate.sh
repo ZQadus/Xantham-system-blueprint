@@ -241,7 +241,7 @@ if [ "$SKIP_DB_CHECKS" = "0" ]; then
     block "MongoDB destructive operation (dropDatabase/drop/deleteMany with empty filter)" "mongo-drop"
   fi
 
-  # Prisma destructive CLI flags (added 2026-05-13 after TixPredict prod data wipe)
+  # Prisma destructive CLI flags (added 2026-05-13 after a Prisma prod data wipe)
   if echo "$COMMAND" | grep -qEi '(prisma|prisma-cli)\s+migrate\s+reset'; then
     block "prisma migrate reset wipes ALL database rows. Run on a non-prod branch or back up first." "prisma-migrate-reset"
   fi
