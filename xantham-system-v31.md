@@ -1442,6 +1442,9 @@ Not documented. Core loop + safety gate + routing table existed from v1.
 ### Per-extension uninstall
 `bash scripts/install-blueprint.sh --remove E3` - uninstall steps for E3, marks it off in the version file.
 
+### Non-interactive auto-apply (for self-updating hosts)
+`bash scripts/install-blueprint.sh --auto` - the NON-INTERACTIVE clean-apply path used by the Xantham auto-sync subsystem (see the "Xantham Auto-Sync subsystem" section in xantham-templates-v31.md). It compares the version-file marker against the version of the blueprint files present in the tree and, on a clean FORWARD upgrade, bumps `blueprint_version:` and appends an `upgraded:` line. It NEVER prompts and NEVER runs an extension installer (newly-shipped advanced-default extensions are surfaced for a manual `--add`). It STOPS with exit 3 (non-destructive, marker untouched) on any ambiguity: no version file, a downgrade/divergence (marker ahead of shipped), or a malformed marker. Idempotent (re-run on the same version = no-op). Audit line written to `data/runtime/xantham-sync.log`. When generating `install-blueprint.sh`, include the `--auto` case so downstream hosts can self-update.
+
 ### Version file format
 `.{{orchestrator_lower}}-blueprint-version` (YAML):
 ```yaml
