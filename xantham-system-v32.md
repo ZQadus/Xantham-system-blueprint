@@ -1001,7 +1001,8 @@ Obsidian does NOT replace anything your orchestrator already does. It is a viewe
 1. **Install:** `brew install --cask obsidian` on Mac, `winget install Obsidian.Obsidian` on Windows, or download from https://obsidian.md.
 2. **Open vault:** launch Obsidian, click "Open folder as vault," navigate to your orchestrator project root (`~/Documents/{{orchestrator_name}}` or wherever you installed). Click Open. Trust the vault when prompted.
 3. **Pre-baked config (already in this repo):** the wizard ships a `.obsidian/` directory with sensible defaults (excluded files for noisy dirs, graph color groups by directory, core plugins enabled). First launch picks these up automatically. No manual settings walk needed.
-4. **Smart Connections (recommended):** Settings → Community plugins → Turn on → Browse → search "Smart Connections" → Install + Enable. On first run it'll ask which embedder. Pick **Ollama** + the `nomic-embed-text` model (matches what your orchestrator's E1 sqlite-vec uses, so the two semantic-search systems share an embedding space). If you don't have the model pulled yet: `ollama pull nomic-embed-text`. First-vault indexing takes 2-5 minutes.
+4. **Smart Connections (recommended):** Settings → Community plugins → Turn on → Browse → search "Smart Connections" → Install + Enable. On first run it'll ask which embedder. Pick **Ollama** + the `nomic-embed-text` model (matches what your orchestrator's E1 sqlite-vec uses, so the two semantic-search systems share an embedding space). If you don't have the model pulled yet: `ollama pull nomic-embed-text`. First-vault indexing takes 2-5 minutes. Smart Connections builds an embeddings cache under `.obsidian/plugins/smart-connections/.smart-env` (and a root `.smart-env/`); both are gitignored by default because they contain embedded copies of your private notes. Keep them ignored, never commit them.
+   - **Smart Lookup (optional companion):** same install flow (Browse → "Smart Lookup"). It surfaces semantically-related notes inline as you read, a lighter complement to Smart Connections' dedicated pane.
 5. **Try it:** Cmd+G opens graph view. Cmd+Shift+F opens full-text search. Cmd+O jumps to any file by name. Click any file and the right panel shows backlinks.
 
 ### Pre-baked vault config (`.obsidian/` directory)
@@ -1009,10 +1010,11 @@ Obsidian does NOT replace anything your orchestrator already does. It is a viewe
 Files committed in the repo:
 - `app.json` - excluded files list (data/runtime, data/audit, telegram-history, youtube-summaries, dream-runs, node_modules, .next, plugin caches, archived agent channels). Markdown link format set to shortest. Frontmatter visible.
 - `core-plugins.json` - graph view, backlinks, outgoing-links, page-preview, outline, tag-pane, properties, file-recovery on. Templates off.
-- `community-plugins.json` - smart-connections enabled (still requires the Settings → Community plugins → Browse install on first launch; this flag just toggles activation post-install).
+- `community-plugins.json` - smart-connections enabled (still requires the Settings → Community plugins → Browse install on first launch; this flag just toggles activation post-install). Smart Lookup, if you add it, registers here too.
 - `graph.json` - color groups per directory (feedback purple, project teal, reference orange, Library coral, agent-memory green, episodic grey).
+- `appearance.json` - your theme / font / accent overrides. Ships empty (Obsidian defaults); set it to taste and it stays per-vault.
 
-Workspace state (`workspace.json`, plugin caches) is gitignored per-machine.
+Workspace state (`workspace.json`), plugin code + per-plugin `data.json`, and the Smart Connections embeddings cache (`.smart-env`) are all gitignored per-machine: config travels with the repo, plugins are reinstalled from the community store on each machine, and the embedded copies of your notes never leave your disk.
 
 ### Why graph view sometimes looks sparse
 

@@ -1,0 +1,28 @@
+{
+  "useMarkdownLinks": false,
+  "newLinkFormat": "shortest",
+  "showLineNumber": true,
+  "showFrontmatter": true,
+  "spellcheck": true,
+  "promptDelete": true,
+  "userIgnoreFilters": [
+    "data/runtime/",
+    "data/audit/",
+    "data/youtube-summaries/",
+    "data/telegram-history/",
+    "data/dream-runs/",
+    "data/dream-proposals/",
+    "node_modules/",
+    ".next/",
+    ".venv-backtest/",
+    "Library/research/.archive/",
+    ".git/",
+    ".claude/plugins/",
+    "agent-channels/archive/",
+    "memory-backup/"
+  ],
+  "alwaysUpdateLinks": true,
+  "showInlineTitle": true,
+  "useTab": false,
+  "tabSize": 2
+}

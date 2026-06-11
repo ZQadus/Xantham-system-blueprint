@@ -1,0 +1,65 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "path:memory/semantic/feedback",
+      "color": {
+        "a": 1,
+        "rgb": 14048348
+      }
+    },
+    {
+      "query": "path:memory/semantic/project",
+      "color": {
+        "a": 1,
+        "rgb": 5025616
+      }
+    },
+    {
+      "query": "path:memory/semantic/reference",
+      "color": {
+        "a": 1,
+        "rgb": 9849600
+      }
+    },
+    {
+      "query": "path:Library",
+      "color": {
+        "a": 1,
+        "rgb": 16737843
+      }
+    },
+    {
+      "query": "path:agent-memory",
+      "color": {
+        "a": 1,
+        "rgb": 6014923
+      }
+    },
+    {
+      "query": "path:memory/episodic",
+      "color": {
+        "a": 1,
+        "rgb": 8421504
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": false,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.518713248970312,
+  "repelStrength": 10,
+  "linkStrength": 1,
+  "linkDistance": 250,
+  "scale": 0.4142724427804902,
+  "close": true
+}

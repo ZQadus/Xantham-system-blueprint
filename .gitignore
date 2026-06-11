@@ -2,3 +2,10 @@
 *.bak.*
 .DS_Store
 *.tmp
+
+# Obsidian — ship config, ignore per-machine runtime state + plugin code/embeddings
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/plugins/
+.smart-env/
