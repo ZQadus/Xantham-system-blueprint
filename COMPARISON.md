@@ -25,7 +25,7 @@ Cost lines worth surfacing: Xantham is $0/month plus your existing Claude.ai pla
 
 **No demo GIF in the README until this week.** Competitors with visual proof (ruvnet/ruflo, pedramamini/Maestro, simonstrumse/claude-code-manager) convert Reddit landings at a higher rate. Fix lane is open separately to this doc.
 
-**Smaller test footprint than AgentShield.** affaan-m/everything-claude-code ships 1282 tests across 102 secret-pattern rules. Xantham's safety gate is one consolidated hook with broad coverage but a smaller verified test surface (verification flow is documented in `xantham-system-v31.md`, not a 1000-test suite). Architecturally equivalent, marketing-wise outclassed.
+**Smaller test footprint than AgentShield.** affaan-m/everything-claude-code ships 1282 tests across 102 secret-pattern rules. Xantham's safety gate is one consolidated hook with broad coverage but a smaller verified test surface (verification flow is documented in `xantham-system-v32.md`, not a 1000-test suite). Architecturally equivalent, marketing-wise outclassed.
 
 **Single maintainer, no community Discord or Slack.** AutoGen has Microsoft Research backing. LangGraph has LangChain Inc. CrewAI has a funded company. Xantham is one operator publishing infrastructure that is useful to others. Reasonable expectation: response times are days, not hours.
 

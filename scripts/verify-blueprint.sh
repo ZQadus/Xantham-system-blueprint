@@ -26,8 +26,8 @@ set -euo pipefail
 REPO_RAW="https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint"
 REF="${1:-main}"
 FILES=(
-  "xantham-system-v31.md"
-  "xantham-templates-v31.md"
+  "xantham-system-v32.md"
+  "xantham-templates-v32.md"
   "LICENSE"
   "README.md"
   "SECURITY.md"
