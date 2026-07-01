@@ -11,7 +11,7 @@
 #   3. session-end-sync.sh       — HANDOFF auto-write + sleep-time reflection
 #
 # Each hook has a HARD timeout (adversarial audit safety: a hung Stop hook
-# could prevent session-end entirely, stranding Zaki). 30s per hook is
+# could prevent session-end entirely, stranding the operator). 30s per hook is
 # generous — real hooks finish in <5s.
 #
 # All hooks MUST always exit 0 so they don't block session-end. Any non-zero

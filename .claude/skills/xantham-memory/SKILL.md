@@ -33,7 +33,7 @@ Implementation in `scripts/active-recall.sh` (Task 17). Within-session cache at 
 
 ### Per-person profile files (shipped 2026-05-10)
 
-`memory/profile/<person>.md` is the per-person sibling of `memory/profile_zaki.md`. One file per regularly-mentioned external person (clients, collaborators, reviewers). Each carries `type: profile-person` frontmatter + a structured shape (Who they are / How to address / Active threads / Past patterns / Sensitivities / Evidence trail).
+`memory/profile/<person>.md` is the per-person sibling of `memory/profile_<user>.md`. One file per regularly-mentioned external person (clients, collaborators, reviewers). Each carries `type: profile-person` frontmatter + a structured shape (Who they are / How to address / Active threads / Past patterns / Sensitivities / Evidence trail).
 
 These files surface automatically via active recall when the person's name appears in inbound text. To populate after a new interaction:
 
@@ -52,7 +52,7 @@ Triggered by:
 
 Four phases (per Anthropic Auto Dream pattern, since native is still feature-flagged in our tier as of May 2026):
 
-1. **Orient** (`scripts/dream/phase1-orient.sh`, Task 20) — read MEMORY.md + profile_zaki.md + corrections-promoted.jsonl + last 5 reflections; emit JSON map of current state
+1. **Orient** (`scripts/dream/phase1-orient.sh`, Task 20) — read MEMORY.md + profile_<user>.md + corrections-promoted.jsonl + last 5 reflections; emit JSON map of current state
 2. **Gather signal** (`scripts/dream/phase2-gather.sh`, Task 21) — scan last N sessions' telegram + audit for repeated patterns / contradictions / decisions
 3. **Consolidate** (`scripts/dream/phase3-consolidate.sh`, Task 22) — convert relative dates, drop contradicted entries, merge overlapping; promote cross-cutting items to procedural/; compress episodic > 30d into semantic summaries
 4. **Prune & index** (`scripts/dream/phase4-prune.sh`, Task 23) — rebuild MEMORY.md (cap 200 lines), re-embed via post-commit, write `data/dream-runs/<ts>/changes.md`
@@ -64,7 +64,7 @@ Cost cap: $1/run, never re-run within 23h. Orchestrator at `scripts/dream.sh` (e
 ```
 memory/
 ├── MEMORY.md              (auto-regenerated index, capped at 200 lines)
-├── profile_zaki.md        (top-level Profile bucket, mutable narrative)
+├── profile_<user>.md        (top-level Profile bucket, mutable narrative)
 ├── agent-memory/          (9 agent dirs)
 ├── episodic/<date>.md     (daily rolled telegram + reflection + commits)
 ├── semantic/

@@ -1,6 +1,6 @@
 # Comparison
 
-How Xantham stacks up against the most-cited public agent frameworks and orchestrators as of May 2026. Honest read, including where Xantham is behind.
+How Xantham stacks up against the most-cited public agent frameworks and orchestrators as of July 2026. Honest read, including where Xantham is behind. Per the v33 honesty guardrail — no "best-in-class" claim is trustworthy without an external check — the "behind" and "at parity" sections below are the ones that were pressure-tested hardest, and none of the "strictly ahead" lines is an externally benchmarked ranking.
 
 ## At a glance
 
@@ -25,7 +25,7 @@ Cost lines worth surfacing: Xantham is $0/month plus your existing Claude.ai pla
 
 **No demo GIF in the README until this week.** Competitors with visual proof (ruvnet/ruflo, pedramamini/Maestro, simonstrumse/claude-code-manager) convert Reddit landings at a higher rate. Fix lane is open separately to this doc.
 
-**Smaller test footprint than AgentShield.** affaan-m/everything-claude-code ships 1282 tests across 102 secret-pattern rules. Xantham's safety gate is one consolidated hook with broad coverage but a smaller verified test surface (verification flow is documented in `xantham-system-v32.md`, not a 1000-test suite). Architecturally equivalent, marketing-wise outclassed.
+**Smaller test footprint than AgentShield.** affaan-m/everything-claude-code ships 1282 tests across 102 secret-pattern rules. Xantham's safety gate is one consolidated hook with broad coverage but a smaller verified test surface (verification flow is documented in `xantham-system-v33.md`, not a 1000-test suite). Architecturally equivalent, marketing-wise outclassed.
 
 **Single maintainer, no community Discord or Slack.** AutoGen has Microsoft Research backing. LangGraph has LangChain Inc. CrewAI has a funded company. Xantham is one operator publishing infrastructure that is useful to others. Reasonable expectation: response times are days, not hours.
 
@@ -48,6 +48,12 @@ Cost lines worth surfacing: Xantham is $0/month plus your existing Claude.ai pla
 **Memory + safety + Telegram together.** Each of these exists elsewhere as a piece. Praktor ships Telegram. CrewAI ships memory. AgentShield ships safety. No competitor in this table ships all three integrated, with a single-paste install and a $0/month cost on top of your existing Claude plan.
 
 **AI-SEO on ship.** Auto-generated llm.txt + sitemap.xml + robots.txt with explicit LLM-bot allowlist (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Applebot-Extended) + JSON-LD schema on every `ship <project>`. Zero competitors in this table ship this. Whether AI-SEO matters for your projects is a separate question; if it does, this is a moat.
+
+**Closed self-improvement loop, wired and measured (v33).** Corrections + eval harness + semantic index run as one measured cycle: a dispatch is cost-tripwire-gated, writes back a forensic "walkthrough" that the next related dispatch actually loads, corrections are rewritten with provenance and a supersede stamp, a composite retrieval ranker is graded on a golden set with rank-sensitive MRR / nDCG@k, and a curator ages skills on usage telemetry. The whole live path is deterministic and zero-LLM; the reflective/quality-judge pieces defer at zero spend without a key. Most competitors in this table have an eval story OR a memory story; wiring both into a self-measuring loop with an explicit "effect-verified, not presence-verified" acceptance bar is the differentiated piece.
+
+**Session continuity as a first-class pillar (v33).** A compaction checkpoint (distill + re-inject + verify around a context compaction), a deterministic completeness gate that blocks "go fresh" until every parked item and uncommitted note is captured, auto-persist at the session boundary, and a byte-capped memory index. Frameworks in this table lean on a checkpointer for graph state; treating human-session continuity — pick up exactly where you left off days later — as a bug class of its own is not something they ship.
+
+**Intellectual-honesty guardrail baked into the system (v33).** A standing operating principle forbids trusting any self-audit, best-in-class claim, or self-designed rubric without an independent check (a different model, an external benchmark, or an adversarial red-team told to find where you're worse). It is the reason this comparison doc leads with where Xantham is *behind*. No competitor in this table ships a self-honesty guardrail as a first-class rule.
 
 ## How to choose
 

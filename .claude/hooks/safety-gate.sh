@@ -1,6 +1,6 @@
 #!/bin/bash
 # CORTANA SAFETY GATE
-# Blocks destructive commands and prompts Zaki for approval via Telegram.
+# Blocks destructive commands and prompts the operator for approval via Telegram.
 # Exit 0 = allow. Exit 2 = block (message sent to Claude via stderr).
 # Also emits structured JSON on stdout for newer Claude Code versions:
 #   {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow|deny","permissionDecisionReason":"..."}}
@@ -8,8 +8,8 @@
 #
 # APPROVAL FLOW:
 # 1. Hook blocks a dangerous command
-# 2. Claude sees the block reason and asks Zaki on Telegram
-# 3. Zaki says "yes" / "approved"
+# 2. Claude sees the block reason and asks the operator on Telegram
+# 3. The operator says "yes" / "approved"
 # 4. Claude writes the command to ${CLAUDE_PROJECT_DIR:-$PWD}/data/approved.txt
 # 5. Claude retries the command
 # 6. Hook sees it's pre-approved, allows it, removes the approval
@@ -74,7 +74,7 @@ if [ -s "$APPROVAL_FILE" ]; then
 fi
 
 # === CHECK FOR PRE-APPROVAL ===
-# If Zaki already approved this exact command, let it through and clear it
+# If the operator already approved this exact command, let it through and clear it
 CHECK_STRING="$COMMAND$FILE_PATH"
 if awk -F'|' -v cmd="$CHECK_STRING" '
   NF >= 2 && $1 ~ /^[0-9]+$/ {
@@ -100,8 +100,8 @@ if awk -F'|' -v cmd="$CHECK_STRING" '
     !consumed && $0 == cmd { consumed = 1; next }
     { print }
   ' "$APPROVAL_FILE" > "$APPROVAL_FILE.tmp" && mv "$APPROVAL_FILE.tmp" "$APPROVAL_FILE"
-  echo "[$TIMESTAMP] APPROVED (pre-approved by Zaki): $CHECK_STRING" >> "$LOG_FILE"
-  emit_decision "allow" "Pre-approved by Zaki (one-time use, consumed)"
+  echo "[$TIMESTAMP] APPROVED (pre-approved by the operator): $CHECK_STRING" >> "$LOG_FILE"
+  emit_decision "allow" "Pre-approved by the operator (one-time use, consumed)"
   exit 0
 fi
 
@@ -109,14 +109,14 @@ fi
 block() {
   local REASON="$1"
   local CATEGORY="$2"
-  local MSG="BLOCKED: $REASON. Ask Zaki for approval on Telegram. If he approves, write the exact command to ${CLAUDE_PROJECT_DIR:-$PWD}/data/approved.txt (one command per line) then retry."
+  local MSG="BLOCKED: $REASON. Ask the operator for approval on Telegram. If they approve, write the exact command to ${CLAUDE_PROJECT_DIR:-$PWD}/data/approved.txt (one command per line) then retry."
   echo "$MSG" >&2
   echo "[$TIMESTAMP] BLOCKED ($CATEGORY): ${COMMAND}${FILE_PATH}" >> "$LOG_FILE"
   emit_decision "deny" "$MSG"
   exit 2
 }
 
-# === HELPER: hard block (not even Zaki-approval opens the gate) ===
+# === HELPER: hard block (not even operator approval opens the gate) ===
 hard_block() {
   local REASON="$1"
   local CATEGORY="$2"
@@ -129,7 +129,7 @@ hard_block() {
 
 # === CATEGORY 1: ALWAYS BLOCKED (no approval possible) ===
 # These are so catastrophic or history-destroying that even with approval,
-# we don't allow them through the hook. Zaki must run them manually in Terminal.
+# we don't allow them through the hook. The operator must run them manually in Terminal.
 
 # Delete home / root filesystem
 if echo "$COMMAND" | grep -qEi 'rm\s+-(rf|fr)\s+(/|~|\$HOME)\s*$'; then
@@ -161,7 +161,7 @@ if echo "$COMMAND" | grep -qEi 'git\s+push(\s+[^-]\S*)*\s+(--force|-f|--force-wi
   fi
 fi
 
-# === CATEGORY 2: BLOCKED UNTIL ZAKI APPROVES ===
+# === CATEGORY 2: BLOCKED UNTIL THE OPERATOR APPROVES ===
 
 # --- File deletion ---
 # Only match `rm` as a standalone command (not inside words like "form", "arm", "term").

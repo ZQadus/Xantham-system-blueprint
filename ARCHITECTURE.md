@@ -123,10 +123,23 @@ The hook layer is the security boundary, see `SECURITY.md` for the full threat m
 - **Three buckets.** Hard-blocked (no approval possible, hook refuses regardless of state), approval-gated (blocked until exact command is written to `data/approved.txt` with a 30-day TTL), allowed-with-audit (passes through but logged).
 - **Sync rule.** Project-level gate (`.claude/hooks/safety-gate.sh`) and global gate (`~/.claude/hooks/safety-gate.sh`) must stay in sync. `scripts/sync-safety-gates.sh` is the canonical sync tool. Drift means a destructive command might slip through in another project.
 - **Banned-language gate.** Independent of the safety gate. Fires on Write/Edit and on Telegram replies. Blocks medical-claim words, marketing superlatives, and AI-tells from leaking into committed content. Allowlist exceptions at `Library/app-store-compliance/banned-language-allowlist.md`.
-- **Reactive model-defense layer (v31.1).** Beside the three-bucket gate sit a fabricated-completion gate (warn-only reply-verify hook), a non-killing loop detector, transcript grounding for quotes/attributions, and a pre-merge deletion guard. Every defense is a hook or a deterministic script rather than a prompt rule. Full detail in `SECURITY.md` and the E5.1 section of `xantham-system-v32.md`.
+- **Reactive model-defense layer (v31.1).** Beside the three-bucket gate sit a fabricated-completion gate (warn-only reply-verify hook), a non-killing loop detector, transcript grounding for quotes/attributions, and a pre-merge deletion guard. Every defense is a hook or a deterministic script rather than a prompt rule. Full detail in `SECURITY.md` and the E5.1 section of `xantham-system-v33.md`.
+- **Verification + continuity hardening (v33).** Grounding requires a real run signal instead of matching the command string (a read-only command no longer counts as "verified"), a reporter-confirm gate covers operator-reported bugs, the secret redactor's coverage was widened to modern high-risk key shapes, and a worktree-cwd guard stops a sub-agent in an isolated worktree from misrouting the main session's commits. A session-continuity spine (compaction checkpoint + completeness gate + auto-persist + byte-capped index) treats losing state between sessions as a bug of the same severity as losing data. All of it ships behind a central toggle registry, OFF by default, and earns "done" only once its effect is observed live ("effect-verified, not presence-verified").
+
+## The self-improvement loop (v32.2, wired + measured in v33)
+
+Corrections, the eval harness, and the semantic index run as one measured cycle rather than three separate features:
+
+1. A dispatch is **cost-tripwire-gated** and budget-tracked (cost-attribution + in-flight dedup + fan-out width-cap + run-tree).
+2. The agent runs tool-scoped under an output contract, then writes back a **walkthrough** — a forensic record of what worked and what bit — that the next related dispatch loads so the same pitfall isn't rediscovered.
+3. Corrections are split task-vs-mental-model and **rewritten with provenance** plus a bi-temporal supersede stamp.
+4. A **composite retrieval ranker** (temporal-decay + entity-expansion + centrality) is graded on a golden set with rank-sensitive **MRR + nDCG@k** so a ranking change is actually visible.
+5. A **curator** ages skills on usage telemetry.
+
+The entire live path is deterministic and zero-LLM. The reflective optimizer, the GEPA quality judge, and the skill-authoring fork are key-gated and defer at zero spend without an API key. A cadence run-due check at session start keeps the loop from going dark.
 
 ## Where the code lives
 
-- **Blueprint files.** `xantham-system-v32.md` (landing, ~5400 lines) and `xantham-templates-v32.md` (template bodies, ~11400 lines). Both at the public repo root.
+- **Blueprint files.** `xantham-system-v33.md` (landing, ~5400 lines) and `xantham-templates-v33.md` (template bodies, ~11400 lines). Both at the public repo root.
 - **Generated install.** Lives at your install directory (default `~/Documents/<OrchestratorName>/`). Includes `CLAUDE.md`, `.claude/`, `.mcp.json`, `memory/`, `scripts/`, `data/`, `docs/`, `blueprints/`, `agent-memory/`, `Library/`.
 - **Per-project repos.** Each registered project lives in its own folder anywhere on your machine. The orchestrator learns about it via `docs/projects.md`. Each project ships its own `CLAUDE.md`, `HANDOFF.md`, `FEATURES.md`.

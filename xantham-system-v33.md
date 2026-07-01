@@ -2,7 +2,7 @@
 architectural_role: trunk
 ---
 
-# Xantham System - Blueprint v32
+# Xantham System - Blueprint v33
 
 You hand this file to a fresh Claude Code session. It walks you through picking a mode, generating the install scripts, and finishes with a working personal orchestrator on your phone. **Time to first reply: about an hour from `git clone` to your phone vibrating with output (30-45 minutes if Node 18 / Git / jq / sqlite3 / bun are already installed, closer to 90 minutes from a fresh laptop where the wizard installs prereqs first).**
 
@@ -107,10 +107,12 @@ Concretely: the everyday engineer agent (`kai`) stays on the default model. Alon
 
 In this build the pattern is applied **team-wide**: every specialist (engineer, researcher, growth, social, infra, writer, trader, business, human-dynamics) has a parallel `<name>-fable` clone built exactly this way. So any role can run on the heavier model on demand, and because each clone shares its original's `agent-memory/<name>/`, the pooled expertise is identical regardless of which model answered. The clones each carry a `VARIANT NOTE` header reminding maintainers to mirror persona edits between the pair (only the `model`/`effort` frontmatter should ever differ).
 
+The same trick runs **downward** too, and in this build it is also applied **team-wide**: every specialist has a parallel `<name>-sonnet` fast clone (`model: sonnet` — the alias for the latest Sonnet — plus `effort: xhigh`, sharing `agent-memory/<name>/`). When the latest fast model is strong enough — this build adopted the tier when a Sonnet release landed at roughly 91% of the top model's agentic-coding score for about a third of the cost and far less rate-limit burn — the cheaper clone becomes a genuine fast **workhorse** rather than a trivial-edits-only helper: most build/edit/refactor, research, and drafting can run on it for speed and parallelism, freeing the top model for the genuinely hard tier. Because the fast model is cheap, these clones run at the max-reasoning `xhigh` tier (not the capped `high` the heavier clones use) to close the capability gap. The routing instinct is a three-way ladder: *speed/parallelism and the top model is overkill* → the cheaper clone; *complex/risky/security/schema/high-stakes* → the everyday agent (still the default); *explicitly needs the strongest* → the heavier clone. The cheap clone is briefed (in its `description`) to stop and escalate upward if a task turns out bigger than it looked, so "route it cheap" never costs correctness on a task that deserved more. Unlike the heavier clones (which carry a `VARIANT NOTE` header), the cheaper clones keep their persona body **byte-identical** to the original — the escalation guidance lives in the agent's `description`, not the body. Keep the strongest model the default workhorse and the orchestrator; treat the two clone tiers as on-demand widen-down (fast/cheap, for breadth) and reach-up (heaviest, for the hard 20% on explicit say-so) lanes.
+
 **Effort tiers we run.** No agent sits on `max`. The capability gain of `max` over `xhigh` is marginal on real work, while the token burn is disproportionate — a single busy afternoon of `max` dispatches can exhaust a 5-hour Max window. So:
 
-- **`xhigh`** — every crew specialist, and the orchestrator session itself.
-- **`high`** — the clone/utility agents (e.g. `kai-fable`, memory + verification helpers).
+- **`xhigh`** — every crew specialist, the orchestrator session itself, and the cheaper-model `-sonnet` clones (the fast model is cheap, so they run at max reasoning to close the gap).
+- **`high`** — the heavier-model `-fable` clones (held back to cap their ~2x burn) plus the memory + verification helper agents.
 - **`max`** — nobody. When a task is genuinely hard enough to want more horsepower, the answer is the heavier-model clone at `high`, not bumping anyone back to `max`.
 
 Set the orchestrator-session floor with `CLAUDE_CODE_EFFORT_LEVEL=xhigh` in your shell rc plus `"effortLevel": "xhigh"` in `.claude/settings.json`; set each agent's tier in its own frontmatter. (Note: `max` does not stick via settings.json — it silently downgrades to `xhigh` — so the only place `max` ever takes effect is the env var or per-agent frontmatter. One more reason we simply don't use it.)
@@ -129,7 +131,13 @@ The orchestrator runs under a small set of cross-project rules. They apply to ev
 
 **Skill and plugin first.** Before executing any task, check whether an installed skill or plugin fits, and route to it. Making that match is the orchestrator's core job, not a nicety — for every task, not only design work. Do not hand-roll what a skill does better: brainstorming, planning, frontend/design, animation, deploy, mobile, documents, debugging, verification each have a dedicated skill or plugin that beats an ad-hoc attempt. When dispatching a specialist sub-agent, name the skills it should invoke. Sibling rule: before framing any upgrade as "build custom X", check for a published repo/package first and default to install/wrap or fork/adapt.
 
-These five show up again in the orchestration skill, the safety skill, and several feedback memories. They are the floor, not advice.
+**Don't grade your own homework.** A model grading its OWN system is sycophantic — it designs rubrics that make itself look best. Any self-audit, "best-in-class" claim, or self-designed scoring rubric must get an INDEPENDENT check — a different model, an external benchmark, or an adversarial red-team told to find where you are *worse* — before it is trusted or shown externally. Do not claim best-in-class externally until you are externally benchmarked. This is the single most important guardrail in the system: it is the thing that keeps the self-improvement loop below from optimising toward a flattering number instead of a real one.
+
+**Session continuity is a first-class pillar, not a nicety.** A fresh session must be able to pick up exactly where the last one left off. That means a real compaction checkpoint (state distilled before a context compaction and re-injected + verified after), a deterministic completeness gate that blocks "go fresh" until every parked item, overdue task, new memory, and uncommitted note is captured, auto-persist at the session boundary (commit + reconcile + write a pickup file the next greeting actually reads), and a memory index that respects its **byte** budget (a line-cap does not stop a large index from silently truncating on load). Losing state between sessions is treated as a bug of the same severity as losing data.
+
+**Effect-verified, not presence-verified.** A capability is not "done" because the file exists, the hook is registered, and the tests are green. It is done when its effect is a logged number in production. It is entirely possible to build a mechanism, wire its hook, pass its tests, and have it sit **dark** — never actually running end-to-end. Every mechanism ships behind a central toggle registry, OFF by default, and earns "done" only once its effect has been observed live, not assumed.
+
+These principles show up again in the orchestration skill, the safety skill, and several feedback memories. They are the floor, not advice.
 
 ### Memory system
 - `memory/MEMORY.md` - index, auto-loaded at session start (capped at 200 lines per Anthropic Auto Dream convention)
@@ -634,7 +642,7 @@ Zero.
 
 **Install (Mac / Linux / Windows-Git-Bash, identical commands)**
 
-The wizard generates the hardened gate body straight into `.claude/hooks/safety-gate.sh` during Step 11 from the `## E5 - Hardened safety gate` template in `blueprints/xantham-templates-v32.md` (262 lines). It includes hard-blocks for force-push to protected branches, git filter-branch, reflog expire, refspec-prefixed force pushes (`+HEAD:main`), `push.default` overrides, and a CLI-rm whitelist (`vercel env rm`, `gh secret rm`, `docker rm`, `npm rm`, `git rm`, etc.) that prevented past false positives.
+The wizard generates the hardened gate body straight into `.claude/hooks/safety-gate.sh` during Step 11 from the `## E5 - Hardened safety gate` template in `blueprints/xantham-templates-v33.md` (262 lines). It includes hard-blocks for force-push to protected branches, git filter-branch, reflog expire, refspec-prefixed force pushes (`+HEAD:main`), `push.default` overrides, and a CLI-rm whitelist (`vercel env rm`, `gh secret rm`, `docker rm`, `npm rm`, `git rm`, etc.) that prevented past false positives.
 
 ```bash
 # 1. Back up BOTH safety gates before the hardened body overwrites either one.
@@ -646,7 +654,7 @@ cp ~/.claude/hooks/safety-gate.sh ~/.claude/hooks/safety-gate.sh.core-backup 2>/
 
 # 2. Verify the wizard wrote the hardened body to the project-level gate.
 #    The wizard generates the body during Step 11 from the E5 template in
-#    blueprints/xantham-templates-v32.md. The string "HARD BLOCKED" only
+#    blueprints/xantham-templates-v33.md. The string "HARD BLOCKED" only
 #    appears in the hardened gate, not the core one.
 grep -q "HARD BLOCKED" .claude/hooks/safety-gate.sh && echo "OK: hardened gate active" || echo "FAIL: re-run Step 11 generation"
 
@@ -1044,7 +1052,7 @@ Five layers, each independently useful and independently testable.
 ### Install (Mac)
 
 ```bash
-# 1. Drop in the scripts (templates in xantham-templates-v32.md):
+# 1. Drop in the scripts (templates in xantham-templates-v33.md):
 #    scripts/telegram-mcp-wrap.sh
 #    scripts/telegram-mcp-watchdog.sh
 #    scripts/notify-telegram-direct.sh
@@ -1074,7 +1082,7 @@ tail -f data/telegram-mcp-health.jsonl
 
 # 6. Register /mcp-health as a slash command (CLAUDE.md commands table)
 #    Already wired in the v31 template; if you're upgrading, see the
-#    Commands section in xantham-templates-v32.md.
+#    Commands section in xantham-templates-v33.md.
 ```
 
 ### Install (Windows, Git Bash or WSL2)
@@ -1142,7 +1150,7 @@ The reaper is deliberately the opposite of a broad killer — it can only ever t
 
 ```bash
 # Install (Mac)
-# 1. Drop the reaper script outside ~/Documents (template in xantham-templates-v32.md)
+# 1. Drop the reaper script outside ~/Documents (template in xantham-templates-v33.md)
 #    ~/.claude/{{orchestrator_lower}}-cpu-reaper.sh
 chmod +x ~/.claude/{{orchestrator_lower}}-cpu-reaper.sh
 
@@ -1191,7 +1199,7 @@ Pairs with the MCP observability stack above. Without the supervisor, the auto-r
 ### Install (Mac and Linux)
 
 ```bash
-# 1. Drop in the supervisor wrapper (template in xantham-templates-v32.md)
+# 1. Drop in the supervisor wrapper (template in xantham-templates-v33.md)
 #    bin/{{orchestrator_lower}}-launch.sh
 mkdir -p bin
 chmod +x bin/{{orchestrator_lower}}-launch.sh
@@ -1242,7 +1250,7 @@ bash scripts/install-launchd-wrappers.sh  # picks up the new plist
 # Wire the SessionStart checkpoint-restore (extends your existing session-start hook)
 # In scripts/session-start-persistence-inject.sh, add the block that reads
 # data/runtime/<orchestrator>-checkpoint.json if mtime < 10 min and surfaces it as the
-# FIRST section of the persistent-state inject. Template in xantham-templates-v32.md.
+# FIRST section of the persistent-state inject. Template in xantham-templates-v33.md.
 ```
 
 ### Tier-1 MCP hardening (recommended, baked into the supervisor)
@@ -1276,7 +1284,7 @@ bash -c 'env | grep MCP_TIMEOUT'
 
 # 3. Crash-loop protection triggers (this WILL pause for 60s after 3 fast crashes)
 #    Skip this in real installs unless you really want to test it.
-#    See xantham-templates-v32.md for the manual procedure.
+#    See xantham-templates-v33.md for the manual procedure.
 
 # 4. SessionStart checkpoint-restore block appears in the inject (if installed)
 bash scripts/session-start-persistence-inject.sh | head -20
@@ -1286,6 +1294,25 @@ bash scripts/session-start-persistence-inject.sh | head -20
 
 
 ## Changelog
+
+### v33 - wire-and-measure + the session-continuity spine (2026-07-01)
+
+v32.2 BUILT the closed self-improvement engine; v33 is the slate that turns it from **present** into **proven**. The organising insight, from a multi-agent best-in-class audit plus an INDEPENDENT adversarial re-check by a second model: you can build a mechanism, register its hook, and pass its tests, and it can still sit **dark** — never running end-to-end. So v33's theme is **wire up + prove what's already built**, not build more. New standing acceptance bar: *"effect-verified, not presence-verified"* — a capability isn't done until its effect is a logged number, not an assumption. Every mechanism below stays toggleable via a central engine-toggle registry and ships **OFF by default** (the operator flips each one; anything that changes how the operator works is the operator's switch).
+
+- **Session continuity becomes a first-class pillar.** A real compaction checkpoint (a `PreCompact` hook that distills session state + a `PostCompact` hook that re-injects and verifies via `hookSpecificOutput.additionalContext` — replacing a dead no-op stub), a **verified-completeness gate** that blocks a "fresh session" until every parked item / overdue task / new memory / worktree note is captured, **auto-persist at the session boundary** (commit + reconcile + write a pickup file on session-end; the explicit "new session" command syncs FIRST), a **byte-capped `MEMORY.md`** (a line-cap does not fix a byte budget; a large index silently truncates on load), and an **adaptive telegram-pickup window** with an audit-log fallback so a long gap doesn't leave the next session blind. The pickup file the sync writes is now actually read by the greeting. Most of this is deterministic no-key script work.
+- **The pre-dispatch cost tripwire wired onto EVERY agent dispatch, plus a per-run and per-day cost ceiling.** The tripwire existed but only wrote a dashboard; wiring `register`/`complete` onto every dispatch makes cost-attribution + in-flight dedup + a fan-out width-cap + a run-tree all fire at once — the single highest-leverage orchestration move for anyone running heavy parallel dispatch on a metered or rate-limited plan. Activating the enforcing path is a one-time operator flip.
+- **Verification hardening.** Grounding now requires a real run signal instead of matching the command string (a read-only command used to count as "verified"); a reporter-confirm gate for operator-reported bugs; the enforce path is wired but ships warn-only until the operator flips it.
+- **A memory ranker that's ON by default and an eval that can move.** The composite retrieval ranker (temporal-decay + entity-expansion + centrality) flips on as the live default (a measured MRR lift on the golden set), and the eval gains **rank-sensitive MRR + nDCG@k** so a ranking change is visible — a recall@k-only harness saturates at 100% and hides exactly the improvement you're trying to measure. Bring up the local embedder first (it's the do-first that unblocks the A/B and cross-domain evals; without it, active-recall can swallow the error and return empty).
+- **The self-improvement loop closes end-to-end.** An on-demand self-improvement orchestrator (the capstone), a walkthrough reader/injector so a task's forensic write-back is actually LOADED by the next related dispatch (not just drafted), a cadence "run-due" check at session start (nothing on a schedule means dream/eval/curator never run), and — behind an optional dedicated capped API key — a GEPA quality judge (so a rewrite can BEAT baseline on quality, not just be cheaper) plus an injection-scanned skill-authoring fork, and an A-MEM-style auto-apply for the safe, single-fact memory evolutions. Every key-gated piece DEFERS at zero spend with no key.
+- **Memory hygiene: the corpus stops piling.** A character-budgeted, self-curated CORE profile block (a hard-capped user profile) plus TTL decay-enforcement so notes actually age out (a corpus where nothing carries a TTL never forgets anything). Decay is off by default.
+- **Security first.** The secret-redaction helper's coverage was widened to the modern high-risk key shapes (Google `AIza`/`ya29`, JWTs including managed-database service-role keys, Twilio `AC`, SendGrid `SG.`) before anything else shipped — an un-redacted key shape is a plaintext-in-git risk. Plus a worktree-cwd guard: a sub-agent given an isolated worktree can still run `git checkout -b` against the shared main checkout from the wrong directory and misroute the main session's commits — a `git-guard` assertion catches it.
+- **A model-tier refinement.** Keep the strongest model as the default workhorse and the orchestrator; add an on-demand fast/cheap clone tier (byte-identical persona, faster/cheaper model, shared agent-memory) for breadth and parallelism, and reserve a heaviest-model clone tier for the hard 20% (gnarly architecture, deep root-cause, security-critical refactors) on explicit operator say-so only. Clones share their originals' memory directory; an edit to a plain agent body is mirrored into every twin. Detailed in "Model and effort per agent" above.
+- **Honesty guardrail (the most important one).** A model grading its OWN system is sycophantic — it designs rubrics that make itself look best. Any self-audit, best-in-class claim, or self-designed scoring rubric must get an INDEPENDENT check (a different model, an external benchmark, or an adversarial red-team told to find where you're WORSE) before it's trusted or shown externally. In this pass the independent check scored the self-assessment low and validated the call: the gap list was sound, but no "best-in-world" claim was supportable without external benchmarks. Do not claim best-in-class externally until externally benchmarked. Promoted to a standing Operating principle ("Don't grade your own homework").
+
+### v32.2 - the closed self-improvement loop (2026-06-24)
+
+- **The closed self-improvement loop documented as ONE measured cycle.** A new subsection turns the corrections log + eval harness + semantic index from three separate features into a single loop: a dispatch is cost-tripwire-gated and budget-tracked, runs a tool-scoped agent with an output contract, writes back a "walkthrough" forensic record that becomes a measured success/failure signal, the eval harness measures it (with an entrenchment / contradiction-update test), corrections are split task-vs-mental-model and rewritten with provenance plus a bi-temporal supersede stamp, an optimizer evolves prompts against the golden set, memory evolves its neighbours on write, and a curator ages skills on usage telemetry. Nine components, each on a deterministic zero-LLM live path, all inheriting the same gating posture (dry-run, propose-on-anything-uncertain, provenance + git-reversible, protected paths untouchable). The one LLM-required piece (the reflective optimizer) ships as deferred scaffolding that runs nothing without a key.
+- **The eval-gate protocol made explicit.** Every component that changes a fact or behaviour adds a golden item and must hold at-or-above baseline recall under the harness's deterministic no-judge run; a capability that can't be expressed as a golden item that holds at-or-above baseline does not ship.
 
 ### v31.5 - plugin roster + cpu-reaper + supervisor remote-control removal + don't-kill-on-idle (2026-06-06)
 
@@ -1475,7 +1502,7 @@ Not documented. Core loop + safety gate + routing table existed from v1.
 `bash scripts/install-blueprint.sh --remove E3` - uninstall steps for E3, marks it off in the version file.
 
 ### Non-interactive auto-apply (for self-updating hosts)
-`bash scripts/install-blueprint.sh --auto` - the NON-INTERACTIVE clean-apply path used by the Xantham auto-sync subsystem (see the "Xantham Auto-Sync subsystem" section in xantham-templates-v32.md). It compares the version-file marker against the version of the blueprint files present in the tree and, on a clean FORWARD upgrade, bumps `blueprint_version:` and appends an `upgraded:` line. It NEVER prompts and NEVER runs an extension installer (newly-shipped advanced-default extensions are surfaced for a manual `--add`). It STOPS with exit 3 (non-destructive, marker untouched) on any ambiguity: no version file, a downgrade/divergence (marker ahead of shipped), or a malformed marker. Idempotent (re-run on the same version = no-op). Audit line written to `data/runtime/xantham-sync.log`. When generating `install-blueprint.sh`, include the `--auto` case so downstream hosts can self-update.
+`bash scripts/install-blueprint.sh --auto` - the NON-INTERACTIVE clean-apply path used by the Xantham auto-sync subsystem (see the "Xantham Auto-Sync subsystem" section in xantham-templates-v33.md). It compares the version-file marker against the version of the blueprint files present in the tree and, on a clean FORWARD upgrade, bumps `blueprint_version:` and appends an `upgraded:` line. It NEVER prompts and NEVER runs an extension installer (newly-shipped advanced-default extensions are surfaced for a manual `--add`). It STOPS with exit 3 (non-destructive, marker untouched) on any ambiguity: no version file, a downgrade/divergence (marker ahead of shipped), or a malformed marker. Idempotent (re-run on the same version = no-op). Audit line written to `data/runtime/xantham-sync.log`. When generating `install-blueprint.sh`, include the `--auto` case so downstream hosts can self-update.
 
 ### Version file format
 `.{{orchestrator_lower}}-blueprint-version` (YAML):
@@ -1555,7 +1582,7 @@ If you've never run Claude Code from a terminal, here is the literal first step:
 Once you see that prompt, paste the line below as your first message:
 
 ```
-Read the Xantham System v32 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v32.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-templates-v32.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
+Read the Xantham System v32 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v33.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-templates-v33.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
 ```
 
 If you forked this blueprint to your own GitHub repo, replace the URL above with your fork's raw URL.
@@ -1719,7 +1746,7 @@ This is a deterministic specimen test. We create a canary file, then ask the gat
   Select-String -Pattern '"PreToolUse"' -Path .claude\settings.json -Context 0,2
   ```
 
-  Expected: `safety-gate.sh` exists and is executable, AND `.claude/settings.json` has a `PreToolUse` hook entry with `command` pointing to `.claude/hooks/safety-gate.sh`. If either is missing, re-run the wizard's hook-install step or copy the template body from `blueprints/xantham-templates-v32.md` → `## Template: .claude/hooks/safety-gate.sh`. Also verify the global gate at `~/.claude/hooks/safety-gate.sh` exists (run `bash scripts/sync-safety-gates.sh` if not).
+  Expected: `safety-gate.sh` exists and is executable, AND `.claude/settings.json` has a `PreToolUse` hook entry with `command` pointing to `.claude/hooks/safety-gate.sh`. If either is missing, re-run the wizard's hook-install step or copy the template body from `blueprints/xantham-templates-v33.md` → `## Template: .claude/hooks/safety-gate.sh`. Also verify the global gate at `~/.claude/hooks/safety-gate.sh` exists (run `bash scripts/sync-safety-gates.sh` if not).
 
 ---
 
@@ -2703,15 +2730,15 @@ Read this entire section carefully before asking the first question. You are abo
 
 1. Read this full document first. Understand all four parts before you start asking questions.
 2. Ask the questions below **one at a time**. Wait for the user's answer before moving to the next question.
-3. Store each answer as a variable using the `{{placeholder}}` names specified. You will need every one of them when generating files from the templates in `blueprints/xantham-templates-v32.md`.
+3. Store each answer as a variable using the `{{placeholder}}` names specified. You will need every one of them when generating files from the templates in `blueprints/xantham-templates-v33.md`.
 4. Some questions have branching logic -- only ask them if the conditions are met.
-5. After all questions are answered, generate every file listed in the "Generation Order" section using the templates in `blueprints/xantham-templates-v32.md`. Substitute all `{{placeholders}}` with the user's answers.
+5. After all questions are answered, generate every file listed in the "Generation Order" section using the templates in `blueprints/xantham-templates-v33.md`. Substitute all `{{placeholders}}` with the user's answers.
 6. Run the post-setup validation checks.
 7. Print the setup summary.
 
 ### Variable reference
 
-These are the variables you will collect. Every template in the companion file `blueprints/xantham-templates-v32.md` references them by these exact names.
+These are the variables you will collect. Every template in the companion file `blueprints/xantham-templates-v33.md` references them by these exact names.
 
 | Variable | Type | Set by question |
 |---|---|---|
@@ -3627,7 +3654,7 @@ extensions:
 
 ## Generation Order
 
-After all questions are answered, generate files in this order. Each file comes from a template in `blueprints/xantham-templates-v32.md`. **Track success of every step.** If any numbered step below fails, capture the error, do NOT continue to the next numbered step, and emit `DIAGNOSTIC-CHECKLIST.md` instead of `SETUP-CHECKLIST.md` at the end (see Step 18).
+After all questions are answered, generate files in this order. Each file comes from a template in `blueprints/xantham-templates-v33.md`. **Track success of every step.** If any numbered step below fails, capture the error, do NOT continue to the next numbered step, and emit `DIAGNOSTIC-CHECKLIST.md` instead of `SETUP-CHECKLIST.md` at the end (see Step 18).
 
 1. **Create directory structure:**
    ```
@@ -3672,21 +3699,21 @@ After all questions are answered, generate files in this order. Each file comes 
    └── CLAUDE.md
    ```
 
-   **Step 1.5 -- write `.gitignore` BEFORE any other generation step.** Use the body in **`blueprints/xantham-templates-v32.md` § Template: .gitignore**. This file must exist at `{{project_path}}/.gitignore` before Step 2 creates the sqlite DB or any subsequent step touches `data/approved.txt`, `data/runtime/`, `data/vector-memory.db`, or `logs/safety-gate.log`. Writing the gitignore here closes a real first-push leak window: the safety-gate template comment at line 497 in the templates file (`# NOTE: this file MUST be in .gitignore`) had no companion gitignore until now. Fixes Marco audit CS3.
+   **Step 1.5 -- write `.gitignore` BEFORE any other generation step.** Use the body in **`blueprints/xantham-templates-v33.md` § Template: .gitignore**. This file must exist at `{{project_path}}/.gitignore` before Step 2 creates the sqlite DB or any subsequent step touches `data/approved.txt`, `data/runtime/`, `data/vector-memory.db`, or `logs/safety-gate.log`. Writing the gitignore here closes a real first-push leak window: the safety-gate template comment at line 497 in the templates file (`# NOTE: this file MUST be in .gitignore`) had no companion gitignore until now. Fixes Marco audit CS3.
 
 2. **Create the SQLite database:** run `setup-db.sh` which creates `data/{{db_name}}` with the full schema (memories table with FTS5, corrections table, patterns table).
 
-3. **Generate CLAUDE.md** from the master template in **`blueprints/xantham-templates-v32.md` § Template: CLAUDE.md**. This is the largest file - it defines the orchestrator's identity, core loop, routing table, commands, agent spawning rules, safety rules, and everything else. Substitute every `{{placeholder}}` (orchestrator name, agent roster, plan, security tier, mode, etc.). Honour both kinds of conditional in the template: `<!-- IF plan=... -->` blocks (driven by `{{plan}}` for the plan-label header) AND `<!-- IF spawn_aggressiveness=... -->` blocks (driven by `{{spawn_aggressiveness}}` from Q7.5 for the agent-spawning-rules section). The two conditionals are intentionally independent so a Max-20x user who picked Conservative gets the right rules (sequential dispatch) instead of inheriting plan-derived aggressive defaults. Also substitute the derived `{{spawn_aggressiveness_block}}` literal text inside whichever spawn-rules block ends up active, and the derived `{{context_warning_threshold}}` + `{{plan_name}}` values in the pre-compaction sync section.
+3. **Generate CLAUDE.md** from the master template in **`blueprints/xantham-templates-v33.md` § Template: CLAUDE.md**. This is the largest file - it defines the orchestrator's identity, core loop, routing table, commands, agent spawning rules, safety rules, and everything else. Substitute every `{{placeholder}}` (orchestrator name, agent roster, plan, security tier, mode, etc.). Honour both kinds of conditional in the template: `<!-- IF plan=... -->` blocks (driven by `{{plan}}` for the plan-label header) AND `<!-- IF spawn_aggressiveness=... -->` blocks (driven by `{{spawn_aggressiveness}}` from Q7.5 for the agent-spawning-rules section). The two conditionals are intentionally independent so a Max-20x user who picked Conservative gets the right rules (sequential dispatch) instead of inheriting plan-derived aggressive defaults. Also substitute the derived `{{spawn_aggressiveness_block}}` literal text inside whichever spawn-rules block ends up active, and the derived `{{context_warning_threshold}}` + `{{plan_name}}` values in the pre-compaction sync section.
 
-4. **Generate .claude/settings.json** from **`blueprints/xantham-templates-v32.md` § Template: .claude/settings.json (Standard Security)** OR **`blueprints/xantham-templates-v32.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
+4. **Generate .claude/settings.json** from **`blueprints/xantham-templates-v33.md` § Template: .claude/settings.json (Standard Security)** OR **`blueprints/xantham-templates-v33.md` § Template: .claude/settings.json (Enterprise Security)** depending on `{{security}}`.
 
    **Step 4 backup + sidecar (sentinel-gating, fixes Marco audit CG5).** If `~/.claude/settings.json` ALREADY EXISTS on the host (another Claude Code project on the same machine), copy it to `~/.claude/settings.json.pre-install` BEFORE writing the new one. Do NOT overwrite an existing `.pre-install` (preserve any older install's backup). Then `touch ~/.claude/.settings.json.xantham-managed` (mode `0644`) AFTER writing the new settings.json. The sidecar marker is what the wizard-provisioned `uninstall.sh` (under `scripts/`) reads to know it can safely jq-strip the `statusLine` block when the .pre-install backup is missing. Without the sidecar, uninstall refuses to touch settings.json. Mac/Linux: standard `cp` + `touch`. Windows (PowerShell): `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.pre-install"` + `New-Item -Path "$env:USERPROFILE\.claude\.settings.json.xantham-managed" -ItemType File`.
 
-5. **Generate hook scripts.** For each hook listed below, look up the matching **`## Template: .claude/hooks/<name>.sh`** section in `blueprints/xantham-templates-v32.md` and write the literal body to `.claude/hooks/<name>.sh`, substituting placeholders. Hook list: `safety-gate.sh` (always), `log-telegram-hook.sh` (only if `{{messaging}}`=telegram), `audit-log-hook.sh` (only if `{{security}}`=enterprise OR Advanced mode with E4 selected at Q18), `voice-lint.sh` (always; the de-personalised reply-quality lint), `stop-composer.sh` (always), `stop-verify-contract.sh` (always). After writing, `chmod +x` each. Mac/Linux: `chmod +x .claude/hooks/*.sh`. Windows (Git Bash): `chmod +x .claude/hooks/*.sh` works the same; on plain PowerShell the chmod is unnecessary because Git Bash interprets the shebang directly.
+5. **Generate hook scripts.** For each hook listed below, look up the matching **`## Template: .claude/hooks/<name>.sh`** section in `blueprints/xantham-templates-v33.md` and write the literal body to `.claude/hooks/<name>.sh`, substituting placeholders. Hook list: `safety-gate.sh` (always), `log-telegram-hook.sh` (only if `{{messaging}}`=telegram), `audit-log-hook.sh` (only if `{{security}}`=enterprise OR Advanced mode with E4 selected at Q18), `voice-lint.sh` (always; the de-personalised reply-quality lint), `stop-composer.sh` (always), `stop-verify-contract.sh` (always). After writing, `chmod +x` each. Mac/Linux: `chmod +x .claude/hooks/*.sh`. Windows (Git Bash): `chmod +x .claude/hooks/*.sh` works the same; on plain PowerShell the chmod is unnecessary because Git Bash interprets the shebang directly.
 
-6. **Generate skill bodies.** For each skill in **`blueprints/xantham-templates-v32.md` § Skill Templates**, write the literal body to `.claude/skills/<skill-name>/SKILL.md`. Substitute `{{orchestrator_name}}` / `{{orchestrator_lower}}` placeholders. Skills to generate: `<orchestrator_lower>-sync`, `<orchestrator_lower>-maintenance`, `<orchestrator_lower>-orchestration`, `<orchestrator_lower>-brain`, `<orchestrator_lower>-safety`, `<orchestrator_lower>-observability`, `<orchestrator_lower>-blueprint-updates`, plus any others in the Skill Templates section. <!-- TODO: cross-reference Kai-1's skill template section once it lands - skill list above is the contract; bodies come from blueprints/xantham-templates-v32.md. -->
+6. **Generate skill bodies.** For each skill in **`blueprints/xantham-templates-v33.md` § Skill Templates**, write the literal body to `.claude/skills/<skill-name>/SKILL.md`. Substitute `{{orchestrator_name}}` / `{{orchestrator_lower}}` placeholders. Skills to generate: `<orchestrator_lower>-sync`, `<orchestrator_lower>-maintenance`, `<orchestrator_lower>-orchestration`, `<orchestrator_lower>-brain`, `<orchestrator_lower>-safety`, `<orchestrator_lower>-observability`, `<orchestrator_lower>-blueprint-updates`, plus any others in the Skill Templates section. <!-- TODO: cross-reference Kai-1's skill template section once it lands - skill list above is the contract; bodies come from blueprints/xantham-templates-v33.md. -->
 
-7. **Generate script bodies.** Walk every script-bearing section in `blueprints/xantham-templates-v32.md` and write each literal body to its indicated path under `scripts/`. Script bodies live in FOUR distinct sections of the templates appendix and the wizard MUST pull from all four, not just the first one:
+7. **Generate script bodies.** Walk every script-bearing section in `blueprints/xantham-templates-v33.md` and write each literal body to its indicated path under `scripts/`. Script bodies live in FOUR distinct sections of the templates appendix and the wizard MUST pull from all four, not just the first one:
 
    1. **`## Script Templates`** (the always-installed core: healthcheck, verify-runtime-perms, load-context, commit-watcher, log-correction, history, register-project, pre-compaction-sync, post-compaction-reload, recent-telegram, redact-secrets, memory-search, embed-memories.py, check-memory-freshness, session-end-sync, update-handoff, reflect, promote-correction, log-telegram, batch-sync, sync-project-memories, check-blueprint-drift, telegram-signal, uninstall).
    2. **`## Common Templates (referenced earlier in this blueprint)`** (setup-db.sh, sync-safety-gates.sh, restore-memory-symlinks.sh). Always installed.
@@ -3699,9 +3726,9 @@ After all questions are answered, generate files in this order. Each file comes 
 
    Verification: after generating all scripts, list `scripts/` and confirm the four-section contract is honoured. A missing `setup-db.sh` means section 2 was skipped. A missing `install-git-hooks.sh` means section 3 was skipped. A missing `audit-archive.sh` (when E4 selected) means section 4 was skipped.
 
-8. **Generate starter memory seeds.** For each seed in **`blueprints/xantham-templates-v32.md` § Starter Memory Seeds**, write the literal body to its indicated path under `memory/`. Then write `memory/MEMORY.md` as the index pointing at every seed. <!-- TODO: cross-reference Isabella's starter memory seeds section once it lands - seed list comes from blueprints/xantham-templates-v32.md. -->
+8. **Generate starter memory seeds.** For each seed in **`blueprints/xantham-templates-v33.md` § Starter Memory Seeds**, write the literal body to its indicated path under `memory/`. Then write `memory/MEMORY.md` as the index pointing at every seed. <!-- TODO: cross-reference Isabella's starter memory seeds section once it lands - seed list comes from blueprints/xantham-templates-v33.md. -->
 
-9. **Generate agent configs** in `.claude/agents/` - one per selected agent, from **`blueprints/xantham-templates-v32.md` § Template: Agent Config**.
+9. **Generate agent configs** in `.claude/agents/` - one per selected agent, from **`blueprints/xantham-templates-v33.md` § Template: Agent Config**.
 
 10. **Create agent + orchestrator memory directories INSIDE the repo**, then symlink Claude Code's expected paths to them. Canonical files live in the repo so `git commit` backs them up and cloud routines see them:
     ```bash
@@ -3729,7 +3756,7 @@ After all questions are answered, generate files in this order. Each file comes 
 
 11. **Generate .mcp.json** if Telegram or any MCP servers were selected.
 
-12. **Add shell launch functions** to the user's shell profile. Mac/Linux: append the bash/zsh functions from **`blueprints/xantham-templates-v32.md` § Template: Shell Launch Functions (Mac/Linux)** to `~/.zshrc` or `~/.bashrc`. Windows: append the PowerShell function from **`blueprints/xantham-templates-v32.md` § Template: Shell Launch Functions (Windows)** to `$PROFILE`.
+12. **Add shell launch functions** to the user's shell profile. Mac/Linux: append the bash/zsh functions from **`blueprints/xantham-templates-v33.md` § Template: Shell Launch Functions (Mac/Linux)** to `~/.zshrc` or `~/.bashrc`. Windows: append the PowerShell function from **`blueprints/xantham-templates-v33.md` § Template: Shell Launch Functions (Windows)** to `$PROFILE`.
 
 13. **Generate data/help-text.md and data/team-text.md** from the agent roster.
 
@@ -4524,7 +4551,7 @@ If NotebookLM auth fails at any point, the system skips silently and relies on l
 
 --- END OF PART 2: ARCHITECTURE REFERENCE ---
 
-> 📎 *Part 3 (Code Templates) lives in the companion file: `blueprints/xantham-templates-v32.md`. Every template body the install wizard copies verbatim (CLAUDE.md, settings.json, hooks, scripts, skills, agent configs, memory seeds, doc bodies) is stored there. The landing file you are reading now keeps the human-readable wizard, architecture reference, advanced patterns, and troubleshooting catalogue.*
+> 📎 *Part 3 (Code Templates) lives in the companion file: `blueprints/xantham-templates-v33.md`. Every template body the install wizard copies verbatim (CLAUDE.md, settings.json, hooks, scripts, skills, agent configs, memory seeds, doc bodies) is stored there. The landing file you are reading now keeps the human-readable wizard, architecture reference, advanced patterns, and troubleshooting catalogue.*
 
 ---
 
@@ -4878,7 +4905,7 @@ Add to the core loop:
 - Logging outbound replies: `bash scripts/log-telegram.sh "{{orchestrator_name_lower}}" "<reply>" "<project>" false`
 - The reply-first rule (always reply on Telegram within seconds, never leave the user waiting)
 
-Add `scripts/log-telegram.sh` if it was not generated during initial setup (terminal-only setups skip this script). Use the template from `blueprints/xantham-templates-v32.md` § Template: scripts/log-telegram.sh.
+Add `scripts/log-telegram.sh` if it was not generated during initial setup (terminal-only setups skip this script). Use the template from `blueprints/xantham-templates-v33.md` § Template: scripts/log-telegram.sh.
 
 **Step 6: Configure access control**
 The Telegram plugin's access system controls who can talk to your bot:
