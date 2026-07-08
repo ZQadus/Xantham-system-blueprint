@@ -271,7 +271,7 @@ Full reference + commit-pinning options at [`docker/README.md`](docker/README.md
 2. Paste this single line into the Claude prompt:
 
    ```
-   Read the Xantham System v31 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v32.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-templates-v32.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
+   Read the Xantham System v34 blueprint at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-v34.md and the companion templates appendix at https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-templates-v32.md. Run the full setup wizard from the landing file, pulling template bodies from the appendix when generation steps reference them. Walk me through every step, ask me one question at a time, don't assume any values. Guide me through getting whatever you need (Telegram bot token, NotebookLM notebook, agent name, etc.) as the wizard reaches each one.
    ```
 
 3. The wizard handles everything interactively from there. It will:
@@ -398,7 +398,7 @@ Working on multiple things in parallel is the default. Telling Telegram "work on
 - **`ARCHITECTURE.md`**. System map with Mermaid diagram, component descriptions, data flow, memory and safety cross-sections.
 - **`SECURITY.md`**. Threat model, the three-bucket safety gate, known limitations, vulnerability disclosure.
 - **`COMPARISON.md`**. Benchmark table vs the most-cited public agent frameworks and orchestrators.
-- **`xantham-system-v32.md`** (~5400 lines). The landing file. Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half.
+- **`xantham-system-v34.md`** (~5900 lines). The landing file (current version). Install wizard, day-1 user experience docs, architecture reference, advanced patterns, troubleshooting catalogue. The human-readable half. The prior `xantham-system-v32.md` remains in the repo for reference (v33 was an internal-only bump; v34 is the current record). Both are covered by the checksum manifest.
 - **`xantham-templates-v32.md`** (~11400 lines). The templates appendix. Every script body, hook template, settings.json variant, agent config, skill body, memory seed that the wizard generates. The wizard's install steps reference these by name; the user's Claude reads both files in sequence.
 - **`orchestration-habits.md`** (versioned, currently v1.0.0). Self-contained habits + manifest file. Drop into any orchestrator install. The `xantham-sync-habits` skill parses the manifest and installs every dependency autonomously when the user says `sync habits`.
 - **`install-xantham-habits.sh`**. CLI fallback installer for the habits layer. Use this for CI / scripted installs / brand-new repos that do not yet have an orchestrator agent loaded. Normal path is the `sync habits` command above.
