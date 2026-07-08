@@ -434,9 +434,9 @@ The repo name doesn't include a version. The files inside do. Commit history sho
 
 ## Sharing
 
-This repo is public. Fork it, share the URL, hand the blueprint file to anyone with Claude Code. They'll have their own AI command centre running by the end of the afternoon.
+This is the private master copy of the self-install method. Hand the blueprint file to a Claude Code session and it builds a full AI command centre in an afternoon.
 
-The personal-state version (with bot tokens, project names, agent personalities, etc.) lives in your private repo. This public file is the universal template.
+The personal-state version (with bot tokens, project names, agent personalities, etc.) lives in your live working repo. This file is the universal template.
 
 ## Don't like it? Uninstall in 2 minutes
 
