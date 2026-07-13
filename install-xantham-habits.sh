@@ -82,6 +82,13 @@ if [ "$UNINSTALL" = "1" ]; then
   done
   [ -f "$PROJECT_ROOT/$HABITS_REL" ] && rm "$PROJECT_ROOT/$HABITS_REL"
   [ -f "$PROJECT_ROOT/CLAUDE.md.pre-habits" ] && mv "$PROJECT_ROOT/CLAUDE.md.pre-habits" "$PROJECT_ROOT/CLAUDE.md"
+  # Restore settings.json from the pre-habits backup so the hook wiring (incl. the
+  # banned-language-gate PreToolUse entry) is fully reversed. Without this, an
+  # uninstall would leave the operator's settings.json patched.
+  if [ -f "$PROJECT_ROOT/.claude/settings.json.pre-habits" ]; then
+    mv "$PROJECT_ROOT/.claude/settings.json.pre-habits" "$PROJECT_ROOT/.claude/settings.json"
+    say "restored .claude/settings.json from pre-habits backup"
+  fi
   say "uninstall complete"
   exit 0
 fi

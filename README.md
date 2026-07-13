@@ -247,7 +247,7 @@ Full reference + commit-pinning options at [`docker/README.md`](docker/README.md
 
 ### Fast path: install directly on host
 
-1. Open a fresh Claude Code session pointed at an empty directory you want to become your AI command centre.
+1. Open a fresh Claude Code session pointed at a brand-new **empty** directory you want to become your AI command centre. This is a hard requirement, not a suggestion: the wizard's first step (Q0 Step 0) checks the directory and **refuses to install if it is non-empty or already contains an install**, so a fresh install can never overwrite an existing setup. To upgrade an existing install, use `sync habits` or the customization-preserving upgrade path instead (see below).
 
    **If you've never run Claude Code from a terminal before:**
    - **Mac:** Open Terminal (⌘+space, type Terminal). Type `mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent && claude --dangerously-skip-permissions`. Press enter.
@@ -264,7 +264,7 @@ Full reference + commit-pinning options at [`docker/README.md`](docker/README.md
    >
    > Two ways to minimise the early-window risk:
    > - **Read the install command before you paste it.** It just points Claude at this repo. Nothing exotic.
-   > - **Run the install in a fresh directory** with no existing secrets, repos, or sensitive files. The wizard only writes inside the install directory until you explicitly point it at other projects later.
+   > - **Run the install in a fresh, empty directory** with no existing secrets, repos, or sensitive files. This is enforced: the wizard's Q0 Step 0 install-safety gate refuses to proceed if the directory is non-empty or already holds an install, before it writes anything. The wizard only writes inside the install directory, and only once that gate passes.
    >
    > After the install, you keep the `--dangerously-skip-permissions` flag on (or off) per your preference. The safety gate keeps working either way. Most operators run with it on for daily work because the orchestrator is fine-grained about what it dispatches to specialists, and the hard-blocks catch the truly dangerous stuff.
 

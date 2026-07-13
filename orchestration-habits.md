@@ -183,7 +183,7 @@ The safety-gate PreToolUse hook is the real enforcement. CLAUDE.md text alone is
 
 Anchor: `#banned-language`
 
-The banned-language gate hook blocks medical-claim words, marketing superlatives, and AI-tells from leaking into messaging-tool replies AND files written under `Library/`, `docs/`, app strings dirs. Sources: `Library/app-store-compliance/banned-language-list.md` (the list) + `banned-language-allowlist.md` (exceptions). Performance target under 50ms per fire.
+The banned-language gate hook is ADVISORY ONLY. It WARNS about medical-claim words, marketing superlatives, and AI-tells in messaging-tool replies AND files written under `Library/`, `docs/`, app strings dirs — it emits a warning and records it to `logs/banned-language-gate.log`, but it NEVER hard-denies the tool call. A language lint must never block the operator's own Write / Edit / Read or their messaging; only the safety gate blocks (and only genuinely destructive commands). Sources: `Library/app-store-compliance/banned-language-list.md` (the list) + `banned-language-allowlist.md` (exceptions). Performance target under 50ms per fire.
 
 ---
 

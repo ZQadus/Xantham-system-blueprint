@@ -88,7 +88,7 @@ The wizard runs for about an hour (30-45 minutes if your prereqs are already ins
 
 Mitigations:
 
-- **Run the install in a fresh directory** with no existing secrets, repositories, or sensitive files. The wizard only writes inside the install directory until you explicitly point it at other projects later.
+- **Run the install in a fresh, empty directory** with no existing secrets, repositories, or sensitive files. This is enforced, not just advised: the wizard's Q0 Step 0 install-safety gate runs before any file is written and **refuses to fresh-install if the directory is non-empty or already contains an install** (it routes you to the customization-preserving upgrade path instead). So even inside the early-install window, a fresh install cannot overwrite an existing setup's CLAUDE.md, memory, secrets, or bots. The standalone check ships at `scripts/preflight-guard.sh`. The wizard only writes inside the install directory until you explicitly point it at other projects later.
 - **Read the install command before pasting.** It points Claude at this public blueprint and tells it to walk you through the wizard. Nothing exotic.
 - **Skip `--dangerously-skip-permissions` if you prefer manual approval.** The install becomes slower (you will approve hundreds of tool calls) but never has an unprotected window.
 

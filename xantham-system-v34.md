@@ -1577,7 +1577,7 @@ The v32.3 pass BUILT the best-in-class engine; v33 is the slate that turns it fr
   4. Per-invocation env-scrub on ensemble CLI calls to prevent cred leak when the wrapper subshells out.
 - **Claude Code v2.1.139 + v2.1.140 settings adoptions.**
   - `skillOverrides` — explicit allowlist of skills to disable / restrict to name-only. Reduces context bloat on every session. Common installs flip 50+ default skills off and 5-10 to name-only.
-  - Hook `continueOnBlock` — lets a hook block a tool call AND let Claude Code keep going with a corrected prompt. Used by the banned-language gate to auto-log + retry.
+  - Hook `continueOnBlock` — lets a hook block a tool call AND let Claude Code keep going with a corrected prompt. (The banned-language gate does NOT use this — it is advisory-only and never blocks; see below.)
   - Hook `args` — pass static args into hook invocations from settings.json (cleaner than env-var smuggling).
   - `CLAUDE_PROJECT_DIR` — Claude Code now exports this so hooks have a stable repo-root reference regardless of cwd.
 - **AI cost dashboard truth rule.** Estimator outputs from preview endpoints + cost-calc helpers are UPPER-BOUND, not actual. Trust the provider dashboard (Anthropic / OpenAI / Gemini) for real spend. Don't quote estimator numbers without flagging them as upper-bound.
@@ -1612,7 +1612,7 @@ The v32 thesis: an orchestrator of this shape is already in the frontier archite
 - **Pair with a pre-install skill SECURITY scan** the moment any auto-generated skill is written or promoted (community skill corpora carry a non-trivial vuln rate) — staged as the next slate item.
 
 ### v31.2 - infra hardening + perma-rules from 2026-05-09 / 2026-05-10 upgrade slate
-- **Banned-language gate hook** (`.claude/hooks/banned-language-gate.sh` + perl helper). PreToolUse blocks medical-claim words / marketing superlatives / AI-tells from leaking into orchestrator replies AND files written under `Library/`, `docs/`, app strings. Reads from `Library/app-store-compliance/banned-language-list.md` + allowlist. ~45ms per fire (60s cache). Configurable via `BANNED_LANG_GATE_PATHS` / `BANNED_LANG_GATE_DEBUG=1` / emergency bypass `BANNED_LANG_GATE_OFF=1`.
+- **Banned-language gate hook** (`.claude/hooks/banned-language-gate.sh` + perl helper). PreToolUse hook that is ADVISORY ONLY — it WARNS about medical-claim words / marketing superlatives / AI-tells in orchestrator replies AND files written under `Library/`, `docs/`, app strings, and records each hit to `logs/banned-language-gate.log`, but it NEVER hard-denies the tool call (it always exits 0). A language lint must never block the operator's own Write / Edit / Read or their messaging; only the safety gate blocks. Reads from `Library/app-store-compliance/banned-language-list.md` + allowlist. ~45ms per fire (60s cache). Configurable via `BANNED_LANG_GATE_PATHS` / `BANNED_LANG_GATE_DEBUG=1` / emergency bypass `BANNED_LANG_GATE_OFF=1`.
 - **Per-agent MCP scoping** (`scripts/sync_agent_skills.py`). Lifted from `anthropics/claude-financial-services`. Each `.claude/agents/<name>.md` declares `mcps:` in YAML frontmatter; script generates per-agent `.mcp.json`, validates against live `claude mcp list`, reports drift. Estimated 6-8k tokens saved per dispatch when Claude Code wires per-agent loading.
 - **Architectural-role tagging** (`scripts/tag-architectural-role.sh` + `scripts/check-trunk-edits.sh`). Convention: every long-lived markdown carries `architectural_role:` of `trunk` / `branch` / `leaf`. Trunk-edit watcher flags commits touching trunk files in healthcheck. Convention doc: `Library/agentic-engineering/architectural-role-tagging.md`.
 - **Agent-readiness audit script** (`scripts/agent-readiness-audit.sh`). Factory.ai-style 8-pillar pattern adapted for orchestrator-system scope: memory hygiene, skill coverage, tool budget, agent crew utilisation, hook reliability, blueprint drift, correction patterns, external dependencies. Quarterly trigger (first Monday of Jan/Apr/Jul/Oct) lives in `<orchestrator>-maintenance` skill. Read-only.
@@ -1701,7 +1701,7 @@ Not documented. Core loop + safety gate + routing table existed from v1.
 `bash scripts/install-blueprint.sh --remove E3` - uninstall steps for E3, marks it off in the version file.
 
 ### Non-interactive auto-apply (for self-updating hosts)
-`bash scripts/install-blueprint.sh --auto` - the NON-INTERACTIVE clean-apply path used by the Xantham auto-sync subsystem (see the "Xantham Auto-Sync subsystem" section in xantham-templates-v32.md). It compares the version-file marker against the version of the blueprint files present in the tree and, on a clean FORWARD upgrade, bumps `blueprint_version:` and appends an `upgraded:` line. It NEVER prompts and NEVER runs an extension installer (newly-shipped advanced-default extensions are surfaced for a manual `--add`). It STOPS with exit 3 (non-destructive, marker untouched) on any ambiguity: no version file, a downgrade/divergence (marker ahead of shipped), or a malformed marker. Idempotent (re-run on the same version = no-op). Audit line written to `data/runtime/xantham-sync.log`. When generating `install-blueprint.sh`, include the `--auto` case so downstream hosts can self-update.
+`bash scripts/install-blueprint.sh --auto` - the NON-INTERACTIVE clean-apply path for MANUAL, explicit upgrades. It runs ONLY when the operator chooses to upgrade (e.g. as part of `sync habits`, or a hand-run upgrade); it is NEVER wired to run automatically, and NEVER from a `SessionStart` hook. It compares the version-file marker against the version of the blueprint files present in the tree and, on a clean FORWARD upgrade, bumps `blueprint_version:` and appends an `upgraded:` line. It NEVER prompts and NEVER runs an extension installer (newly-shipped advanced-default extensions are surfaced for a manual `--add`). It STOPS with exit 3 (non-destructive, marker untouched) on any ambiguity: no version file, a downgrade/divergence (marker ahead of shipped), or a malformed marker. Idempotent (re-run on the same version = no-op). Audit line written to `data/runtime/blueprint-apply.log`. When generating `install-blueprint.sh`, include the `--auto` case so an operator can run a non-interactive upgrade on demand — do NOT wire it to run automatically on session start.
 
 ### Version file format
 `.{{orchestrator_lower}}-blueprint-version` (YAML):
@@ -2777,7 +2777,7 @@ The hardened safety gate (E5) blocks this hard, but if you somehow get past it: 
 
 ## Do not reinstall the orchestrator over an existing install without backing up
 
-Re-running the wizard on a populated repo can overwrite CLAUDE.md / settings / memory. Always backup the entire repo first: `git branch backup/$(date +%s) && git push origin backup/$(date +%s)`.
+Re-running the wizard on a populated repo can overwrite CLAUDE.md / settings / memory. This is now enforced: the wizard's **Q0 Step 0 install-safety hard gate** detects an existing install (or any non-empty directory) BEFORE writing anything and refuses to fresh-install over it, routing you to the customization-preserving upgrade path instead. If you genuinely want a clean re-install, always back up the entire repo first (`git branch backup/$(date +%s) && git push origin backup/$(date +%s)`) and run the wizard in a brand-new EMPTY directory. To UPGRADE in place without clobbering, use `sync habits` or the three-way-diff upgrade path (which backs up and preserves your `USER-CUSTOM-SECTION` blocks) rather than a fresh install.
 
 ## Do not run multiple `<agent-name>` aliases pointing at different repos
 
@@ -3008,7 +3008,41 @@ After collecting answers, compute these before generating files:
 
 ### Q0: Preflight checks
 
-Q0 is a HARD GATE. The wizard does not ask any other question until Q0 passes. Goal: confirm every prerequisite (Node 18+, Git, jq, sqlite3, bun, claude CLI) is installed before any user-facing decision. Without these, later steps fail in confusing ways and the user has to start over.
+Q0 is a HARD GATE. The wizard does not ask any other question until Q0 passes. Goal: confirm this is a safe place to install AND that every prerequisite (Node 18+, Git, jq, sqlite3, bun, claude CLI) is installed before any user-facing decision. Without these, later steps fail in confusing ways and the user has to start over.
+
+**Step 0 (install-safety hard gate — runs BEFORE any file is written).** A fresh install writes hundreds of files under `--dangerously-skip-permissions`. If the install directory already contains an install (or the user's own work), a fresh install would OVERWRITE their CLAUDE.md / settings / memory / bots / secrets / chat. So the very first thing the wizard does — before writing anything, including before generating `preflight.sh` in Step 2 — is verify the target directory is safe to fresh-install into. Run this prompt-free Bash probe via the Bash tool (it writes nothing):
+
+```bash
+# Install-safety guard: detect an existing install or a non-empty dir.
+# Mirrors scripts/preflight-guard.sh (which is not present yet in a fresh dir).
+found=""
+for m in CLAUDE.md .claude/settings.json memory data .env USER-GUIDE.md SETUP-CHECKLIST.md agent-memory HANDOFF.md; do
+  [ -e "$m" ] && found="$found $m"
+done
+for vm in .*-blueprint-version; do
+  [ -e "$vm" ] && found="$found $vm"
+done
+if [ -n "$found" ]; then
+  echo "GUARD=EXISTING_INSTALL markers:$found"
+else
+  leftover=""
+  for e in * .[!.]*; do
+    case "$e" in
+      '*'|'.[!.]*'|.DS_Store|.git|.gitkeep) continue ;;
+      *) [ -e "$e" ] && leftover="$leftover $e" ;;
+    esac
+  done
+  if [ -n "$leftover" ]; then echo "GUARD=NONEMPTY leftover:$leftover"; else echo "GUARD=SAFE"; fi
+fi
+```
+
+Branch on the result and DO NOT proceed to Step 1 unless it is `GUARD=SAFE`:
+
+- `GUARD=EXISTING_INSTALL` → STOP the fresh install. Tell the user, in a 🔴 block: "This directory already has an install (found: `<markers>`). I will NOT fresh-install over it — that would overwrite your CLAUDE.md, settings, memory, bots, secrets, and chat. To UPGRADE an existing install safely, use the customization-preserving path: say `sync habits` (adds/updates habits without clobbering), run the wizard's three-way-diff upgrade path (it backs up first and preserves your `USER-CUSTOM-SECTION` blocks — see 'Upgrading an existing install' / 'Do not reinstall the orchestrator over an existing install without backing up'), or add an extension with `bash scripts/install-blueprint.sh --add E<N>`. If you truly want a clean re-install, back the repo up first (`git branch backup/$(date +%s)`), then run me in a brand-new EMPTY directory." Then WAIT — do not write anything.
+- `GUARD=NONEMPTY` → STOP. Tell the user, in a 🔴 block: "This directory is not empty (found: `<leftover>`) and a fresh install must run in a brand-new empty directory so it cannot overwrite your files. Create an empty dir (`mkdir ~/Documents/MyAgent && cd ~/Documents/MyAgent`), start Claude Code there, and re-run me." Then WAIT — do not write anything.
+- `GUARD=SAFE` → the directory is empty. Proceed to Step 1.
+
+This is a HARD GATE: on `EXISTING_INSTALL` or `NONEMPTY` the wizard performs zero writes and stops. A standalone copy of this check ships at `scripts/preflight-guard.sh` for CI / manual re-runs once the repo exists (`bash scripts/preflight-guard.sh <dir>`; exit 0 safe / 3 existing-install / 4 non-empty).
 
 **Step 1.** Detect the user's OS in one prompt-free check (used only to pick the right install commands when something is missing). Run a single Bash probe via the Bash tool:
 

@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# XANTHAM BANNED-LANGUAGE GATE
+# XANTHAM BANNED-LANGUAGE GATE  (ADVISORY / WARN-ONLY — never hard-denies)
 #
-# PreToolUse hook that blocks the orchestrator from emitting banned words /
-# phrases defined by the App Store compliance handbook. Fires on:
+# PreToolUse hook that WARNS the orchestrator about banned words / phrases
+# defined by the App Store compliance handbook. Fires on:
 #   - mcp__plugin_telegram_telegram__reply  (every Telegram outbound)
 #   - Write / Edit when file_path matches BANNED_LANG_GATE_PATHS
 #
-# Exit-code contract (matches safety-gate.sh):
-#   exit 0 = allow
-#   exit 2 = block (reason on stderr)
+# Exit-code contract:
+#   exit 0 = ALWAYS. This gate is advisory only — it NEVER blocks a tool call.
+#            A language lint must never hard-deny the operator's own Write /
+#            Edit / Read or their messaging. On a banned-word hit it emits an
+#            advisory WARNING to stderr and appends a durable record to
+#            logs/banned-language-gate.log, then lets the tool proceed.
+#            (This is the deliberate difference from safety-gate.sh, which DOES
+#            block genuinely destructive commands with exit 2. This gate never
+#            blocks anything — it only advises.)
 #
-# Block message format:
-#   BLOCKED (banned-language): "<word>" detected in <context>.
+# Advisory message format (stderr, non-blocking):
+#   WARNING (banned-language, advisory): "<word>" detected in <context>.
 #     Snippet: <±20 chars>
 #     Suggested alternative: <safe alternative>
 #     Source: Library/app-store-compliance/banned-language-list.md
@@ -225,21 +231,28 @@ if [ -n "$DECISION" ]; then
   SNIPPET=$(printf '%s' "$DECISION" | awk -F'\t' '{print $3}')
   ALT=$(printf '%s' "$DECISION" | awk -F'\t' '{print $4}')
 
-  MSG="BLOCKED (banned-language): \"$WORD\" detected in $LINT_KIND.
+  MSG="WARNING (banned-language, advisory): \"$WORD\" detected in $LINT_KIND.
   Snippet: $SNIPPET
   Suggested alternative: $ALT
   Source: Library/app-store-compliance/banned-language-list.md
-  If this is a legitimate use, add to:
+  This is an ADVISORY warning only - the tool call is NOT blocked. If this is a
+  legitimate use, add to:
   Library/app-store-compliance/banned-language-allowlist.md (literal: or regex: line)"
 
   printf '%s\n' "$MSG" >&2
 
+  # Durable advisory record so the warning is not lost (stderr on exit 0 is not
+  # surfaced to the orchestrator in normal use). Always written on a hit.
+  printf '[%s] WARN(advisory) kind=%s word=%s\n' \
+    "$(date -Iseconds)" "$LINT_KIND" "$WORD" >> "$LOG_FILE" 2>/dev/null || true
+
   if [ "${BANNED_LANG_GATE_DEBUG:-0}" = "1" ]; then
-    printf '[%s] BLOCK %sms kind=%s word=%s\n' \
+    printf '[%s] WARN %sms kind=%s word=%s\n' \
       "$(date -Iseconds)" "$ELAPSED_MS" "$LINT_KIND" "$WORD" >> "$LOG_FILE"
   fi
 
-  exit 2
+  # Advisory only: NEVER block. Let the tool proceed.
+  exit 0
 fi
 
 if [ "${BANNED_LANG_GATE_DEBUG:-0}" = "1" ]; then
