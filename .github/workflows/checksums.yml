@@ -13,6 +13,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'xantham-system-v35.md'
       - 'xantham-system-v34.md'
       - 'xantham-system-v32.md'
       - 'xantham-templates-v32.md'
@@ -27,6 +28,7 @@ on:
       - '.github/workflows/checksums.yml'
   pull_request:
     paths:
+      - 'xantham-system-v35.md'
       - 'xantham-system-v34.md'
       - 'xantham-system-v32.md'
       - 'xantham-templates-v32.md'

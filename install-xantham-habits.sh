@@ -36,7 +36,16 @@ LIBRARY_FILES=(
 )
 SKILL_FILES=(
   ".claude/skills/xantham-sync-habits/SKILL.md"
+  ".claude/skills/xantham-21st-bridge/SKILL.md"
+  ".claude/skills/xantham-ai-seo/SKILL.md"
+  ".claude/skills/xantham-memory/SKILL.md"
+  ".claude/skills/xantham-spec-kit-bridge/SKILL.md"
 )
+# NOTE: xantham-orchestration, xantham-reflection, and xantham-safety are NOT
+# in this list on purpose. They are generated per-install by the full setup
+# wizard (Q14+ in xantham-system-v35.md, bodies in xantham-templates-v32.md)
+# because their content depends on your chosen orchestrator name and mode.
+# This script only fetches the 5 skills that ship as static files in this repo.
 HABITS_REL="blueprints/orchestration-habits.md"
 DRY_RUN=0
 UPDATE=0
@@ -229,6 +238,7 @@ checks=(
   ".claude/hooks/stop-verify-contract.sh:x"
   ".claude/hooks/stop-composer.sh:x"
   "Library/app-store-compliance/banned-language-list.md:f"
+  ".claude/skills/xantham-memory/SKILL.md:f"
   "$HABITS_REL:f"
 )
 for c in "${checks[@]}"; do

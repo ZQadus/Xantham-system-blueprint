@@ -236,6 +236,15 @@ habits_version: 1.0.0
 
 # Skills to install (clone or marketplace).
 # Each skill lands at .claude/skills/<name>/SKILL.md.
+# All entries below are marked "blueprint-generated" because the body embeds
+# {{orchestrator_lower}} and other per-install values. Five of them ALSO ship
+# as static, URL-fetchable files in this repo under their "xantham-" prefixed
+# name (spec-kit-bridge, memory, ai-seo, 21st-bridge, sync-habits) --
+# install-xantham-habits.sh's SKILL_FILES array pulls those five directly.
+# The other three (orchestration, reflection, safety) have no fixed public
+# body -- they are generated fresh per-install by the full setup wizard
+# (Q14+ in xantham-system-v35.md, template bodies in xantham-templates-v32.md)
+# because their content depends on your chosen orchestrator name and mode.
 skills:
   - name: "{{orchestrator_lower}}-orchestration"
     install: blueprint-generated

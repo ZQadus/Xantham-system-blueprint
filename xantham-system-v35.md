@@ -257,79 +257,79 @@ Run these from a normal terminal via the `claude plugin` CLI, **not** the in-ses
 
 ### Marketplaces we add
 
+This table is verified against a live install (`claude plugin marketplace list` + `claude plugin list`), not aspirational. Marketplace nicknames are whatever your CLI assigns when you run the add command below (usually derived from the repo name) — confirm yours with `claude plugin marketplace list` after adding; the repo path is the durable identifier.
+
 | Marketplace | Add command (`claude plugin marketplace add ...`) | What it brings |
 |---|---|---|
-| superpowers | `obra/superpowers` | Brainstorming, planning, TDD, systematic debugging, git worktrees, parallel-agent dispatch |
-| document-skills | `anthropics/skills` | docx / pptx / xlsx / pdf authoring, frontend-design, skill-creator, brand + theme tooling |
-| vercel | `vercel/plugins` | Deploy, env, Next.js, shadcn, functions, firewall, AI SDK — the full Vercel surface |
-| expo | `expo/plugins` | Native UI, EAS build / update / deploy, native modules, Tailwind/NativeWind setup |
-| core-3d-animation | `community/core-3d-animation` | GSAP + ScrollTrigger, Three.js, React Three Fiber, Babylon.js, Motion |
-| animation-components | `community/animation-components` | Magic UI + React Bits libraries, Anime.js, Lottie, React Spring, scroll-reveal |
-| ui-ux-pro-max | `community/ui-ux-pro-max` | 50+ styles, 161 palettes, 57 font pairings, design review/build for web + mobile |
-| impeccable | `community/impeccable` | Design / redesign / audit / polish for interfaces, live browser iteration |
-| react-native-best-practices | `software-mansion/rn-skills` | New-Architecture RN performance, Reanimated, gesture, brownfield migration |
-| swiftui-pro | `community/swiftui` | SwiftUI review, Liquid Glass, concurrency, performance audit, view refactor |
-| codex | `community/codex` | OpenAI Codex second-model review / rescue subagent (judgment-based) |
-| caveman | `community/caveman` | Token-compressed communication + commit / review modes for long sessions |
-| watch | `bradautomates/claude-video` | Download + transcribe + frame-extract any video, then answer questions about it |
-| notebooklm | `community/notebooklm` | Full programmatic NotebookLM (create notebooks, sources, podcasts, downloads) |
-| frontend-design | `community/frontend-design` | Distinctive production-grade frontend that avoids generic AI aesthetics |
-| compound-engineering | `EveryInc/compound-engineering-plugin` | Structured plan → review → work → codify methodology (org-maintained), maps onto the orchestration loop |
+| claude-plugins-official | `anthropics/claude-plugins-official` | telegram, vercel, swift-lsp (Swift LSP), clangd-lsp (C/C++ LSP) |
+| claude-code-plugins | `anthropics/claude-code` | frontend-design |
+| superpowers-marketplace | `obra/superpowers-marketplace` | superpowers |
+| anthropic-agent-skills | `anthropics/skills` | document-skills (docx/pptx/xlsx/pdf), example-skills (reference patterns) |
+| impeccable | `pbakaus/impeccable` | impeccable |
+| ui-ux-pro-max-skill | `nextlevelbuilder/ui-ux-pro-max-skill` | ui-ux-pro-max |
+| claude-design-skillstack | `freshtechbro/claudedesignskills` | animation-components, core-3d-animation |
+| expo-plugins | `expo/skills` | expo |
+| callstack-agent-skills | `callstackincubator/agent-skills` | react-native-best-practices |
+| swmansion | `software-mansion-labs/skills` | Software Mansion RN skill bundle (rnrepo build acceleration, Radon IDE MCP guidance, TypeGPU, Meta Quest/Horizon) |
+| swiftui-agent-skill | `twostraws/SwiftUI-Agent-Skill` | swiftui-pro |
+| skills-marketplace | `jamesrochabrun/skills` | swiftui-animation |
+| karpathy-skills | `forrestchang/andrej-karpathy-skills` | andrej-karpathy-skills |
+| openai-codex | `openai/codex-plugin-cc` | codex |
+| compound-engineering-plugin | `EveryInc/compound-engineering-plugin` | compound-engineering |
+| claude-video | `bradautomates/claude-video` | watch |
 
-(Exact marketplace slugs vary by fork; `claude plugin marketplace list` shows what you already have. The point is the *shape*: add the marketplace, then pull the plugins below.)
+**caveman is not a marketplace plugin.** It ships as a standalone skill folder dropped directly into `.claude/skills/` (or your user-level `~/.claude/skills/`), not something you `claude plugin marketplace add` for. If you want token-compressed communication mode, copy the skill folder in rather than looking for a marketplace entry.
+
+**NotebookLM is not a marketplace plugin either.** The AI Brain integration is a CLI tool (`notebooklm-py`, installed via `pip install`) wired in directly at Q10, not something installed through this plugin flow — see Q10 below for the exact setup.
 
 ### Plugins we install, grouped by job
 
 **Orchestration / meta**
-- `superpowers:brainstorming` — `claude plugin install superpowers@superpowers` · explore intent + requirements before any creative or build work.
+- `superpowers:brainstorming` — `claude plugin install superpowers@superpowers-marketplace` · explore intent + requirements before any creative or build work.
 - `superpowers:writing-plans` / `superpowers:executing-plans` — turn a spec into a reviewed, step-checkpointed plan.
 - `superpowers:systematic-debugging` — reproduce → hypothesise → instrument → fix → regression-test, instead of guess-fix-pray.
 - `superpowers:using-git-worktrees` + `superpowers:dispatching-parallel-agents` — isolated worktrees and clean fan-out when running multiple agents at once.
 - `superpowers:verification-before-completion` — evidence before any "done / fixed / passing" claim.
-- `codex:rescue` / `code-review` — `claude plugin install codex@codex` · a second-model pass on high-stakes diffs and stuck investigations.
-- `compound-engineering` — `claude plugin install compound-engineering@compound-engineering-plugin` · structured plan → review → work → codify loops that slot straight onto the orchestration cycle.
+- `codex:rescue` / `codex:code-review` — `claude plugin install codex@openai-codex` · a second-model pass on high-stakes diffs and stuck investigations.
+- `compound-engineering:*` — `claude plugin install compound-engineering@compound-engineering-plugin` · structured plan → review → work → codify loops that slot straight onto the orchestration cycle.
 
 **Design / UI**
-- `ui-ux-pro-max:ui-ux-pro-max` — `claude plugin install ui-ux-pro-max@ui-ux-pro-max` · plan/build/review UI with a large style + palette + font-pairing library.
+- `ui-ux-pro-max:ui-ux-pro-max` — `claude plugin install ui-ux-pro-max@ui-ux-pro-max-skill` · plan/build/review UI with a large style + palette + font-pairing library.
 - `impeccable:impeccable` — `claude plugin install impeccable@impeccable` · design, redesign, audit, polish, live browser iteration.
-- `frontend-design:frontend-design` — `claude plugin install frontend-design@frontend-design` · distinctive production-grade components.
-- `redesign-skill` / `soft-skill` / `taste-skill` — upgrade an existing UI to premium quality and block cheap AI-default patterns.
-- `document-skills:frontend-design` — `claude plugin install document-skills@document-skills` · the same lens for artifacts, posters, and landing pages.
+- `frontend-design:frontend-design` — `claude plugin install frontend-design@claude-code-plugins` · distinctive production-grade components that avoid generic AI aesthetics.
+- `document-skills:frontend-design` — the same design lens applied to artifacts, posters, and landing pages (ships inside the document-skills plugin, no separate install).
 
 **Animation / 3D**
-- `core-3d-animation:motion-framer` — `claude plugin install core-3d-animation@core-3d-animation` · React motion components, gestures, layout + exit animations.
-- `core-3d-animation:gsap-scrolltrigger` — scroll-driven timelines, pinning, scrubbing, parallax.
-- `core-3d-animation:threejs-webgl` / `core-3d-animation:react-three-fiber` / `core-3d-animation:babylonjs-engine` — real 3D scenes, configurators, immersive web.
-- `animation-components:animated-component-libraries` — `claude plugin install animation-components@animation-components` · Magic UI + React Bits prebuilt animated components.
-- `animation-components:lottie-animations` / `animation-components:animejs` / `animation-components:react-spring-physics` — designer Lottie JSON, SVG morphing, physics-based motion.
+- `core-3d-animation:motion-framer` / `core-3d-animation:gsap-scrolltrigger` / `core-3d-animation:threejs-webgl` / `core-3d-animation:react-three-fiber` / `core-3d-animation:babylonjs-engine` — `claude plugin install core-3d-animation@claude-design-skillstack` · React motion + gestures, scroll-driven timelines, Three.js, React Three Fiber, Babylon.js.
+- `animation-components:animated-component-libraries` / `animation-components:lottie-animations` / `animation-components:animejs` / `animation-components:react-spring-physics` / `animation-components:scroll-reveal-libraries` — `claude plugin install animation-components@claude-design-skillstack` · Magic UI + React Bits prebuilt components, Lottie, Anime.js SVG morphing, physics-based motion, AOS scroll reveals.
 
 **Mobile**
-- `expo:building-native-ui` — `claude plugin install expo@expo` · Expo Router fundamentals, styling, navigation, native tabs (default stack for new mobile apps).
-- `expo:expo-deployment` / `expo:eas-update-insights` — ship to the stores, watch OTA rollout health.
-- `expo:expo-module` / `expo:expo-tailwind-setup` / `expo:use-dom` — native modules, NativeWind, web-in-webview migration.
-- `react-native-best-practices:react-native-best-practices` — `claude plugin install react-native-best-practices@react-native-best-practices` · New-Architecture performance, Reanimated, gesture, FlashList.
-- `swiftui-pro:swiftui-pro` + `swiftui-liquid-glass` — `claude plugin install swiftui-pro@swiftui` · native iOS review, Liquid Glass, concurrency.
+- `expo:expo-router` / `expo:expo-native-ui` / `expo:eas-app-stores` / `expo:eas-update-insights` / `expo:expo-module` / `expo:expo-tailwind-setup` / `expo:expo-web-to-native` — `claude plugin install expo@expo-plugins` · Expo Router fundamentals, native UI, ship to the stores, watch OTA rollout health, native modules, NativeWind, web-to-native migration.
+- `react-native-best-practices:react-native-best-practices` — `claude plugin install react-native-best-practices@callstack-agent-skills` · New-Architecture RN performance, Reanimated, gesture, FlashList.
+- `skills:react-native-best-practices` / `skills:rnrepo` / `skills:radon-mcp` / `skills:typegpu` / `skills:expo-horizon` — `claude plugin install skills@swmansion` · Software Mansion's own New-Architecture RN guidance, prebuilt-artifact build acceleration, Radon IDE MCP usage, type-safe WebGPU, and Meta Quest/Horizon OS support.
+- `swiftui-pro:swiftui-pro` — `claude plugin install swiftui-pro@swiftui-agent-skill` · native iOS review, Liquid Glass, concurrency, performance audit, view refactor.
+- `skills:swiftui-animation` — `claude plugin install swiftui-animation@skills-marketplace` · advanced SwiftUI animation, transitions, matched geometry, Metal shader integration.
 
 **Build / deploy**
-- `vercel:deploy` / `vercel:deployments-cicd` — `claude plugin install vercel@vercel` · preview + production deploys, promote, rollback, inspect.
-- `vercel:env-vars` / `vercel:nextjs` / `vercel:shadcn` / `vercel:vercel-functions` — env management, App Router, shadcn, serverless/edge functions.
-- `vercel:vercel-firewall` / `vercel:auth` — WAF + rate limiting, and Clerk/Auth0 auth wiring.
+- `vercel:vercel-cli` / `vercel:deployments-cicd` / `vercel:env-vars` / `vercel:nextjs` / `vercel:shadcn` / `vercel:vercel-functions` / `vercel:vercel-firewall` / `vercel:auth` — `claude plugin install vercel@claude-plugins-official` · preview + production deploys, promote, rollback, inspect, env management, App Router, shadcn, serverless/edge functions, WAF + rate limiting, Clerk/Auth0/Descope auth wiring.
 
 **Code intelligence**
-- `codegraph` — `npx @colbymchenry/codegraph install` (an MCP server, not a marketplace plugin) · builds a local call-graph + impact map of the codebase, so agents answer "what calls this" and "what breaks if I change it" without re-scanning every file. Runs fully on-device, no cloud, no API key.
+- `codegraph` — `npx @colbymchenry/codegraph` (an MCP server, not a marketplace plugin) · builds a local call-graph + impact map of the codebase, so agents answer "what calls this" and "what breaks if I change it" without re-scanning every file. Runs fully on-device, no cloud, no API key.
 
 **Docs**
-- `document-skills:docx` / `document-skills:pptx` / `document-skills:xlsx` / `document-skills:pdf` — `claude plugin install document-skills@document-skills` · real Office + PDF authoring and extraction.
-- `document-skills:doc-coauthoring` / `document-skills:internal-comms` — structured doc co-authoring and company-format internal comms.
-- `document-skills:theme-factory` / `document-skills:brand-guidelines` — consistent theming and brand application across artifacts.
+- `document-skills:docx` / `document-skills:pptx` / `document-skills:xlsx` / `document-skills:pdf` — `claude plugin install document-skills@anthropic-agent-skills` · real Office + PDF authoring and extraction.
+- `example-skills` — `claude plugin install example-skills@anthropic-agent-skills` · reference implementations of common Claude Code patterns, useful while you're learning the system.
 
 **Channel**
-- `watch:watch` — `claude plugin install watch@watch` · watch any video URL or local file, transcribe, and answer questions about its content.
-- `notebooklm` — `claude plugin install notebooklm@notebooklm` · full programmatic NotebookLM, including podcast generation and multi-format downloads, for the second-brain layer.
+- `watch:watch` — `claude plugin install watch@claude-video` · download + transcribe + frame-extract any video URL or local file, then answer questions about its content.
+- telegram — `claude plugin install telegram@claude-plugins-official` · drive the whole system from your phone. Required if Telegram is your messaging channel (Q6).
 
-**Research / media**
-- `deep-research` — fan-out web search + adversarial verification + a cited report.
-- `document-skills:algorithmic-art` / `document-skills:canvas-design` — generative art and static visual design when a deliverable needs original artwork.
+**Engineering discipline**
+- `andrej-karpathy-skills:karpathy-guidelines` — `claude plugin install andrej-karpathy-skills@karpathy-skills` · behavioural guidelines that reduce common LLM coding mistakes (overcomplication, unsurfaced assumptions, unverifiable success criteria).
+
+**Research / second brain**
+- `deep-research` — fan-out web search + adversarial verification + a cited report (ships as a project-level skill, not a marketplace plugin — no install command needed).
+- The AI Brain (NotebookLM) is wired in at Q10 via the `notebooklm-py` CLI, not a plugin. See Q10 for the exact setup flow.
 
 > Rule of thumb: if a job has a plugin (deploy → vercel, mobile → expo, brainstorm → superpowers, design → ui-ux-pro-max / impeccable, video → watch), route to it and name the plugin in the dispatch. Only hand-roll when no published skill or plugin fits, and write down the fit-gap when you do.
 
@@ -3747,27 +3747,68 @@ After they pick, confirm the selection and note which ones are available later:
 
 ### Q14: Plugins and skills
 
-Ask:
-> Which plugins and skills do you want to install? These extend what your agents can do.
->
-> **Plugins** (always-on capabilities):
-> - **superpowers** -- planning workflows, systematic debugging, code review, TDD, parallel task dispatch. **Recommended for everyone.**
->
-> **Skills** (on-demand capabilities, activated when needed):
-> - **document-skills** -- create and edit PDFs, Word docs, Excel spreadsheets, PowerPoint presentations
-> - **frontend-design** -- premium UI/UX generation with design system support
-> - **example-skills** -- reference implementations for common patterns
->
-> I'd recommend at least **superpowers**. The others depend on your use case:
-> - Building apps with UIs? Add **frontend-design**.
-> - Working with office documents? Add **document-skills**.
-> - Learning Claude Code patterns? Add **example-skills**.
->
-> Enter the names you want (e.g., "superpowers, document-skills") or "all" or "none".
+This step installs from the full catalogue documented in `## The plugin + skill stack we run` above (16 marketplaces, grouped by job). Do not offer a shortened subset — a wizard that only asks about 4 plugins when the system documents ~20 is the single most common onboarding complaint ("it didn't have all the plugins"). Present every group below.
 
-**Valid answers:** Comma-separated names, "all", "none".
-**Default:** superpowers.
+Ask:
+> Which plugins and skills do you want to install? These extend what your agents can do. I'll group them by job, pick whole groups or individual names, "all", or "none" -- everything you skip stays available to add later with the same command.
+>
+> **Orchestration / meta** (recommended for everyone)
+> - **superpowers** -- planning workflows, systematic debugging, TDD, git worktrees, parallel-agent dispatch
+> - **codex** -- a second AI model (OpenAI) for independent review of high-stakes diffs and stuck investigations
+> - **compound-engineering** -- structured plan -> review -> work -> codify loop
+>
+> **Design / UI** (pick if you build anything with a visual interface)
+> - **ui-ux-pro-max** -- 50+ styles, 100+ palettes, font pairings, review/build for web + mobile
+> - **impeccable** -- design, redesign, audit, polish, live browser iteration
+> - **frontend-design** -- distinctive components that avoid generic AI-default aesthetics
+> - **document-skills** -- also covers artifact/poster/landing-page design, not just Office files
+>
+> **Animation / 3D** (pick if your UI needs motion or 3D scenes)
+> - **core-3d-animation** -- GSAP + ScrollTrigger, Three.js, React Three Fiber, Babylon.js, React motion
+> - **animation-components** -- Magic UI + React Bits prebuilt components, Lottie, Anime.js, physics-based motion
+>
+> **Mobile** (pick if you're building iOS / Android / React Native / Expo)
+> - **expo** -- Expo Router, EAS build/submit/update, native modules, NativeWind
+> - **react-native-best-practices** -- New-Architecture RN performance, Reanimated, gesture, FlashList
+> - **swmansion RN skills** -- Software Mansion's build-acceleration + Radon IDE + TypeGPU + Meta Quest support
+> - **swiftui-pro** -- native iOS review, Liquid Glass, concurrency, performance audit
+> - **swiftui-animation** -- advanced SwiftUI animation, transitions, Metal shaders
+>
+> **Build / deploy** (pick if you ship to Vercel)
+> - **vercel** -- preview + production deploys, env management, Next.js, shadcn, functions, firewall, auth
+>
+> **Docs** (pick if you produce Office files or need reference examples)
+> - **document-skills** -- docx / pptx / xlsx / pdf authoring and extraction
+> - **example-skills** -- reference implementations of common Claude Code patterns
+>
+> **Channel**
+> - **telegram** -- required if Telegram is your messaging channel (you already picked this at Q6 if so; it installs automatically, no need to re-select here)
+> - **watch** -- download, transcribe, and answer questions about any video
+>
+> **Engineering discipline**
+> - **andrej-karpathy-skills** -- behavioural guidelines that reduce common LLM coding mistakes
+>
+> A few starting points based on what's common:
+> - Solo dev, no UI work: **superpowers** + **codex** is plenty to start.
+> - Building an app with a real interface: add **ui-ux-pro-max** or **impeccable**, plus **frontend-design**.
+> - Building mobile: add **expo** (+ **swiftui-pro** if it's iOS-native, or **react-native-best-practices** if it's cross-platform).
+> - Shipping to Vercel: add **vercel**.
+> - Handling Office documents or wanting reference patterns: add **document-skills**.
+>
+> Enter the groups or individual names you want (e.g., "orchestration, design, vercel" or "superpowers, expo, vercel"), or "all", or "none".
+
+**Valid answers:** Comma-separated group names and/or individual plugin names, "all", "none".
+**Default:** superpowers, codex (the Orchestration / meta group).
 **Affects:** Plugin installation commands run during setup, skill references in CLAUDE.md.
+
+**Generating the install commands.** For each plugin the user selected, look up its `marketplace nickname` and `add command` in the `## The plugin + skill stack we run` table above (do not invent a marketplace slug -- if a plugin the user names is not in that table, tell them you don't have a verified marketplace for it and skip it rather than guessing). Then run, once per NEW marketplace referenced by the selection:
+
+```bash
+claude plugin marketplace add <owner/repo>   # once per marketplace, skip if already added
+claude plugin install <plugin>@<marketplace-nickname>
+```
+
+Batch all `marketplace add` calls first (deduplicated -- several plugins share one marketplace, e.g. vercel + telegram + swift-lsp all come from `claude-plugins-official`), then all `plugin install` calls. Confirm each install with `claude plugin list` before moving on, and report back exactly which plugins installed clean vs which failed (network error, marketplace rejected, etc) rather than assuming success.
 
 **After the install commands run, the wizard must pause and walk the user through a session reload.** Plugins (including the Telegram plugin) and any hook updates do not take effect in the current Claude session. The new tools, slash commands, and hooks only register on next launch.
 
