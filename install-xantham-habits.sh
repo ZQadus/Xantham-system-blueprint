@@ -43,7 +43,7 @@ SKILL_FILES=(
 )
 # NOTE: xantham-orchestration, xantham-reflection, and xantham-safety are NOT
 # in this list on purpose. They are generated per-install by the full setup
-# wizard (Q14+ in xantham-system-v35.md, bodies in xantham-templates-v32.md)
+# wizard (Q14+ in xantham-system-v36.md, bodies in xantham-templates-v32.md)
 # because their content depends on your chosen orchestrator name and mode.
 # This script only fetches the 5 skills that ship as static files in this repo.
 HABITS_REL="blueprints/orchestration-habits.md"
