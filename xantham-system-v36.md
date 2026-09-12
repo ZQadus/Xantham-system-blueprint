@@ -77,7 +77,7 @@ Read CATALOGUE before proposing new upgrades (you might find it's already been c
 Both modes get:
 
 ### Orchestrator (your AI itself)
-Claude Code CLI running Opus 4.8. Receives Telegram messages, routes to specialist sub-agents, replies. Lives in `CLAUDE.md` in your project root.
+Claude Code CLI running the top-tier model. Receives Telegram messages, routes to specialist sub-agents, replies. Lives in `CLAUDE.md` in your project root.
 
 ### Specialist crew (9 specialists)
 Default names - rename to taste. Total team is 9 specialists + 1 orchestrator = 10 agents:
@@ -96,7 +96,7 @@ Each lives at `.claude/agents/<name>.md`. Each has its own persistent memory at 
 
 ### Model and effort per agent (and the clone trick for heavier models)
 
-Every agent — orchestrator and crew — defaults to the strongest everyday model (this build runs Opus 4.8). Two dials control an agent's horsepower, and they behave **differently** at dispatch time. This asymmetry is worth understanding because it dictates how you run a heavier model on demand:
+Every agent — orchestrator and crew — defaults to the strongest everyday model. Two dials control an agent's horsepower, and they behave **differently** at dispatch time. This asymmetry is worth understanding because it dictates how you run a heavier model on demand:
 
 - **Model CAN be overridden per dispatch.** The Agent tool takes a `model:` parameter, so you can send any one agent on a different model for a single task without editing its definition file.
 - **Effort CANNOT be set per dispatch.** Effort (the reasoning-token budget: `high` / `xhigh` / `max`) is fixed in the agent's own definition frontmatter (`effort:` in `.claude/agents/<name>.md`) and is read once when the agent spawns. There is no per-call override.
@@ -118,6 +118,23 @@ The same trick runs **downward** too, and in this build it is applied **team-wid
 - **`max`** — nobody. When a task is genuinely hard enough to want more horsepower, the answer is the heavier-model clone at `high`, not bumping anyone back to `max`.
 
 Set the orchestrator-session floor with `CLAUDE_CODE_EFFORT_LEVEL=xhigh` in your shell rc plus `"effortLevel": "xhigh"` in `.claude/settings.json`; set each agent's tier in its own frontmatter. (Note: `max` does not stick via settings.json — it silently downgrades to `xhigh` — so the only place `max` ever takes effect is the env var or per-agent frontmatter. One more reason we simply don't use it.)
+
+**Migrate the crew to a new model generation before the orchestrator.** When a new top-tier model ships, the instinct is to move everything at once. Don't. Move the **crew** first and hold the orchestrator on the proven one for a while, for two reasons. The crew's work is *checkable* — a dispatch returns a diff, a report, a verdict you can review — so a regression surfaces on the next task. The orchestrator's job is availability and routing; a subtle behavioural change there degrades every dispatch at once and is much harder to attribute, because the symptom is "things feel worse" rather than a failed check. Running the two generations side by side for a stretch is also the only way you get a real comparison. This build currently sits exactly there: crew on the newest generation, orchestrator deliberately one behind.
+
+Two things to check on any model migration, because both have bitten:
+
+- **Verify the new model is actually in effect**, agent by agent, rather than assuming the config took. Read it back from a live dispatch, not from the frontmatter you just wrote.
+- **Re-read the model's own operating guidance and update the per-engine `Model operating notes` in each persona.** Successive generations differ in what they *under*-do by default — one may under-trigger search and tool use when a system prompt is present, another may over-ask for confirmation on trivial choices. Those are prompt-fixable, but only if you notice them; a persona tuned for the previous generation will quietly under-use the new one.
+
+### A fourth, reasoning-focused engine tier
+
+Beyond the strongest-model default and its `-sonnet`/`-fable` clone twins, a build can wire in a fourth tier on the SECOND engine's own provider side — a flagship reasoning model reached via an explicit model-id flag on the second engine's CLI (not a named clone agent). Route this tier to what it is actually good at: long-horizon agentic/terminal/computer-use reasoning, security-code-review/audit work, and non-2D-graphics generation (3D/procedural geometry, shader code) — and explicitly NOT to visual design generation, where a blind bake-off ranked it last against the top model and the second engine's own default tier. Default its reasoning effort to the SDK's own middle setting, not its highest — this tier is typically the most rate-limited on a flat-rate plan, and the provider's own guidance is that its lowest effort setting can already beat a cheaper tier's highest. Enforce the routing as a written rule in the always-loaded instructions file first; a script-level named-tier alias is a nice-to-have, not a prerequisite for the routing rule to be real. Hold this tier's WRITE capability (letting it directly edit files) behind your safety-gate's own hardening state — a more capable model is not what widens your blast radius if your own enforcement layer has open gaps; fix those first.
+
+**The pre-dispatch model-rule enforcer, corrected.** The mechanism that keeps "strongest model by default, escalation tiers opt-in only" real (not just written down) is a deterministic PreToolUse-on-dispatch check: it inspects the model/agent about to be spawned, and if an escalation tier is being dispatched WITHOUT an explicit say-so signal in the operator's own inbound message this turn, it **blocks the dispatch** — this is a default-block gate, not a warn-only advisory one, and treating it as advisory is a live documentation bug worth checking before you rely on it. Deliberately no in-prompt override token: the say-so check reads the operator's real message, and any token the assistant could itself embed in a dispatch payload would let it self-authorize the exact escalation the gate exists to gate. The fallback when a dispatch is blocked is always the plain default-tier agent — always available, so the gate needs no escape hatch.
+
+### Beyond the domain crew: task-scoped utility agents
+
+Not every specialist needs to be a standing domain owner in your routing table. A second useful shape is the **task-scoped utility agent** — narrow, single-tier (one model, no clone family), dispatched by name from a specific moment in your workflow rather than routed by topic. Good candidates: a post-implementation security reviewer (dispatched before anything ships that touches auth/payments/user data), a UX/design reviewer (dispatched after a frontend change), a schema designer (dispatched before building a new feature's data layer), a launch-day coordinator (dispatched on ship day), and an autonomous verifier that actually RUNS your tests and hits your live endpoints rather than just reminding you to. These live at `.claude/agents/<name>.md` exactly like your domain crew and share the same memory-directory pattern, but are wired into the *skill or checklist* that needs them, not into your topic-routing table — so don't expect (or force) a routing-table row for each one.
 
 ### Operating principles
 
@@ -261,7 +278,7 @@ This table is verified against a live install (`claude plugin marketplace list` 
 
 | Marketplace | Add command (`claude plugin marketplace add ...`) | What it brings |
 |---|---|---|
-| claude-plugins-official | `anthropics/claude-plugins-official` | telegram, vercel, swift-lsp (Swift LSP), clangd-lsp (C/C++ LSP) |
+| claude-plugins-official | `anthropics/claude-plugins-official` | telegram, vercel, security-guidance, ralph-loop, swift-lsp (Swift LSP), clangd-lsp (C/C++ LSP) |
 | claude-code-plugins | `anthropics/claude-code` | frontend-design |
 | superpowers-marketplace | `obra/superpowers-marketplace` | superpowers |
 | anthropic-agent-skills | `anthropics/skills` | document-skills — docx / pptx / xlsx / pdf authoring, frontend-design, skill-creator, brand + theme tooling, generative art |
@@ -277,6 +294,10 @@ This table is verified against a live install (`claude plugin marketplace list` 
 | openai-codex | `openai/codex-plugin-cc` | codex |
 | compound-engineering-plugin | `EveryInc/compound-engineering-plugin` | compound-engineering |
 | claude-video | `bradautomates/claude-video` | watch |
+| gsap-skills | `greensock/gsap-skills` | gsap-skills — GreenSock's own 8-skill animation pack (added in the 2026-08 refresh) |
+| higgsfield | `higgsfield-ai/skills` | ⚠️ marketplace only. On this build no plugin from it is installed or enabled — the generative image / video / 3D capability arrives as an **MCP server** instead (see Q13). Add the marketplace if you want the skill form; do not assume a plugin is present because the marketplace is. |
+
+**A marketplace being added is not the same as a plugin being installed, and neither is the same as a plugin being enabled.** Three separate states, three separate files: marketplaces live in `~/.claude/plugins/known_marketplaces.json`, installs in `~/.claude/plugins/installed_plugins.json`, and the on/off flag in `enabledPlugins` inside `~/.claude/settings.json`. A plugin can sit installed-but-disabled indefinitely (on this build `clangd-lsp` and `example-skills` are exactly that). When auditing what your agents can actually reach, read the enabled map — not the marketplace table, and not the cache directory.
 
 **Some things you will want are NOT marketplace plugins.** They ship as standalone skill folders dropped directly into `.claude/skills/` (or your user-level `~/.claude/skills/`), so looking for a marketplace entry will only waste your time:
 
@@ -284,6 +305,20 @@ This table is verified against a live install (`claude plugin marketplace list` 
 - **`redesign-skill` / `soft-skill` / `taste-skill`** — upgrade an existing UI to premium quality and block cheap AI-default patterns. Same deal: copy the folders in.
 - **NotebookLM** — the AI Brain integration is a CLI tool (`notebooklm-py`, installed via `pip install`) wired in directly at Q10, not something installed through this plugin flow. See Q10 below for the exact setup.
 - **`deep-research`** — ships as a project-level skill, not a marketplace plugin, so there is no install command.
+- **`brutalist-skill` / `minimalist-skill` / `stitch-skill` / `output-skill` / `polish`** — additional art-direction and finishing skills in the same copy-the-folder shape.
+- **`frontend-verify` / `screenshot-verify`** — the two cheap post-UI-change verification loops (console + failed-network sweep across changed routes; screenshot-critique-fix before declaring done). Pair them with the verification rule in the core loop.
+- **`ego-browser`** — a Chromium browser built so an agent works in its own isolated profile while reusing the human's login state, instead of fighting them for the same window.
+- **`notebooklm`** — the full programmatic wrapper around the Brain, distinct from the `notebooklm-py` CLI at Q10.
+- **App Store / native families** — `asc-*` (App Store Connect app creation, IAP attach, privacy nutrition labels, team API keys), `swiftui-ui-patterns` / `swiftui-liquid-glass` / `swiftui-view-refactor` / `swiftui-performance-audit` / `swift-concurrency-expert`, `ios-debugger-agent`, `native-app-profiling`.
+- **Marketing / asset families** — `marketing-studio` (the shared background every asset skill reads) plus `logo-reveal`, `social-clip`, `product-demo`, `launch-video`, `og-assets`, `audio-track`, `marketing`, `launch`, `ship`.
+
+There are two skill directories and they are both live: **project-level `.claude/skills/`** (committed with the repo, travels with the orchestrator) and **user-level `~/.claude/skills/`** (per-machine, shared by every project on that laptop). This build runs roughly 50 project-level and roughly 37 user-level skills. Auditing only one of them is the most common way to conclude a capability is missing when it is installed — derive the set from both:
+
+```bash
+find .claude/skills ~/.claude/skills -maxdepth 2 -name SKILL.md | wc -l
+```
+
+⚠️ A directory under `skills/` is not necessarily a skill. Some are **resource bundles** referenced by a sibling skill and deliberately carry no `SKILL.md` (this build has one, `_cinematic-scroll-kit-resources`). Count `SKILL.md` files, never directory entries, or your inventory is silently off.
 
 ### Plugins we install, grouped by job
 
@@ -302,10 +337,13 @@ This table is verified against a live install (`claude plugin marketplace list` 
 - `frontend-design:frontend-design` — `claude plugin install frontend-design@claude-code-plugins` · distinctive production-grade components that avoid generic AI aesthetics.
 - `redesign-skill` / `soft-skill` / `taste-skill` — upgrade an existing UI to premium quality and block cheap AI-default patterns (standalone skill folders — see the note above, no install command).
 - `document-skills:frontend-design` — the same design lens applied to artifacts, posters, and landing pages (ships inside the document-skills plugin, no separate install).
+- **A `.pen`-file design-editor MCP** (if your design tool exposes one) — read/write access to a structured design file, distinct from a screenshot-and-guess workflow: batch inserts, node search, style-guide lookup, and screenshot verification of the design itself before you ever generate code from it.
+- **Figma MCP** (the official remote Figma MCP, `mcp.figma.com`) — bridges code and design in both directions: read a design into code (design context, screenshots, variables) and push code or intent back into Figma. Note that free/Starter tiers on hosted design-tool MCPs often meter tool calls on a small pool that exhausts fast on exploratory probing — budget calls accordingly and don't sweep a design system on a metered plan without checking the quota first.
 
 **Animation / 3D**
 - `core-3d-animation:motion-framer` / `core-3d-animation:gsap-scrolltrigger` / `core-3d-animation:threejs-webgl` / `core-3d-animation:react-three-fiber` / `core-3d-animation:babylonjs-engine` — `claude plugin install core-3d-animation@claude-design-skillstack` · React motion + gestures, scroll-driven timelines, Three.js, React Three Fiber, Babylon.js.
 - `animation-components:animated-component-libraries` / `animation-components:lottie-animations` / `animation-components:animejs` / `animation-components:react-spring-physics` / `animation-components:scroll-reveal-libraries` — `claude plugin install animation-components@claude-design-skillstack` · Magic UI + React Bits prebuilt components, Lottie, Anime.js SVG morphing, physics-based motion, AOS scroll reveals.
+- `gsap-skills:gsap-core` / `gsap-scrolltrigger` / `gsap-timeline` / `gsap-react` / `gsap-frameworks` / `gsap-plugins` / `gsap-utils` / `gsap-performance` — `claude plugin install gsap-skills@gsap-skills` · **GreenSock's own** first-party pack, and it supersedes the third-party GSAP guidance in `core-3d-animation` for anything non-trivial: tweens + easing + `matchMedia` (including `prefers-reduced-motion`), scroll-linked animation and pinning, timeline sequencing, the `useGSAP` hook and React cleanup, Vue / Svelte lifecycle scoping, the full plugin surface (ScrollSmoother, Flip, Draggable, SplitText, CustomEase), the `gsap.utils` helpers, and a performance skill for diagnosing jank. When both are installed, reach for the first-party pack first.
 
 **Mobile**
 - `expo:expo-router` / `expo:expo-native-ui` / `expo:eas-app-stores` / `expo:eas-update-insights` / `expo:expo-module` / `expo:expo-tailwind-setup` / `expo:expo-web-to-native` — `claude plugin install expo@expo-plugins` · Expo Router fundamentals, native UI, ship to the stores, watch OTA rollout health, native modules, NativeWind, web-to-native migration.
@@ -313,6 +351,7 @@ This table is verified against a live install (`claude plugin marketplace list` 
 - `skills:react-native-best-practices` / `skills:rnrepo` / `skills:radon-mcp` / `skills:typegpu` / `skills:expo-horizon` — `claude plugin install skills@swmansion` · Software Mansion's own New-Architecture RN guidance, prebuilt-artifact build acceleration, Radon IDE MCP usage, type-safe WebGPU, and Meta Quest/Horizon OS support.
 - `swiftui-pro:swiftui-pro` + `swiftui-liquid-glass` — `claude plugin install swiftui-pro@swiftui-agent-skill` · native iOS review, Liquid Glass, concurrency, performance audit, view refactor.
 - `skills:swiftui-animation` — `claude plugin install swiftui-animation@skills-marketplace` · advanced SwiftUI animation, transitions, matched geometry, Metal shader integration.
+- A dedicated App Store Connect automation tool — app creation, in-app-purchase/subscription attach, privacy nutrition labels, and signing-key management — worth wiring in alongside your mobile framework's own store-submission tooling if you ship to iOS.
 
 **Build / deploy**
 - `vercel:deploy` / `vercel:vercel-cli` / `vercel:deployments-cicd` / `vercel:env-vars` / `vercel:nextjs` / `vercel:shadcn` / `vercel:vercel-functions` / `vercel:vercel-firewall` / `vercel:auth` — `claude plugin install vercel@claude-plugins-official` · preview + production deploys, promote, rollback, inspect, env management, App Router, shadcn, serverless/edge functions, WAF + rate limiting, Clerk/Auth0/Descope auth wiring.
@@ -332,12 +371,70 @@ This table is verified against a live install (`claude plugin marketplace list` 
 
 **Engineering discipline**
 - `andrej-karpathy-skills:karpathy-guidelines` — `claude plugin install andrej-karpathy-skills@karpathy-skills` · behavioural guidelines that reduce common LLM coding mistakes (overcomplication, unsurfaced assumptions, unverifiable success criteria).
+- `security-guidance` — `claude plugin install security-guidance@claude-plugins-official` · first-party secure-coding guidance that loads alongside the safety gate. The gate stops a destructive *command*; this shapes the *code* being written. They are complementary, not redundant.
+
+**Security / red-team (⚠️ read the warning before installing)**
+- **Strix** (`usestrix/strix-agent`, MIT, `pip install`/`uv tool install strix-agent`) — an autonomous AI pentesting agent: it runs a target dynamically, finds vulnerabilities, and **validates them with real PoC exploits** in a Docker sandbox, using an LLM-driven multi-agent loop rather than a static scanner. This is an ESCALATION leg on top of your standard security-review pass, not a replacement for it.
+  > 🔴 **HARD WARNING: this tool executes live exploits.** Point it ONLY at infrastructure you own and control — your own staging environment or your own repo — and NEVER at third-party infrastructure, even "just to check." Running an exploit against a system you do not own and have explicit authorization to test is illegal in most jurisdictions regardless of intent. Treat it as opt-in, not default: it costs money, needs a running Docker daemon plus an LLM key, and should be a deliberate decision each time it runs, not a step that fires automatically inside a routine review pass.
+
+**Cinematic scroll + motion (standalone skill folders, no marketplace)**
+
+A seven-skill kit that takes a brand from written narrative to a shipped scroll-scrubbed cinematic site, plus a separate motion-doctrine family for video. Both are copy-the-folder skills, and both are staged — invoking them out of order wastes a generation budget:
+
+- **The scroll kit, in dependency order** — `narrative-from-brand` (250-400 word brand story in two voices) → `storyboard-from-narrative` (6-10 numbered scenes with start-frame / end-frame / motion / duration) → `video-preprocessing` (ffmpeg all-keyframe encoding for frame-perfect seek + 9:16 reframes) → `scroll-scrub-rendering` (pick the rendering engine *before* building the loop: `video.currentTime` vs WebCodecs-to-canvas vs image-sequence-to-canvas — the wrong pick is what produces "stuck frames" and reverse-scroll stutter) → `build-cinematic-scroll-site` (the actual HTML/CSS/JS) → `adaptive-mobile-strategy` (breakpoints, autoplay-loop substitution, reduced-motion fallback) → `anti-ai-editorial-design` (the visual language pass that keeps it from reading as AI-generated — applied during the build, not retrofitted). A sibling `_cinematic-scroll-kit-resources` directory holds the shared bundle and is deliberately not a skill.
+- **Motion doctrine for video** — `motion-doctrine` is the gateway (load it first: the vector law, carrier elements, the seam gate, the ban on idle wobble), routing to `cut-the-curve` (the velocity-matched seam catalogue), `seam-craft` (render-correctness at scene boundaries — the opaque stage-ground guard that prevents white flashes on dark films), `oversized-cursor` (the pointer-led technique that rescues a static scene), and `captions-overlay` (captions composite *on top of* the film; never reserve a bottom band). `changelog-video` turns a weekly changelog markdown into a finished branded video.
+- **`cinematic-scroll-landing` / `scroll-world`** — the two end-to-end landing-page variants (awwwards-style scroll choreography; scroll-scrubbed fly-through-the-world).
+
+**Writing + comms**
+- `no-ai-slop` — edits a draft sharper and more human while preserving the writer's voice, or detects AI-slop patterns without rewriting. Run it on anything going outside the building.
+- `book-to-skill` — converts a book or document (PDF, EPUB, DOCX, HTML, Markdown, RTF, MOBI) into a structured agent skill, extracting the frameworks, mental models and anti-patterns as loadable per-chapter guidance. This is the **complement** to authoring a new skill from scratch: one converts reference material you already have, the other invents. A knowledge library is worth far more once its contents are loadable skills rather than files someone has to remember to open.
+
+**Email**
+- `resend-setup` — one command provisions a transactional sending domain end to end: find-or-create the domain, write the DKIM/SPF/MX records via your DNS provider, poll verification, mint a **sending-only key scoped to that domain**, and wire it into the host project's env. It provisions; it does not send or debug delivery. The least-privilege scoping is the point — a full-access key wired into a preview environment is a credential leak waiting for a public repo.
 
 **Research / second brain**
 - `deep-research` — fan-out web search + adversarial verification + a cited report (ships as a project-level skill, not a marketplace plugin — no install command needed).
 - The AI Brain (NotebookLM) is wired in at Q10 via the `notebooklm-py` CLI, not a plugin. See Q10 for the exact setup flow.
 
-> Rule of thumb: if a job has a plugin (deploy → vercel, mobile → expo, brainstorm → superpowers, design → ui-ux-pro-max / impeccable, video → watch), route to it and name the plugin in the dispatch. Only hand-roll when no published skill or plugin fits, and write down the fit-gap when you do.
+> Rule of thumb: if a job has a plugin (deploy → vercel, mobile → expo, brainstorm → superpowers, design → ui-ux-pro-max / impeccable, animation → gsap-skills, video → watch, docs-for-a-library → context7), route to it and name the plugin in the dispatch. Only hand-roll when no published skill or plugin fits, and write down the fit-gap when you do.
+
+### The orchestrator's own skills
+
+Everything above is third-party. Alongside it the orchestrator carries its **own** skill layer — roughly 34 `{{orchestrator_lower}}-*` skills that encode this system's operating procedure. They exist because of the placement rule: a rule with a clear trigger belongs in a skill, not in `CLAUDE.md`, so it costs zero context until its situation actually arrives. That is what keeps the always-on file under 200 lines while the system keeps growing.
+
+> **Read this before you expect the wizard to produce all of them.** The install wizard generates **seven** skill bodies from the templates appendix — `sync`, `maintenance`, `orchestration`, `brain`, `safety`, `observability`, `blueprint-updates` (see Generation Order step 6). The remaining skills below are **documented capabilities of this build, hand-added over time**, not wizard output. Ask for one by name and the orchestrator will write it; do not assume it appears at install. The split is deliberate: the seven are the ones a fresh install cannot run without.
+
+**Completion + truth gates** (the layer that stops confident-wrong output)
+- `{{orchestrator_lower}}-verify` — fires before any "done / shipped / fixed / passing" claim **and** before any count, absence, or completeness assertion. Forces a command to run, its output to be read, and the *derivation* of any set to be stated in the reply.
+- `{{orchestrator_lower}}-abstention` — the other half. On a genuinely low-confidence claim, reshape the assertion into a structured handoff ("not fully confident; here is what to verify, where to look, and the one clarifying question") instead of asserting. Never nags on a confident answer.
+- `{{orchestrator_lower}}-transcript-grounding` — before a quote, paraphrase, or who-said-it attribution drawn from a transcript or client document reaches memory or a reply, verify the verbatim string is actually present in the source and read the speaker off the structured sender label. Deterministic, not self-policing.
+- `{{orchestrator_lower}}-adversarial-review` — stress-tests a finding by **refutation** rather than agreement: N independent refuters, each attacking through a distinct failure lens, default-to-refuted-if-uncertain; only what survives is accepted, reported with the strongest attack that failed to kill it. Distinct from the two-model consensus pattern, where agreement *raises* confidence — here disagreement is the product. Reach for it on money, credentials, personal data, or anything irreversible.
+- `{{orchestrator_lower}}-security-preflight` — the production gate. Nothing goes live — prod deploy, promote, merge to a deploying branch, DNS, a build handed to a client — until its checklist runs and every finding is resolved or explicitly signed off.
+
+**Dispatch + build**
+- `{{orchestrator_lower}}-dispatch` / `{{orchestrator_lower}}-handoff` / `{{orchestrator_lower}}-reflection` — who to send, how many, on which model tier; the structured brief; and the pre-hoc plan critique that catches a wrong-direction dispatch *before* tokens are spent.
+- `{{orchestrator_lower}}-orchestration` — the accumulated multi-agent habits (parallel fan-out, scope boundaries, the council pattern, worktree isolation).
+- `{{orchestrator_lower}}-master-build` — the one-command hybrid gauntlet: scope + recon → dual strategy reconciled → parallel build by layer → mutual adversarial cross-verify → sign-off. Auto-scales, so a one-file fix skips the heavy stages.
+- `{{orchestrator_lower}}-spec-kit-bridge` — constitution → spec → plan → tasks → analyze, before a greenfield build over ~4h.
+- `{{orchestrator_lower}}-diagnose` — the structured debugging loop, in place of guess-fix-pray.
+- `{{orchestrator_lower}}-21st-bridge` — routes a "novel functional React component with sensible defaults" to a generator, then integrates the result. Explicitly **not** for hand-styled premium work.
+
+**Second engine**
+- `{{orchestrator_lower}}-codex-reviewer` (per-commit, diff-scoped) · `{{orchestrator_lower}}-codex-ensemble` (per-release, decision-scoped) · `{{orchestrator_lower}}-codex-write` (hand the second engine an implementation task; it writes on a feature branch in a workspace-write sandbox with no network, leaves the edits uncommitted, and a dual-model review runs before a human merges).
+
+**Memory + self-improvement**
+- `{{orchestrator_lower}}-memory` · `{{orchestrator_lower}}-brain` · `{{orchestrator_lower}}-correction` (a corrected fact must be *rewritten at its source with provenance*, not appended as a newer contradicting note) · `{{orchestrator_lower}}-reflexion` (async post-reply self-critique) · `{{orchestrator_lower}}-walkthrough` (write back what a dispatch learned) · `{{orchestrator_lower}}-gepa` (optimise an existing prompt against the eval harness) · `{{orchestrator_lower}}-skill-author` (draft a *new* skill from an accumulated need — the complement to GEPA, which rewrites existing ones).
+- Both authoring paths are **propose-only and human-gated**: neither writes into the live skills directory, and neither self-adopts. A system that can author its own skills without a gate is a system that can quietly rewrite its own operating rules.
+
+**Research + external**
+- `{{orchestrator_lower}}-research` — fires a multi-method protocol (premium search + web search + second engine + a fetch lane) in parallel, so no single source can be the whole answer.
+- `{{orchestrator_lower}}-context7` — pulls **current** library / framework / SDK docs instead of answering from training data. The trigger is worth stating plainly: training data goes stale on fast-moving libraries, and a confidently wrong API signature costs more than the lookup.
+- `{{orchestrator_lower}}-ai-seo` — before shipping anything with a public web surface, generate the machine-readable layer (`llm.txt`, `robots.txt` rules for the AI crawlers, JSON-LD, sitemap) so assistants can cite the site.
+- `{{orchestrator_lower}}-youtube-queue` — batch-drain queued videos into summaries via the video plugin.
+- `{{orchestrator_lower}}-voice-note` — when an inbound message is a voice note, transcribe it **locally** and answer what was said, rather than acknowledging that a file arrived.
+
+**Operations**
+- `{{orchestrator_lower}}-sync` · `{{orchestrator_lower}}-maintenance` · `{{orchestrator_lower}}-commands` · `{{orchestrator_lower}}-safety` · `{{orchestrator_lower}}-observability` · `{{orchestrator_lower}}-blueprint-updates` (keeps this document and its private sibling honest whenever the architecture changes).
 
 ---
 
@@ -360,8 +457,10 @@ Fast local semantic search over every markdown memory file. Answers "have we hit
 
 **Cost**
 - $0 - no API calls. Nomic-embed weights are free, run on your CPU via Ollama.
-- Disk: ~300 MB (Nomic-embed model) + ~10-15 MB (vector DB for 1200 chunks; a mature setup runs 1000-1500 chunks across memory + agent-memory + docs)
+- Disk: ~300 MB (Nomic-embed model) + a few tens of MB for the vector DB at a starting scale (~1200 chunks). **At scale, this grows further than the starting figure suggests:** a long-running install with a large memory corpus can reach tens of thousands of indexed chunks, not the 1000-1500 range a fresh install starts at — re-measure your own DB's row count periodically rather than assuming the install-day estimate still holds months in.
 - RAM: ~500 MB when Ollama is loaded; 0 when idle (Ollama unloads after 5 min)
+
+**A layered memory system, generally.** Durable atomic-fact files organized by type (user profile, project state, behavioral feedback, external references), a byte-capped rolling index for fast context-load with automatic overflow to a secondary file once the cap is hit, and this semantic vector index for cross-session recall that a keyword search alone would miss. Pair it with a durable, append-only event log for anything you track as an open commitment or blocked item — never silently reassemble that list from the model's own memory of a conversation — so the list renders deterministically rather than being re-derived from a language model's recollection, which closes a class of bug where an item silently drops off a list under the illusion of completeness.
 
 **Token usage**
 Zero. Purely local compute.
@@ -626,6 +725,22 @@ echo "OK: E4 installed"
 
 ---
 
+### E4.1 - A local fleet dashboard (optional, Advanced mode)
+
+**Purpose**
+Once you're running several background agents at once, a JSONL audit log is enough to answer "what happened" but not "what's happening right now, across everything." A small local dashboard closes that gap: which agents are live, which have stalled, and — for a multi-model setup — which model tier each one is running on.
+
+**How it works**
+A zero-dependency local web server (language-stdlib only, no external packages, no network calls) reads your existing dispatch-tracking files and renders them as a live-updating page. The one non-obvious design point worth carrying over if you build your own: a background dispatch tool typically returns control as soon as a job is *accepted*, not when it *finishes* — so a naive reading of "did this dispatch complete" from the acceptance record alone will say "done" the instant it starts. Prefer a live heartbeat signal (a file the running job itself touches) when one exists, and only fall back to the acceptance record's status when no heartbeat is available.
+
+**Cost / Token usage**
+$0. Pure local, runs outside the orchestrator's own context window entirely.
+
+**Install**
+Point it at your existing dispatch-log file(s) and correlate by dispatch name/description (or a stable ID if your dispatch tool provides one) rather than assuming a 1:1 file-per-agent layout — that assumption breaks under load. Auto-launch it alongside your orchestrator's own launch script with an environment-variable off-switch for anyone who doesn't want a browser tab popping open on every session start.
+
+---
+
 ### E5 - Hardened safety gate
 
 **Purpose**
@@ -677,6 +792,8 @@ Zero.
 **Install (Mac / Linux / Windows-Git-Bash, identical commands)**
 
 The wizard generates the hardened gate body straight into `.claude/hooks/safety-gate.sh` during Step 11 from the `## E5 - Hardened safety gate` template in `blueprints/xantham-templates-v32.md` (262 lines). It includes hard-blocks for force-push to protected branches, git filter-branch, reflog expire, refspec-prefixed force pushes (`+HEAD:main`), `push.default` overrides, and a CLI-rm whitelist (`vercel env rm`, `gh secret rm`, `docker rm`, `npm rm`, `git rm`, etc.) that prevented past false positives.
+
+> **Held pending a re-hardening pass (2026-09-03).** This E5 template is deliberately NOT synced from the reference build's newer live gate: a read-only adversarial audit found the live gate has several high-severity bypasses its own self-test suite did not catch (a green suite is not a clean gate). Treat the template as the current known-good floor, not the last word — re-port only after the upstream fix sprint lands and a fresh adversarial probe passes. See the Changelog entry "The never-miss change manifest, cost measurement, and the escalation-model gate (2026-09-03)". The general rule: never propagate a security-critical body from a source you have not just re-audited.
 
 ```bash
 # 1. Back up BOTH safety gates before the hardened body overwrites either one.
@@ -821,6 +938,9 @@ Four phases, one bash script per phase under `scripts/dream/`:
 - `phase4-prune.sh` - rebuild `MEMORY.md` index (capped at 200 lines), re-embed via post-commit hook, write `data/dream-runs/<ts>/changes.md`
 
 Orchestrator: `bash scripts/dream.sh --full-cycle [--turn-id <id>] [--dry-run]` runs all 4 phases sequentially. Manual trigger via `dream` / `/dream` / "consolidate memory". Scheduled via Stop hook on session end if 24 h + 5 sessions both elapsed since last run.
+
+*Mode C - Eager-ingest reconciliation (on write).*
+Stops memory growing purely append-only. After a new note is saved and committed, the orchestrator reuses its own semantic index to surface existing pages the new note overlaps with, and writes a worksheet listing those overlaps — it never rewrites a note on its own. The orchestrator then does the actual synthesis: integrate the new facts into the canonical page, reconcile any contradictions (a changed status, URL, number, date, or decision), and cross-link related notes both ways. This closes the gap where the same fact gets re-saved as a new note every time it comes up instead of updating the one page that already covers it. Same propose-then-approve discipline as the rest of this layer: a safe link applies directly, but a content overwrite always goes through a review step, never a silent overwrite, and a small set of protected files (orchestrator config, session handoff, the generated memory index) are excluded entirely.
 
 *Compilation passes (cognitive-overlay maintenance).*
 Three cadences, all skill-driven (no cron):
@@ -1594,9 +1714,26 @@ The shim reads Codex's tool input on stdin, pipes it through the safety gate, an
 
 **Keep both gates in sync.** Any edit to `.claude/hooks/safety-gate.sh` → run `bash scripts/sync-safety-gates.sh`, which transforms the project gate into the global `~/.claude/hooks/safety-gate.sh` (header + log/approval paths differ, logic identical; checksums before/after; backs up the old global gate). Drift means destructive commands slip through in other projects AND the Codex shim (which calls the project gate) diverges from what the assistant enforces.
 
+### 4.1. A new frontier tier can appear on your existing second-engine subscription without warning — re-probe periodically
+
+The three named tiers in §2 (frontier / balanced / fast) are not necessarily the ceiling of what your second-engine subscription can reach. Vendors periodically roll a new flagship model onto an *existing* consumer plan weeks or months after its public launch, sometimes without an announcement that reaches you. If your tier-resolver has a passthrough branch for an unrecognised model string (most do, so an operator can type a full model id without waiting for a named-tier update), the new model is often reachable the moment your account is entitled — **before you've built a named tier for it, and before you know the entitlement landed.**
+
+Concretely, this build hit exactly that: a stronger model launched on the vendor's own product line, was blocked on our specific subscription type for about a week and a half (a vendor-side entitlement gap, not a config problem on our end), and then became usable with **zero code changes** the moment the entitlement landed, because the resolver already forwarded any unrecognised `<vendor-prefix>-*` string verbatim. **Worth being precise about how we caught it: we didn't have a standing re-probe discipline running — we found it because we happened to ask "what's new to try this on" and re-tested by hand.** The rule below is the discipline we're adopting FROM that near-miss, not one that was already in place and caught it.
+
+Two practical rules follow:
+1. **Periodically re-probe your second engine's raw model string**, not just its named tiers, when a vendor ships a new flagship — a single cheap read-only call (`echo 'reply ok' | <cli> exec --model <new-model-id>`) tells you definitively whether an entitlement landed; a cached model-list file does NOT (it is a client catalogue, not an entitlement list, and can lag reality in both directions). Put this on an actual cadence (e.g. check on every new-flagship announcement, not "whenever it comes up") — an ad-hoc catch is a lucky one, not a working discipline.
+2. **A new, stronger tier is not automatically the right tier for every job.** Before promoting it to a default anywhere, A/B it against your existing tiers on the SPECIFIC kind of work you'd route to it. A model can be measurably stronger on one axis (long-horizon reasoning, agentic tool use) and measurably weaker on another (aesthetic design generation, terse code patches) — see §5.1 below for a real example of exactly this split. Reserve the new tier's highest reasoning-effort setting for the lane where the vendor's own guidance says it earns its cost (security review / audit is the common one); default it to a mid-tier effort everywhere else, because a newer flagship is often the hungriest tier on a flat-rate allowance, not the cheapest.
+3. **Hold a security review before making a new frontier tier your default WRITE engine**, even after it's usable read-only. A model that's classified higher-risk by its own vendor deserves the same caution your own safety gate would want applied to any new capability — verify your own containment (the gate, the sandbox, the diff scan) is actually sound before trusting a stronger model to write code through it. And separate "we adopted this as policy" from "we wired it" — a decision to route a task-class to the new tier is not the same as a resolver that actually does it automatically; say which one you have.
+
 ### 5. Personas — `--persona <crew>` runs Codex AS one of your agents
 
 `codex_load_persona <name>` reads `.claude/agents/<name>.md`, STRIPS the YAML frontmatter, and prepends the persona BODY verbatim to the Codex prompt — so `--persona <your-engineer>` carries that agent's exact framing to the second engine with **zero drift** (edit the one crew file, both engines follow). Trusted crew content, deliberately NOT run through the secret-redactor (there are no secrets in a persona file and it would mangle the markdown). Traversal-guarded: a path-y or `..` name is rejected with a clear error, and the caller MUST abort rather than run persona-less when a persona was explicitly requested. Works on both wrappers.
+
+### 5.1. Don't assume design generation is the top model's exclusive lane — A/B it
+
+The instinctive division of labour is "the top model does interface/design/anything client-facing, the second engine does backend." Treat that as a starting assumption to test, not a fixed rule. A measured multi-build bake-off on this build found the second engine matched or beat the top model on UI/landing-page/component generation at a fraction of the cost and latency, on a majority of builds — genuinely surprising, since design taste was assumed to be the top model's strength going in.
+
+**How to apply:** on a design/frontend GENERATION task (a new UI, a landing page, a component set), run BOTH engines on the same brief and pick the winner, rather than defaulting to the top model. This is specifically about the GENERATION step — a strong, fast first draft — not the final taste pass or client-facing judgement call, which should stay with whichever engine your own A/B testing shows wins there (on this build, that stayed the top model). Track which engine wins each real A/B so the policy graduates from "one bake-off" to your own measured default, and re-test whenever either engine ships a new generation — a result that held for one model pairing does not automatically hold for the next.
 
 ### 6. Per-tier reasoning effort — auto-applied on `--tier`
 
@@ -1612,9 +1749,18 @@ The orchestration-mode ledger (a live toggle backed by a runtime state file at `
 
 "back to default" resumes the smart selection.
 
-### 8. Tri-method research — the permanent web-research default
+### 8. Quad-method research — the permanent web-research default
 
-Every web-research / landscape / competitive sweep fires THREE sources IN PARALLEL and merges+dedupes: a semantic web index, the assistant model's keyword web search, and **Codex web** (`bash scripts/codex.sh research "<query>"` — a read-only live-browsing exec pass on the read-only floor plus the bundled browser plugin). Merge rule: 2-3 sources agree = high confidence; only one surfaces = a lead to verify; divergence = flag it. **Fallback chain (research is NEVER hard-blocked on Codex):** if the Codex leg errors, times out, or returns non-zero, the caller drops to the two-source merge and always returns something. The researcher personas default to the tri-method sweep; science/sentiment MCPs still lead for those, with tri-method as the web-sweep layer on top.
+Every web-research / landscape / competitive sweep fires FOUR independent sources IN PARALLEL and
+merges+dedupes them: a semantic web index, the assistant model's own keyword web search, a
+read-only live-browsing pass on the second engine, and a deep-read fetch layer that opens the
+primary source in full (clean article text) so it can falsify the other three rather than just
+agree with an index. **First improve the ask** — broaden and deepen the brief before firing any
+leg, so the four sources answer the better question rather than the first one typed. Merge rule:
+most sources agreeing is high confidence; a fact only one surfaces is a lead to verify, not a
+conclusion; divergence gets flagged, not averaged away. The fallback ladder is never a hard block
+on any single leg — state explicitly which leg died and how many survived, rather than reporting a
+flat "N-method" number.
 
 ### 9. Master-build gauntlet — the one-command hybrid build path
 
@@ -1637,6 +1783,54 @@ ls scripts/codex.sh scripts/codex-write.sh scripts/ensemble.sh scripts/lib/codex
 
 
 ## Changelog
+
+### The never-miss change manifest, cost measurement, and the escalation-model gate (2026-09-03)
+
+All additive, all optional. No version marker moved: the installer reads `TARGET_VERSION` and stops on a mismatch, so a doc-only refresh must not bump it.
+
+**The never-miss change manifest: decompose a multi-item ask into atomic IDs and gate "done" on per-ID evidence.** A recurring failure: a request that carries several changes (three UI sections plus a validator fix, say) is held in the model's head, and the tail items silently fall off under a green "done". A prompt rule does not fix this, the same lesson as the fabricated-completion gate above: a rule that keeps getting skipped is a rule that is getting lost, so it becomes a STORE plus a GATE. The pattern: on any multi-item ask, open a manifest that decomposes the request into atomic, individually-verifiable items each with a stable ID; a `tick` refuses to close an item without an evidence string (the command plus its output, or the live marker); an `open` command lists everything unresolved AND exits non-zero while anything remains, so the completion gate reconciles against the manifest before any "done / shipped / fixed" claim. Two properties earn their keep. **Evidence-required ticks** push the verification rule down to the item level: an item is done when a check you can show says so, never when it "looks done". And an **independent-review gate**: an item flagged as requiring a second-engine pass is un-closable by any evidence that is not an independent second-engine (Codex) verdict. That is how a build which produced its own passing test, and passed mutation testing against that test, was still caught: mutation testing proves fidelity to a test, never the test's correctness, and only the independent read of the *requirement* caught the defect. **Conveyance note:** this is documented here as a PATTERN. The reference implementation is a small `change-manifest.sh` plus a skill; it is not yet shipped as a wizard-generated template in the templates appendix, so treat it as a pattern to implement against your own completion gate, not a file the installer writes.
+
+**Measure spend before you try to cut it, then batch the single-shot calls.** Two cheap wins on model-API cost. First, instrument every caller that spends on the metered API to record its spend, because a path that bills quietly (a background scorer, a self-improvement loop whose key resolves from a file at call time rather than the environment) is otherwise invisible, and you cannot cap what you do not measure. Second, any scorer or judge that fires one request at a time is a candidate for the provider's batch API, which is typically half the price for work that does not need to be synchronous; route the single-shot evaluators through it. Pair this with the standing rule that uncapped dynamic-effort workflows stay off until a spend cap ships: measurement is the first half of that cap.
+
+**The escalation-model gate: a heavier tier is opt-in only, and the say-so signal must be read where it actually arrives.** If your ladder has an escalation tier above the default (a heavier, more expensive model), gate it deterministically: the escalation clone is dispatched only on an explicit user say-so *this turn*, never auto-escalated, because it is a multiple of the default's burn. A hook that inspects each dispatch and blocks an escalation-tier agent when no say-so is present makes the policy real rather than aspirational. One failure mode worth designing out from the start: if the say-so detector reads the user's message from a file that is only written for a turn's *opening* message, an instruction that arrives *mid-turn* (a message that lands while the agent is already working) never reaches that file, and the detector blocks a genuinely-authorised dispatch off a stale prior turn. The fix is to update the signal file on every inbound arrival, not only at turn start. A second principle from the same gate: the trust signal must not be something the model can author. An approval token the model could type into its own dispatch payload is a bypass of the only trustworthy input, so the signal is the user's real message, read from outside the model's control.
+
+**Safety-gate template held pending a re-hardening pass (see E5).** A read-only audit of the reference build's live hardened gate found multiple high-severity bypasses that its own self-test suite did not catch (a green suite is not a clean gate). The E5 hardened-safety template in this guide is therefore deliberately HELD at its current version rather than re-synced from that live gate: re-porting a known-bypassed body downstream would ship the bypasses. Re-port only after the fix sprint lands and a fresh adversarial probe passes. The general rule: never propagate a security-critical template from a source you have not just re-audited, and never trust a gate's own suite as proof it is sound.
+
+### Cold validation, a pre-aggregated dispatch state table, and a sampling diagnostic (2026-08-24)
+
+Five scripts, all additive and all optional. No version marker moved — the installer reads `TARGET_VERSION` and stops on a mismatch, so a doc-only refresh must not bump it.
+
+**Cold validation — `scripts/cold-validate.sh`, the runtime engine for a `{{orchestrator_lower}}-cold-validate` skill.** Ordinary review asks "is this diff good?" of someone who has read the plan that produced it, and a reviewer primed with the plan will rationalise a mismatch as intent. Cold validation removes the priming: **one** validator receives the requirements, the diff, and private failure scenarios written *before* the diff existed — and deliberately **not** the builder's plan, the discussion, or any earlier review verdict. It returns PASS / FAIL / SCOPE-REJECT, where SCOPE-REJECT fires mechanically on any changed file that maps to no requirement ID, which is what makes silent scope creep detectable rather than arguable. It only works when the requirements can be written as an enumerated list: with no requirement IDs, SCOPE-REJECT can never fire and the gate enforces nothing.
+
+**Build it as a sibling of your refutation tool, never as a mode of it.** The two share mechanics (a read-only sandboxed second-engine call, a witness gate that requires quoted real bytes, a fail-closed parse, the shared daily spend cap, redact-before-persist, and the rule that only a real success exits 0) — copy those, but keep the files separate. A shipped fail-closed gate is trusted code, and bolting a second semantic onto several hundred lines of it is how trusted paths break.
+
+**`scripts/lib/cold-validate-parse.py` — the parser is the warranty, and its gravity is inverted.** Whatever decides what a validator's reply *means* is the real gate. A refuter defaults to REFUTED, so every ambiguity there — an unread file, a truncated target — biases toward "not proven", which is the safe direction for free. A **validator has the opposite gravity**: an unread hunk, a missing mapping, or a silently truncated diff all make the change look *compliant*, precisely because the violating lines were never examined. So in a validator every ambiguity must be pushed to non-PASS by **explicit rule**, never left to the default of the surrounding logic. State the invariant once and hold it: nothing becomes PASS by default — PASS requires a parsed block, coverage checked against the driver's own changed-file set, a witness quote matching real bytes, and every requirement and holdout explicitly resolved.
+
+**`scripts/test-cold-validate.sh` — test the gate for failing OPEN, not for working.** Every case in the suite is a way the parser could manufacture a pass, because a permissive gate is strictly worse than no gate: the invented PASS then gets quoted as evidence. A suite that only proves the happy path executes has proven the plumbing, not the gate. Keep it zero-network, zero-spend and deterministic so it runs on every change.
+
+**`scripts/dispatch-state-table.sh` — hand the agent digested state, not raw sources ("silver platter").** A dispatch brief that points an agent at raw logs, git history, message tails and handoff docs makes it spend a large share of its context *parsing* before any real work starts. This precomputes one compact markdown table from the **same** authoritative sources — no model call, fast, and idempotent (re-running on unchanged state emits byte-identical output). Two rules keep it honest: it is a **composer, not a new truth source** (it reads the existing build-state cache read-only and calls the existing parsers rather than reimplementing them), and when a source is missing or stale the table **says so instead of guessing** — a state table that quietly fills gaps is worse than the raw dump it replaced.
+
+**`scripts/youtube-scene-sample-diag.py` — and the lesson that outlives it.** The script compares a video pipeline's scene-aware frame sampling against a pure-uniform baseline using a deterministic recall metric, so the sampling default can be judged on evidence rather than intuition, with no manual labelling. It exists because an audit recommended adding scene-detection as an opt-in mode — and reading the vendored plugin showed scene-aware sampling was **already the shipped default**, falling back to a uniform grid only on near-static clips. There was nothing to add, so the work became validating the existing default instead. **Generalise that: an audit recommending a capability your system already ships is a reading failure, and the cheap guard is to read the vendored code before building the recommendation.**
+
+### Arsenal reconciliation — the full plugin / skill / MCP inventory, re-derived from a live install (2026-08-23)
+
+A completeness pass rather than a new mechanism: the three catalogues in this guide had drifted from what the reference build actually runs, and every number in them is now derived from the live install rather than remembered. No version marker moved — the installer reads `TARGET_VERSION` and stops on a mismatch, so a doc-only refresh must not bump it.
+
+**Marketplaces: 16 → 18.** Added GreenSock's own `gsap-skills` (an 8-skill first-party animation pack that supersedes third-party GSAP guidance for anything non-trivial) and a generative-media marketplace. Corrected the first-party marketplace row, which was under-listing what it brings — `security-guidance` and `ralph-loop` were missing.
+
+**Three states, not one.** Marketplace-added, plugin-installed, and plugin-enabled are separate states stored in three separate files, and only the *enabled* set is reachable by your agents. The guide now says so, names the three files, and the verification step checks the enabled map rather than the cache directory. On the reference build two plugins sit installed-but-disabled and one marketplace has nothing installed from it — all normal, all previously invisible.
+
+**Skills: the second directory.** The guide documented `.claude/skills/` and mentioned the user-level directory only in passing. Both are live (roughly 50 project-level and 37 user-level on the reference build) and auditing one is the most common way to conclude a capability is missing when it is installed. Added the derive-from-both command, plus the counting trap: a directory under `skills/` with no `SKILL.md` is a **resource bundle**, so count files and never directory entries.
+
+**New skill families documented** — the seven-skill cinematic-scroll kit (named in dependency order, because invoking it out of order wastes a generation budget), the motion-doctrine family for video (gateway → seam catalogue → render-correctness → cursor technique → caption overlay), document-to-skill conversion, an AI-slop editor for anything going outside the building, one-command transactional-email domain provisioning with a domain-scoped sending key, the two frontend verification loops, and the App Store / native / marketing families in the user-level directory.
+
+**The orchestrator's own skill layer is now documented as a layer** (~34 skills, grouped by job: completion + truth gates, dispatch + build, second engine, memory + self-improvement, research, operations) — with an explicit statement of which **seven** the wizard generates versus which are documented-but-hand-added. Implying the wizard emits bodies that do not exist in the templates appendix is how an install guide stops installing.
+
+**MCP: the three-source model.** The Q13 catalogue was a nine-item list that no longer matched anything. It is now organised by job and, more importantly, states where a tool comes from: project config, user config, or an **account connector**. Connectors carry a `mcp__claude_ai_*` prefix and are **invisible to background and scheduled runs** — building a routine on one is a failure that surfaces later as "the scheduled job silently did nothing". Browser and desktop control are called out as client built-ins that appear without any server entry, so nobody debugs them by editing config.
+
+**Two safety findings promoted into the install path.** (1) A `PreToolUse` gate that inspects Bash and file paths does **not** see MCP tools, and a name-matched allowlist **misses suffixed server variants** — a gate keyed on `mcp__supabase__*` passes `mcp__supabase-main__*` straight through, which is exactly what happens if you follow the (correct) advice to give each project its own suffixed database server. Both are now a checklist step that must be proven with synthetic tool-call envelopes, not read off the gate. (2) The **browser-consent trap**: an agent driving a paired browser extension raises a consent prompt that appears only in the terminal, does not route to your messaging channel, and does not respect a skip-permissions flag — so a background agent freezes waiting for an approval nobody sees, presenting exactly like a crashed agent with its work uncommitted. Standing rule added: background agents verify UI through headless automation or a direct build/curl check, never the extension; recovery is to stop the agent and check its working tree before re-dispatching.
+
+**New section A9.1 — adding a code-navigation MCP server safely.** The highest-value MCP addition is also the one most likely to quietly disarm your safety layer: these servers ship file-mutation tools your gate cannot see, and several ship a default prompt instructing agents that the host's own `Read`/`Edit` are forbidden and to use the server's ungated editors instead. The section gives the four-part read-only recipe (own config, a *true* allowlist that resets to empty rather than a subtractive exclude list, pinning the startup modes that are applied additively **after** the config from an unversioned home-directory file, and verifying by enumerating tools over stdio — running the server twice and requiring the lists to differ, because identical lists mean your config never loaded). Both the gate blind spot and the mode-widening path were proven empirically on the reference build, not inferred.
 
 ### v35 - public cut: the second engine becomes a building hand (2026-07-15)
 
@@ -2152,6 +2346,24 @@ This is a deterministic specimen test. We create a canary file, then ask the gat
   Verify: in this Claude Code session, type `/mcp` (slash command, not bash).
   Expected: every MCP server in your `.mcp.json` shows status `connected`.
   Fix: red entries need either (a) an OAuth completion in the browser (Notion, HubSpot, Pipedream and any other auth-required server) or (b) a process restart via `/mcp restart <name>`. Click through the auth links Claude provides. If a server stays red after both, paste the `/mcp` output back and ask Claude to diagnose.
+
+- [ ] **You can name where every connected server is declared**
+
+  `/mcp` shows a merged view across all three sources, so a green list does not tell you which of them is committed to the repo, which is machine-local, and which will vanish from a background run. Derive the split explicitly:
+
+  ```bash
+  # project-scoped (committed, travels with the repo)
+  python3 -c "import json;print(sorted(json.load(open('.mcp.json'))['mcpServers']))"
+
+  # user-scoped (this machine only, not committed)
+  python3 -c "import json,os;print(sorted(json.load(open(os.path.expanduser('~/.claude.json'))).get('mcpServers',{})))"
+  ```
+
+  Anything green in `/mcp` but absent from both outputs is an **account connector** (`mcp__claude_ai_*`) or a client built-in (browser extension, computer use). Write that list down. It is the set of tools your scheduled and background work cannot use.
+
+- [ ] **Your safety gate actually covers the destructive MCP tools you just connected**
+
+  Feed the gate a synthetic tool-call envelope for each destructive MCP tool and confirm it blocks — do not assume coverage from reading the gate. **Test the exact server names you configured**, including suffixes: a gate matching `mcp__supabase__*` will pass `mcp__supabase-main__*` straight through. If any destructive tool is allowed, extend the gate's patterns before you connect that server to real data.
 
 ---
 
@@ -3729,20 +3941,50 @@ Ask:
 
 ### Q13: MCP servers
 
+**Before you ask, understand the three places a tool can come from.** They behave differently and the difference matters for background work:
+
+| Source | Declared in | Scope | Works in a headless / scheduled run? |
+|---|---|---|---|
+| **Project MCP** | `.mcp.json` in the repo | this project, committed, travels with the repo | Yes |
+| **User MCP** | `mcpServers` in `~/.claude.json` | every project on this machine, not committed | Yes |
+| **Account connector** | your Claude account, nothing local | the interactive session only | **No** |
+
+Account connectors carry a `mcp__claude_ai_*` tool prefix, and that prefix is the tell. They authenticate through your Claude account rather than a local config file, which means a background agent, a cron-triggered run, or a scheduled maintenance pass **cannot reach them**. Wiring a routine around one and only ever testing it interactively is a failure that surfaces weeks later, at 3am, as "the scheduled job silently did nothing." If a routine must run unattended, put its dependency in one of the first two rows.
+
+Two more capabilities look like MCP servers but are not declared in either config file: **browser control** (the paired Chrome extension) and **desktop control** (native computer use). They come from the client itself. You will see their tools without having configured a server — that is expected, and it also means you cannot fix them by editing `.mcp.json`.
+
 Ask:
 > Which MCP servers would you like to connect? These give your agents access to external services. Pick the ones relevant to your work -- you can always add more later.
 >
-> Available now:
+> **Data + backend**
+> 1. **Postgres (serverless)** -- database branching, SQL execution, schema management
+> 2. **Supabase** -- database, auth, storage, edge functions. Add one entry *per project* rather than one shared entry, and give each a distinct suffixed name (`supabase-<project>`) so a destructive query can never hit the wrong database because two projects shared a server name.
 >
-> 1. **Chrome** -- browser automation, web scraping, form filling, screenshot capture
-> 2. **Neon** -- serverless Postgres database, branching, SQL execution, schema management
-> 3. **Gmail** -- read and draft emails, search inbox, manage labels
-> 4. **Google Calendar** -- view schedule, create events, find free time
-> 5. **Notion** -- read and write pages, search docs, manage databases
-> 6. **Vercel** -- deploy, check build logs, get deploy URLs, manage domains
-> 7. **Supabase** -- database, auth, storage, edge functions (backend-as-a-service)
-> 8. **HubSpot** -- CRM, contacts, deals, companies, pipelines
-> 9. **Computer Use** -- control your desktop, click buttons, type text, take screenshots
+> **Web + research**
+> 3. **Premium web search** -- neural search with full page content, better than a plain keyword search for research
+> 4. **Reddit** -- browse, search, analyse user activity (anonymous tier is rate-limited)
+> 5. **Academic search** -- peer-reviewed papers, for anything that needs a science-backed claim
+> 6. **Docs fetcher (Context7)** -- current documentation for any library, framework, SDK or CLI. Strongly recommended: it is the cheapest available fix for a model confidently citing an API signature that changed two releases ago.
+>
+> **Code intelligence**
+> 7. **Symbolic navigation (serena)** -- language-server-backed "what actually references this symbol", "where is this implemented", "does this file have type errors". Install it **read-only** — see the recipe in A9, it is not the default and the default is unsafe here.
+>
+> **Browser + desktop**
+> 8. **Playwright** -- headless, DOM-aware browser automation. This is the one a background agent should use.
+> 9. **Chrome extension** -- drives your real browser with your real logins. Interactive use only (see the consent warning below).
+> 10. **Computer use** -- native desktop control for apps that have no API
+>
+> **Design + generation**
+> 11. **Generative media** -- image / video / 3D generation from prompts
+> 12. **Design tooling** -- screen generation and design-file editing
+>
+> **Docs + workspace**
+> 13. **Notion** -- read and write pages, search docs, manage databases
+> 14. **Transactional email** -- sending domains and delivery
+> 15. **Integration hub** -- one server wrapping thousands of third-party APIs, for the long tail you would otherwise hand-roll
+>
+> **Account connectors** (session-only, not available to background agents)
+> 16. **Gmail / Calendar / Drive / CRM / deploy platform** -- connected through your Claude account, not a config file
 >
 > Enter the numbers of the ones you want (e.g., "1, 3, 4") or "none" to skip. Everything you skip is still available to add later.
 
@@ -3750,14 +3992,42 @@ Ask:
 **Default:** None.
 **Affects:** .mcp.json configuration, which MCP tools are referenced in CLAUDE.md agent capabilities, whether specific MCP setup instructions are included.
 
+⚠️ **The browser-consent trap, and it is the single most expensive one in this list.** Driving the real browser through a paired extension raises an in-app consent prompt ("… wants to click…") that appears **only in the terminal running the session**. It does not route to your messaging channel, and it does not respect a skip-permissions flag. A background agent that reaches for it therefore **freezes waiting for an approval nobody will ever see** — and presents exactly like a crashed agent, with its work sitting uncommitted in the working tree. Standing rule: **background and dispatched agents verify UI through headless Playwright or a direct build / bundle / curl check, never the browser extension.** Recovery when it happens: stop the frozen agent, then check its working tree before re-dispatching — the work is usually finished, just uncommitted.
+
+**Update: there is a SECOND, independent root cause of the same symptom, found later.** A paired browser extension can also fail to safely relax its security model for local/localhost content specifically, so it prompts on **every single action** against a local dev server regardless of any grant a background agent already has — this is separate from the missing-grant cause above and needs a different fix. Which gives a three-lane browser-automation model, chosen by auth state and locality rather than one universal tool:
+
+### Browser automation — three lanes by auth and locality, not one universal tool
+
+1. **Local / unauthenticated verification** (render, screenshot, a static marker in returned HTML)
+   → a headless browser automation MCP (**Playwright** is the reference choice here), run from the
+   orchestrator's own session. This avoids both traps above: it is a separate sandbox outside the
+   paired-extension's security model, so it never throws the local-content prompt, and running it
+   from the main session sidesteps the missing-grant prompt too. Note the `file://` restriction
+   most headless engines carry — serve local content over `127.0.0.1:<port>` instead of opening it
+   from disk.
+2. **Authenticated work on the operator's real logged-in sessions, for domains you've explicitly
+   granted** → a second-engine's own browser-driving capability, if your build includes one
+   (**Codex's own Chrome-extension automation** is what this build uses), is the flat-rate default:
+   no approval prompt, unattended, and it doesn't burn your primary model's usage window. Keep the
+   per-origin grant list in the second engine's own config as the single source of truth — copying
+   it elsewhere just gives you a second, driftable copy.
+3. **Authenticated work on ungranted/open-web domains** → an isolated agent-browser tool that
+   inherits your real login state without re-authenticating, used as a fallback.
+4. A paired browser extension (or generic screen/computer automation) should be the LAST resort,
+   and forbidden by default inside dispatch briefs — its approval prompts appear only on the
+   operator's own screen and cannot be answered remotely, which silently hangs any dispatched agent
+   whose operator is reachable only by chat.
+
+⚠️ **Your safety gate probably does not see MCP tools.** A `PreToolUse` gate that inspects Bash commands and file paths inspects exactly that; any *other* MCP tool falls straight through to "all clear" unless you named it explicitly. So a destructive database tool from an MCP server is ungated by default, and — the part that actually bites — **a name-matched allowlist misses suffixed variants**. A gate keyed on `mcp__supabase__*` does not match `mcp__supabase-main__*`. If you follow the per-project-suffix advice above, extend the gate's patterns in the same commit, or you have just moved every real database outside the gate while the pattern still looks correct.
+
 After they pick, confirm the selection and note which ones are available later:
-> Selected: [list]. The others (Chrome, Neon, Gmail, etc.) are available any time -- just say "add [server] MCP" in a session and I'll configure it.
+> Selected: [list]. The others are available any time -- just say "add [server] MCP" in a session and I'll configure it.
 
 ---
 
 ### Q14: Plugins and skills
 
-This step installs from the full catalogue documented in `## The plugin + skill stack we run` above (16 marketplaces, grouped by job). Do not offer a shortened subset — a wizard that only asks about 4 plugins when the system documents ~20 is the single most common onboarding complaint ("it didn't have all the plugins"). Present every group below.
+This step installs from the full catalogue documented in `## The plugin + skill stack we run` above (18 marketplaces, grouped by job). Do not offer a shortened subset — a wizard that only asks about 4 plugins when the system documents ~20 is the single most common onboarding complaint ("it didn't have all the plugins"). Present every group below.
 
 Ask:
 > Which plugins and skills do you want to install? These extend what your agents can do. I'll group them by job, pick whole groups or individual names, "all", or "none" -- everything you skip stays available to add later with the same command.
@@ -3774,7 +4044,8 @@ Ask:
 > - **document-skills** -- also covers artifact/poster/landing-page design, not just Office files
 >
 > **Animation / 3D** (pick if your UI needs motion or 3D scenes)
-> - **core-3d-animation** -- GSAP + ScrollTrigger, Three.js, React Three Fiber, Babylon.js, React motion
+> - **gsap-skills** -- GreenSock's own 8-skill pack: core tweens, ScrollTrigger, timelines, the React hook, Vue/Svelte lifecycles, plugins, utils, performance. Pick this over the third-party GSAP guidance for anything non-trivial
+> - **core-3d-animation** -- Three.js, React Three Fiber, Babylon.js, React motion (plus its own GSAP coverage)
 > - **animation-components** -- Magic UI + React Bits prebuilt components, Lottie, Anime.js, physics-based motion
 >
 > **Mobile** (pick if you're building iOS / Android / React Native / Expo)
@@ -3796,6 +4067,7 @@ Ask:
 >
 > **Engineering discipline**
 > - **andrej-karpathy-skills** -- behavioural guidelines that reduce common LLM coding mistakes
+> - **security-guidance** -- first-party secure-coding guidance; complements the safety gate (the gate stops a destructive command, this shapes the code being written)
 >
 > A few starting points based on what's common:
 > - Solo dev, no UI work: **superpowers** + **codex** is plenty to start.
@@ -4279,6 +4551,31 @@ For each installed plugin, verify it loaded:
 claude plugin list
 ```
 
+`claude plugin list` reports what is **installed**. Installed is not the same as **enabled**, and only the enabled set is reachable by your agents. Check both, and reconcile against what the user actually selected at Q14:
+
+```bash
+# What is enabled (the set that is actually reachable)
+python3 -c "import json,os;d=json.load(open(os.path.expanduser('~/.claude/settings.json')));print({k:v for k,v in sorted(d.get('enabledPlugins',{}).items())})"
+
+# Which marketplaces are registered
+python3 -c "import json,os;print(sorted(json.load(open(os.path.expanduser('~/.claude/plugins/known_marketplaces.json')))))"
+```
+
+Report any plugin that is installed but disabled, and any marketplace added with nothing installed from it — both are normal states, but a silent one is how a user concludes a capability is missing when it is one flag away.
+
+### 6b. Skill and MCP inventory
+
+```bash
+# Skills live in TWO directories. Count SKILL.md files, not directory entries —
+# a resource bundle is a directory with no SKILL.md and would inflate the count.
+find .claude/skills ~/.claude/skills -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l
+
+# MCP servers live in TWO config files. Anything green in /mcp but in neither
+# is an account connector, and is unavailable to background agents.
+python3 -c "import json;print(sorted(json.load(open('.mcp.json'))['mcpServers']))"
+python3 -c "import json,os;print(sorted(json.load(open(os.path.expanduser('~/.claude.json'))).get('mcpServers',{})))"
+```
+
 ### 7. Healthcheck
 Run the generated `scripts/healthcheck.sh` and display results.
 
@@ -4754,6 +5051,8 @@ The eval-gate protocol is the discipline that holds the whole thing together: ev
 
 The reply-output discipline this build relies on is enforced by a single neutral hook, `.claude/hooks/{{orchestrator_lower}}-output-lint.sh` (a PreToolUse hook on the Telegram reply tool, canonical rules in `docs/output-discipline-rules.md`). It is the one source of truth for outbound style; no per-mode alias variant exists.
 
+**A self-improvement loop with five write-back mechanisms, all gated on human approval — an honest limitation, disclosed rather than hidden.** The system can (1) propose an optimized rewrite of one of its own instruction files when measured performance data supports it, (2) draft an entirely new procedural skill when a recurring unmet need is detected, (3) age out procedural knowledge that's gone stale, (4) extract a reusable lesson from a completed multi-step task automatically, and (5) self-critique its own recent output against its stated operating rules. Every one of these mechanisms is propose-only by construction: it writes a reviewable, git-trackable draft and never edits the live configuration directly. **The honest limitation, found on a real long-running install:** all five mechanisms were actively generating proposals on a real cadence, but the human review/approval step had a very low throughput relative to that generation rate — the system was much better at noticing what could be improved than at getting improvements actually adopted, and each mechanism's specific reason differed (one had a healthy backlog nobody had reviewed, one had never fired at all, one lacked a provisioned credential, one had a generation-side duplication bug on top of the review gap, and one was executing correctly but had never once flagged a real issue — a calibration question, not a wiring one). This is presented as an open engineering problem (a review-bottleneck, not a design flaw in the propose/approve split itself), and a natural next investment area: either lower the review cost per proposal, or raise the bar for what gets proposed in the first place so fewer, higher-value candidates reach the human. **The general lesson: a self-improvement engine's own dashboard should measure adoption rate, not just proposal volume — "wired and generating" is not the same claim as "closing the loop," and conflating them is how a system quietly stops improving while still looking active.**
+
 ### The toggleable engine pass (Advanced mode, optional)
 
 A later slate gives the self-improvement loop a **central on/off registry** so every mechanism is independently switchable and ships **dormant until the operator flips it**. The registry is `data/config/engine-toggles.json` (schema `engine-toggles/v1`), read by `scripts/lib/engine-toggle.sh` (`is_enabled <key> [default]`) and `scripts/lib/engine_toggle.py`; each mechanism checks its key and **cleanly no-ops when off**. The fail-safe contract is the important part: an absent, unreadable, or malformed registry, or a missing key, returns the caller's coded default, so a missing file can never silently disable a correctness guard. Each entry is self-describing (a `label` plus a `description`), which lets a future settings screen render the whole engine as one panel of switches. The design stance is that the operator owns the defaults. This is not a blanket "all safety on"; a build can ship every mechanism OFF and let the operator enable them one at a time, while the always-on catastrophe-prevention layer (the never-send / destructive-command gate) stays on regardless.
@@ -4765,7 +5064,7 @@ The mechanisms grouped by what they protect or measure:
 - **Security.** A deterministic "lethal-trifecta" / Rule-of-Two egress gate (`rule_of_two_gate`: a harness-level data-flow gate OUTSIDE the model that tracks three session capabilities, namely untrusted-content ingested, private-data accessed, and an external-egress channel, and when all three co-occur it flags the egress leg for an explicit confirm; it sits alongside the destructive-command gate, never replaces it). This is the one mechanism the wider security field agrees is correct yet no mainstream agent harness had shipped, so it is genuine first-mover ground; it ships OFF because an always-on gate blocks a lot of normal flow for an agent that routinely reads untrusted content, holds private memory, and sends messages.
 - **Measurement (report-only, never gates anything).** A cross-domain transfer eval (`cross_domain_eval`: does an agent's recall on its OWN domain rise as its memory grows, and does loading one agent's memory NOT degrade another's, i.e. does the per-agent partition hold and does parallel dispatch pay off), a with/without-skill A/B harness (`skill_ab_harness`: run the golden cases with a skill loaded vs without and report repairs minus regressions, so a skill is proven net-positive before it is kept), and a roster runtime-behaviour measure (`roster_behaviour_measure`: does a new or changed skill actually change runtime behaviour or is it dead weight). All three live-run against a local embedder and no-op cleanly when it is absent; none of them ever adopts, removes, or gates a skill or a dispatch.
 - **Quality.** Calibrated abstention-as-handoff (`abstention_handoff`: on a genuinely low-confidence claim, reshape the assertion into a structured handoff of "not fully confident; here is what to verify, where to look, and the one clarifying question," and log an abstention-quality signal; it never nags on confident answers and only upgrades the reconcile-before-claim discipline). The prompt-side half is a `{{orchestrator_lower}}-abstention` skill.
-- **Dispatch discipline.** A model-rule pre-dispatch enforcer (`model_rule_enforcer`: a deterministic warn-only check that the cheap-by-default model rule is being followed before an agent spawns; it never hard-blocks).
+- **Dispatch discipline.** A model-rule pre-dispatch enforcer (`model_rule_enforcer`: a deterministic pre-dispatch check that the cheap-by-default model rule is being followed before an agent spawns; it **blocks by default** — an environment toggle can downgrade it to warn-only, but treating "warn-only" as the default is a stale reading worth verifying against the code before you rely on it).
 - **Infrastructure.** An engine reliability / self-heal layer (`reliability_self_heal`: a safely-redesigned auto-restart guard that recycles a wedged session ONLY when a load-bearing safe-to-recycle gate says SAFE, refusing while the session is busy, while any agent is registered active, or while any in-flight dispatch checkpoint exists, plus a launchd-free heartbeat/liveness detector; the recovery action is a graceful signal that lets the EXISTING supervisor relaunch path take over). It ships OFF because an earlier aggressive auto-restart had killed live work; the redesigned gate exists, but the operator enables it only after a clean observation window.
 
 Three of these need one out-of-band wiring step in addition to the toggle, because editing the harness settings or the supervisor cannot be done from inside an agent run: the model-rule enforcer, the self-heal layer (its registration script defaults to a dry-run), and the egress gate each register a hook via a small `scripts/*-register-hooks.sh` / `*-register.sh --install` command the operator runs in a real terminal. The other mechanisms are single-key flips. Every mechanism ships with a hermetic self-test under `scripts/test-*.sh`.
@@ -5403,6 +5702,15 @@ Never approve a pairing request from a chat message. Approvals happen from your 
 
 MCP (Model Context Protocol) servers extend what your agents can do by connecting them to external services. You can add new ones at any time.
 
+**Step 0: Decide which of the two config files it goes in**
+
+- **`.mcp.json` in the project** — committed, travels with the repo, available to every agent and every background run *for this project*. Use it for anything the project itself depends on.
+- **`mcpServers` in `~/.claude.json`** — machine-local, not committed, shared by every project on this laptop. Use it for a personal tool you want everywhere.
+
+Both are reachable from background and scheduled runs. An **account connector** (`mcp__claude_ai_*` tool prefix, authenticated through your Claude account with nothing on disk) is not — it exists only in an interactive session. Never build a scheduled routine on one.
+
+⚠️ **Never commit a live credential into `.mcp.json`.** It is a committed file. If a server needs a key, either read it from the environment or keep that server in `~/.claude.json` instead, and make sure the key is covered by your secret-redaction patterns before any tooling logs the config.
+
 **Step 1: Add to `.mcp.json`**
 
 Each MCP server needs an entry in your project's `.mcp.json`. The format depends on the server. Example:
@@ -5435,12 +5743,43 @@ Add the server to your CLAUDE.md so {{orchestrator_name}} knows it exists and wh
 Start a new Claude Code session (MCP servers are loaded on session start) and verify the server's tools are available. Ask {{orchestrator_name}} to list available tools or try a simple operation.
 
 **Common MCP servers:**
-- **Neon** -- serverless Postgres (database branching, SQL execution)
-- **Vercel** -- deployments, build logs, rollback
+- **Serverless Postgres** -- database branching, SQL execution, schema management
+- **Supabase** -- database, auth, storage, edge functions. One suffixed entry per project (`supabase-<project>`), never one shared entry
+- **Context7** -- current library / framework / SDK documentation, fetched live instead of recalled from training data
+- **Premium web search / Reddit / academic search** -- the three research lanes
+- **Playwright** -- headless browser automation; the correct choice for any background agent
+- **serena** -- language-server-backed symbolic code navigation (install read-only, see below)
 - **Notion** -- project docs, task tracking
-- **Gmail** -- email reading and drafting
-- **Google Calendar** -- event management
-- **Chrome automation** -- browser control, page reading, form filling
+- **Generative media** -- image / video / 3D generation
+- **Integration hub** -- one server wrapping thousands of third-party APIs
+- **Account connectors** (session-only) -- Gmail, Calendar, Drive, CRM, deploy platform
+- **Client built-ins** (no config entry) -- paired browser extension, native computer use
+
+---
+
+### A9.1. Adding a code-navigation MCP server safely (the read-only recipe)
+
+Symbolic navigation is one of the highest-value MCP additions: a language server resolves *real* references, so "what actually calls this?" excludes same-named methods on unrelated types and catches contextually-typed usages that never name the type — questions text search answers badly. It is also the addition most likely to quietly disarm your safety layer, so it is worth doing properly once.
+
+**The problem.** A typical `PreToolUse` safety gate inspects Bash commands, `Write` / `Edit` file paths, and a named list of database tools. Every *other* MCP tool falls through to "all clear". Code-navigation servers commonly ship **file-mutation tools** alongside the read-only ones — replace-in-files, replace-symbol-body, create-file, delete-lines. Those are invisible to the gate. Worse, several ship a default prompt that instructs agents that the host's own `Read` and `Edit` are "forbidden" and that they should use the server's editors instead — which systematically routes every file mutation *around* your gate. The result is a rig that looks gated and is not.
+
+Do not take this on trust in either direction. **Prove it** before deciding, by feeding your gate synthetic `PreToolUse` envelopes for both a known-gated control and each of the server's editor tools, and comparing the verdicts. On this build the result was 4/4 gated controls blocked and 4/4 server editors allowed.
+
+**The fix, in four parts:**
+
+1. **Write your own context/config file** rather than using the server's stock one, and check it into your repo. The stock config is tuned for a rig with different assumptions than yours.
+2. **Use a true allowlist, and confirm it is one.** Look for a setting that *resets* the tool set to empty and adds back only what you name — subtractive "exclude" lists silently fail open when the server ships a new tool. On this build the allowlist is seven tools: an activate-project call plus six read-only symbolic ones (symbols overview, find symbol, find referencing symbols, find implementations, find declaration, file diagnostics). **Every mutation stays on the host's own gated `Edit` / `Write`.**
+3. **Pin anything applied *after* the config.** This is the part that is easy to miss and it is where the real hole was. Startup **modes** are applied after the context and their optional tools are added **additively** — including real mutators (delete-lines, replace-lines, insert-at-line, rename, remove-project). Those modes otherwise default from an *unversioned file in your home directory*, outside your repo and outside your gate. Pin them explicitly on the launch command so the choice lives in committed config. Verified empirically on this build: with a permissive mode planted in the home-dir config, `tools/list` returned 9 tools unpinned and 7 pinned.
+4. **Verify by enumerating, not by reading config.** Start the server twice — once with your config, once with the vendor default — and require the two tool lists to **differ**. Identical lists mean your config never loaded, and that is a failure mode config-reading cannot detect.
+
+```bash
+# The verification that actually settles it: enumerate the exposed tools over stdio.
+# Expect exactly your allowlisted names — and expect a DIFFERENT list from the default run.
+```
+
+**Two things to also rule out.** If the server ships its own **memory tools**, exclude them: they write to a parallel store that nothing in your rig reads, embeds, or reconciles, so memory silently forks in two. And if it has a single-project mode, check whether that mode applies the *target repo's* config when building the exposed tool set — if it does, any repo you open could widen your tool surface by shipping its own config file.
+
+Finally, write the reasoning **into the config file as comments**, not just into a commit message. The next person to look at it — including a future agent — needs to know that the narrow tool list is deliberate and what breaks if they widen it. A config that looks needlessly restrictive gets "helpfully" relaxed.
 
 ---
 
@@ -6408,6 +6747,63 @@ is meaningless`.
 **A second opinion delivered confidently from an empty context is worse than an error**, because you
 will act on it.
 
+## The fix for that bug introduced the next one: a per-file cap SKIPS, it does not truncate
+
+The per-file cap above stopped one lockfile eating the budget. It also introduced a quieter failure
+that took months to notice: a file **larger than the cap is skipped entirely**. Not truncated —
+skipped. So the review runs, reports no findings, and the verdict reads clean.
+
+On a codebase whose largest files are the interesting ones, "clean" then means *"I never looked at
+the parts that matter."* A real audit missed a token service and an entire payout surface this way,
+while returning a confident all-clear.
+
+Two rules fall out, and they generalise to any budgeted sampler — bundlers, context packers,
+retrieval:
+
+- **Always read the inventory before believing the verdict.** A clean result that saw 6 of 24 files
+  is worthless. This is why the bundler emits what it skipped *and why*: a skip list nobody reads is
+  the same as no skip list. If your tool cannot tell you what it skipped, you cannot use its verdict.
+- **Prefer truncate-with-a-marker over skip.** Half a large file plus an explicit "truncated here" is
+  strictly better than silence, because the reviewer can ask for the rest. Silence cannot be
+  distinguished from "nothing was wrong".
+
+And on anything guarding money, credentials, or personal data: **run the second engine twice and take
+the union of findings.** One clean pass is a sample, not a proof — two passes routinely disagree, and
+they have disagreed on a top-severity finding.
+
+## Test the running product, not the code that should produce it
+
+Green unit tests, a clean build, and a careful read of the diff are all necessary and none of them is
+sufficient. Features have shipped "done" from all three while being silently broken in the actual
+running app — the classic shape being a control that renders, responds, and never persists.
+
+So the completion gate is: **click the real control in the running application and confirm the effect
+at the point of consumption.** Not the source tree it was built from; not the deploy dashboard; not a
+200 on the page. If the feature is behind authentication, that is not an excuse to skip it — keep a
+dedicated test account and drive the real flow headlessly. Standing up that login once is cheaper
+than one "shipped but broken" cycle, and it converts the most expensive class of false-completion
+into a check that takes a minute.
+
+## Give a captured idea a decision, or the capture is theatre
+
+Tools, repos, and techniques arrive faster than they can be evaluated. The failure mode is not losing
+them — it is capturing them diligently into a note and never *deciding*, so the list grows into a
+monument to good intentions.
+
+The cure is a small pipeline with one non-optional property: **every captured item ends in a recorded
+verdict — adopt, adapt, skip, or defer — with a date and a reason.** "Skip, too expensive" is a
+complete and successful outcome. "Deferred" is fine *if it carries what would change the answer*. The
+only failure state is an item with no verdict, because that is the one that gets re-evaluated from
+scratch every few months.
+
+Two habits make the verdicts cheap: hand the evaluation to a research agent rather than doing it
+inline, and record the verdict where the *next* relevant task will trip over it, not in a standalone
+file nobody opens. **Adopt in one of three forms** — install-as-is, *adapt* (vendor the source, then
+narrow it to the subset that is safe on your rig — this is what the read-only code-navigation recipe
+in A9.1 is), or steal-the-pattern (reimplement the one idea worth having and skip the dependency).
+The middle form is the most common and the most often skipped, because "install it" and "don't" feel
+like the only two options.
+
 ## Your always-on rules file is a user message, not a system prompt
 
 This is the single highest-leverage thing in this section.
@@ -6718,3 +7114,121 @@ replacement expanded to the whole line and produced an invalid script. The comma
 tested and was correct in the shell it was authored in. **Ship a file and have them run one
 unambiguous line.** Back up first, verify after, roll back on failure, and refuse rather than
 guess — you are not there when it runs.
+
+## Self-heal every tracking surface, and close the loop on what you detect
+
+Three gaps surfaced in one week, all the same shape — a WRITE with no matching DETECT or
+self-heal, so the thing looked shipped and did nothing:
+
+- **Per-project tracking files rot silently.** An orchestrator that rebuilds its OWN `HANDOFF.md`
+  every session but leaves every managed project's `HANDOFF.md` as a day-one stub is running blind on
+  every project except itself. **`scripts/rebuild-project-handoffs.sh`** is the sibling of the
+  orchestrator's own handoff-rebuilder: it regenerates the auto section of every OTHER repo's
+  `HANDOFF.md` from that repo's own git log, wired into session-end so it heals unattended. One trap
+  to guard: a script that regenerates a file **and commits it** must exclude its own commits from any
+  git-log it embeds, or every run reads its own prior refresh as new activity and churns a commit into
+  every repo forever.
+
+- **Bi-temporal memory needs a DETECT edge, not just WRITE and READ.** "What is true now" versus
+  "what was true" is answerable in flat markdown by supersede-don't-delete: stamp the old note
+  `invalid_at` + `superseded_by`, the new one `valid_at`, and filter recall to the current slice. But
+  two opt-in writers with no live caller produce zero stamps in practice — the pattern looks shipped
+  and does nothing. **`scripts/memory-supersede.py`** is the missing detector — propose-only, it
+  surfaces likely-superseded pairs for confirmation and never auto-rewrites — and
+  **`scripts/test-supersede-recall.sh`** is the hermetic self-test proving the recall seam actually
+  filters to the current slice, so the pattern is verified rather than assumed.
+
+- **An SLO you don't alert on is invisible.** Writing every breach to a log whose only reader is a
+  once-daily digest lets a monitor sit at 100% violation for days, unseen. **`scripts/slo-alert-notify.sh`**
+  reads the fresh rolling state (never the raw backlog, so message size stays bounded), dedupes by a
+  per-monitor escalation bucket so it pages once per new threshold crossed rather than every run,
+  distinguishes a broken monitor from a real breach, and is a forcing function that only sends on an
+  explicit opt-in — wrapped so a notify bug can never fail the monitored run itself. Turn it on for a
+  scheduled, no-flags invocation with a persistent opt-in *file* the runner checks, not a CLI flag the
+  scheduler will never pass.
+
+## Completeness pass — patterns and mechanisms added 2026-09-12
+
+A structured audit against the running system surfaced a set of live, generalizable patterns this guide had documented thinly or not at all. They're gathered here rather than threaded through the install flow above, since most are cross-cutting teaching rather than a single install step.
+
+### Three lifecycle events beyond the gate-named set
+
+Most hook examples above wire `PreToolUse` / `PostToolUse`. Three more lifecycle events each earn a purpose-built hook:
+
+- **`InstructionsLoaded`** fires when your always-loaded instructions file is read into context — wire a drift/sync check here so the session starts aware of state problems before it can assert anything wrong about them.
+- **`PostToolUseFailure`** fires on a tool call that FAILED, which the ordinary `PostToolUse` event does not — without a dedicated hook here, failed calls are invisible to whatever audit trail you already keep on successful ones.
+- **`TeammateIdle`** (multi-agent teams only) fires when a teammate is about to go idle — a hook here can detect a premature idle (an assigned task, no expected output file, no final message) and send the teammate back to work instead of letting it silently stop mid-task.
+
+**A block-still-gets-logged pattern.** When a `PreToolUse` gate blocks an outbound reply, a companion `PostToolUse` hook on the SAME tool, wired with the block-continuation flag your harness exposes, still fires and records the blocked attempt into your corrections/learning log. Without this pairing, a blocked action simply vanishes — nothing else in the chain sees it, so nothing learns that it was attempted.
+
+**Auto-nudge, at the implementation level.** The "draft a new procedural skill when a recurring unmet need is detected" mechanism (mechanism 2 of the self-improvement write-back set) is implemented as a `PostToolUse` hook that watches every tool call for a repeated multi-step manual pattern; after enough repeats it proposes (never auto-adopts) a lightweight skill candidate for review, kept separate from the heavier LLM-authored full-skill drafting mechanism.
+
+### The pre-go-live security gate
+
+Before anything reaches production — a deploy promotion, a merge to a deploying branch, a build handed to a client — run a structured security checklist and resolve or explicitly accept every finding. A good checklist covers: exposed credentials and secrets; authentication/authorization enforced server-side (never client-side-only); data-exposure and access-control boundaries between tenants; injection classes (SQL/XSS/CSRF/SSRF/prompt-injection); configuration and supply-chain hygiene; network/API/email hardening (CORS, webhooks, security headers, rate limits); and monitoring/audit/backup-with-tested-restore. Run it with an independent second reviewer (a different model/engine reading the diff cold catches what the author's own green tests don't), and verify each item at the point where a real user would hit it — the served page and a real-payload request, not a health-check endpoint. An optional autonomous red-team leg (a pentest agent aimed only at your own authorized targets) is worth adding for high-value go-lives.
+
+### No feature-drop on deploy
+
+Before promoting any build, prove the candidate is a strict superset of what's currently live — mechanically, the live commit must be an ancestor of the new commit in git history. A "green build, clean deploy" is not proof of this: a branch that forked before a feature shipped will pass every test and still silently remove that feature when promoted. A one-command ancestry check that blocks the promote and names the exact commits that would be dropped closes this class of regression structurally instead of relying on someone remembering to check. First get the TRUE live commit from the hosting platform, not the branch your repo happens to be sitting on. A pass proves parity only — review and live verification remain separate steps.
+
+### Gate hardening is a cadence, and self-tests can lie
+
+Treat any destructive-command safety mechanism as something that needs periodic adversarial re-testing against itself, not a build-once artifact. Two recurring failure classes to design against from the start: (1) a matcher that only inspects the first command in a chained/piped invocation will miss a destructive command riding after a benign prefix; (2) a self-test suite can exercise a different code path than the one actually installed, and report green while the live mechanism leaks. Route every destructive action — including ones issued through connected tool/plugin surfaces, not just the shell — through one central point, classified by *verb* (delete, drop, reset, truncate), not by a hand-maintained list of exact tool names that a new or differently-named tool silently escapes. And never propagate a security-critical gate body from a source you have not just re-audited.
+
+### Enforcing your own model/effort tiers
+
+If you adopt the model-tier discipline (cheap clone for speed, everyday agent as default, heavier clone only on explicit say-so), a `PreToolUse` hook on your dispatch tool can enforce it: it inspects the model/agent about to spawn and, if an escalation tier is requested without an explicit escalation signal in the operator's own message that turn, blocks the dispatch. Make it a default-block gate with an environment toggle to downgrade to warn-only, rather than the reverse — an advisory that never blocks is one you'll stop reading. (The engine-tier section earlier describes the same enforcer from the model side.)
+
+### Operational commands worth including
+
+- **Checkpoint / rollback.** A manual save-point pair: `checkpoint` snapshots current git state plus a small amount of session context; `rollback` reverses to a named checkpoint, always with an explicit confirmation step before anything is discarded.
+- **Monitor vs watchdog.** `monitor` is a one-shot health probe against your own configured list of live URLs. `watchdog` starts a persistent, session-scoped watch that stays quiet unless something actually breaks — complementary, not overlapping.
+- **Deploy.** Resolves a project by name using the same project-registry mechanism as every other command, then runs its production deploy path.
+- **Test-and-fix loop.** Detects your test runner, runs the suite, and on failure dispatches a build specialist with the failure trace; re-runs; a hard iteration cap prevents an infinite fix-loop; reports green or a surrender-with-diff-trail.
+- **Undo.** A discoverable alias for the CLI's own turn-rewind feature.
+
+**The auto-nudge skill-generation loop.** A background pass watches for a recurring procedure the orchestrator keeps re-explaining, drafts it as a candidate skill, and surfaces it for approval rather than self-adopting. Two commands close the loop: an approve command promotes the draft into a real skill file (after an injection scan) and commits it; a reject command discards it and records the reason so the same candidate isn't re-proposed.
+
+**Inbox sweep and overdue-arc chaser.** Two lightweight, connector-backed digest commands: an inbox sweep that queries a small, user-configured watchlist of searches against a mail connector and reports what's new since a persisted marker (advancing the marker only on success); and an overdue-arc chaser that reads a small state file of open commitments with due dates and surfaces the most-overdue first. Both auto-surface a short digest inside a morning/greeting routine as well as answering on demand.
+
+### Orchestration patterns worth teaching in full
+
+- **Reflection before dispatch — the six-stage check.** Before dispatching on a fuzzy brief, run a short pre-hoc critique instead of discovering gaps mid-build: does the brief establish who the agent is acting as (persona), what role it fills, exactly what task it's doing, what outcome defines success, whether any state must persist past this dispatch, and — the risk-inflection check — whether anything is irreversible enough that getting the direction wrong is expensive. Cheaper before the first tool call than after the tenth.
+- **The completion-verification gate.** Never let a "done / fixed / shipped / passing" claim leave without a verification command run and its output confirmed in the same turn. This extends to any count, completeness claim ("all of X"), or absence claim ("there is no Y") — state how you derived it, not just what you concluded.
+- **Post-dispatch trajectory extraction (walkthrough).** After a non-trivial dispatch, deterministically parse the agent's own transcript (not an LLM summary of it) for the challenges it hit, the patterns it established, and the step-sequence that worked — and write that as a draft memory a human approves before it becomes load-bearing. Trivial runs write nothing by design.
+- **Calibrated abstention.** When confidence is genuinely low — an ambiguous or stale source, a claim you can't reconcile against ground truth, inference past what you actually checked — produce a structured handoff (what you're unsure of, what to verify, where to look, the clarifying question) instead of asserting a shaky claim. It must never fire on confident, correct, or trivial answers; a gate that nags constantly gets ignored on the one turn it matters.
+- **The handoff packet.** Before dispatching a non-trivial task, or when a session runs low on context, compress state into a structured packet rather than dumping raw transcript: the goal, what's done, what's next, open questions, and specific files-and-lines rather than vague prose. This is what lets a dispatch or a fresh session continue mid-task without re-deriving context.
+- **Shared scratch-pad path.** Every multi-agent brief names a shared scratch-pad path so agents on the same task leave intermediate artifacts somewhere every teammate can find, instead of re-deriving the location or writing incompatible state to different paths.
+- **Progressive skill disclosure.** Scope the skill roster a dispatched agent carries to the file/area it's touching — name the relevant skills in the brief rather than loading a multi-hundred-skill catalogue into context and hoping it self-selects.
+- **Plan cross-check before executing a complex plan.** For a complex, multi-step, or partly-irreversible plan, run it past a second engine for a design review BEFORE the first line of implementation, not after — catching a wrong-direction plan while it's still cheap to redirect. Gate on complexity/reversibility; a single-file fix skips it.
+
+### Beyond the resolver — code-derived build state + a second semantic index
+
+Two pieces close gaps a name-based project resolver can't:
+
+- A **code-derived build-state script** answers "how much of this project is actually built" from the repository itself — module inventory, test counts, feature detection, LOC, deploy markers, git recency — because a model-written status note drifts from what the code actually contains. It supports deriving one project, deriving the whole registry ranked by recency, and a read-only cached-serve mode for session start. Deterministic, no LLM call, fails open.
+- A **second, separate semantic index** covers every OTHER project's own docs (README/instructions/handoff and anything under a top-level `docs/`) — distinct from the orchestrator's own memory index — so a "which project talks about X" question is answered without touching the deterministic name resolver, which stays reserved for "resolve this name to its exact folder."
+
+**The registry doctor.** The exact-match resolver's registry has a validation mode that checks the WHOLE registry rather than one lookup, distinguishing a hard failure (an on-disk project with no entry at all in the human-curated project list) from an honestly-unconfirmed curated field (a backlog item, not a blocker). Wired into routine maintenance so drift surfaces on its own.
+
+### A distribution pipeline that derives the public package from the live tree
+
+Two export paths exist for a reason: one sanitises the hand-authored blueprint prose (the setup guide itself); a second, separate pipeline derives the entire code-template package from the CURRENT live tree, so nothing has to be manually re-typed and the package can never lag behind what actually ships. A manifest classifies every live artifact as ship / doc-only / private; a completeness gate then proves every live file is classified SOMEWHERE — an unclassified new hook or script is a hard failure until a human decides its disposition, so nothing new is silently omitted. The scrub's name-deny-list is itself derived from live sources every run (the project registry, profile data) rather than a hand-maintained literal list, so a newly-added project or person can't leak through a stale list. The pipeline only stages a package directory for review — it never pushes on its own. And the leak-scrub PROOF script is a separate, read-only check from the sanitiser: pointing the sanitiser at an already-public file (instead of the proof-check) would wipe the install guide and re-emit the very secrets it exists to catch.
+
+**Two agentic runtimes, two MCP configs.** If you run a second-engine CLI alongside your primary agent, remember it keeps its OWN MCP server config, separate from your primary's. A server you add to one is invisible to the other until you wire it twice — check both when auditing what either agent can actually reach.
+
+### A shell-injection lesson worth carrying into any logging script
+
+If a script logs USER-PROVIDED text by taking it as a quoted command-line argument, double quotes do NOT stop command substitution — a message containing `$(...)` or backticks executes in the caller's shell before the script's own argument list even exists. This needs no attacker: an ordinary pasted code snippet containing backticks triggers it by accident, and the output of whatever ran gets logged in place of the original text, silently corrupting whatever record depends on it. Nothing inside the logging script can fix this, because the expansion happens in the CALLER's shell first. The fix is a different call pattern: write the untrusted text to a file first (never via a shell-interpolated string), then pass the FILE PATH as the argument — a path is a fixed, well-formed token that never lets the message body enter a command string.
+
+### A client/project log entry, in full
+
+A durable per-project log should carry four things, not two: what came in and from whom; its PROVENANCE (a binding requirement vs. a reference document vs. an unconfirmed idea — these carry different weight, and conflating them risks building a suggestion as if it were a spec); its concrete effect on the product, not merely that a message arrived; and a "where things stand" pickup line so any fresh session can continue without re-deriving context from raw history. Saving a file into the project folder is not the same as logging it — a write-time gate that checks the log was touched in the same turn closes that gap.
+
+### Two knowledge stores, deliberately separate
+
+A curated, durable reference library (promoted material expected to stay useful — compliance rules, design playbooks, reusable engineering patterns) is kept deliberately distinct from a dated research scratch corpus (one-off audits and investigations, cited by date for a specific claim rather than browsed as a shelf). A verification gate sits on the promotion path from scratch findings (e.g. summaries of watched reference material) into the curated library, so an unverified claim can't quietly become a cited fact.
+
+### Use the arsenal, don't just own it
+
+Possessing a skill/plugin/tool/engine is not using it. On every substantive task, route through a selection framework rather than reaching for whatever's habitual: (1) WHO — the specialist whose domain this is, splitting a multi-domain ask across specialists; (2) WHICH ENGINE — match the engine to the work (the primary model for judgement/interface/client-facing, the second engine for backend and cheap drafts and now design generation too, a frontier reasoning tier for long-horizon agentic/security-audit/3D work but explicitly not visual design where it measures worst, the cheap fast clone for speed/parallelism); (3) WHICH SKILL/TOOL — the matching skill/plugin auto-surfaces on its trigger, so invoke it instead of hand-rolling what it already does; (4) MEASURED WINNERS, NOT VIBES — where a bake-off already exists on record, the numbers pick the engine, not habit. Prefer a published tool/library over building custom before reaching for any of this. A post-reply self-critique judge can make this enforceable: add an "arsenal-underuse" miss category that fires only when a SPECIFIC skill/tool/engine-routing-rule was nameable and skipped for hand-rolling or the wrong engine — never on a vague "could have been more thorough."
