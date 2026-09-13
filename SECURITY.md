@@ -10,7 +10,7 @@ If you find a security issue, please do not open a public GitHub issue. Instead,
 
 - A clear description of the issue and how to reproduce it
 - The affected component (safety gate, secret redactor, banned-language gate, install wizard, blueprint templates)
-- The version of the blueprint you are looking at (v31, v30, etc.)
+- The version of the blueprint you are looking at (v36, v35, etc.)
 - Your assessment of severity (information leak, privilege escalation, command injection, etc.)
 
 Expected response time: **48 hours for acknowledgement, 7 days for triage**. This is a single-maintainer project so do not expect enterprise turnaround, but real issues are taken seriously and credited in the fix commit unless you ask otherwise.
@@ -55,7 +55,7 @@ These are blocked until you write the exact command to `{{project_path}}/data/ap
 - Force-push to any non-protected branch, `git push --mirror`, `--delete`, `:branch`
 - `git reset --hard`, `git clean -f`, `git branch -D`, `git rebase -i`, `rebase --onto`, `commit --amend`
 - `git checkout -- .`, `git restore .`, `git stash drop/clear`, `git worktree remove --force`
-- `git stash pop` / `stash apply` (overwrite-on-pop vector), `git stash` chained with a branch-switch in one command, `git checkout <ref> -- <path>` / `git restore --source=<ref>` over a dirty working tree, and broad-staging (`git add -A` / `git add .` / `--all`) — the data-loss-class blocks added in v31.1 to close the failure modes that surfaced with Opus 4.8
+- `git stash pop` / `stash apply` (overwrite-on-pop vector), `git stash` chained with a branch-switch in one command, `git checkout <ref> -- <path>` / `git restore --source=<ref>` over a dirty working tree, and broad-staging (`git add -A` / `git add .` / `--all`) — the data-loss-class blocks added in v31.1 to close the failure modes that surfaced with newer model generations
 - `rm` with any flag (the CLI-rm whitelist exempts known-safe variants like `npm rm`, `vercel env rm`, `docker rm`, `gh secret rm`, `git rm`)
 - `DROP TABLE`, `TRUNCATE`, `DELETE FROM` without a `WHERE` clause
 - `sudo` anything
@@ -65,7 +65,7 @@ These are blocked until you write the exact command to `{{project_path}}/data/ap
 
 Everything else passes through. Every tool call is still recorded in the audit log (`.claude/hooks/audit-log-hook.sh`) so you can reconstruct what happened after the fact. Audit logs are local-only and gitignored by default.
 
-The canonical implementation of the gate is the one shipped by the blueprint at `.claude/hooks/safety-gate.sh` (project-level) and `~/.claude/hooks/safety-gate.sh` (global). Both are kept in sync via `scripts/sync-safety-gates.sh`. Diverging them is a known footgun, see the install verification step in `xantham-system-v35.md`.
+The canonical implementation of the gate is the one shipped by the blueprint at `.claude/hooks/safety-gate.sh` (project-level) and `~/.claude/hooks/safety-gate.sh` (global). Both are kept in sync via `scripts/sync-safety-gates.sh`. Diverging them is a known footgun, see the install verification step in `xantham-system-v36.md`.
 
 ### Reactive model-defense layer (v31.1)
 
@@ -76,7 +76,7 @@ On top of the three-bucket gate, v31.1 adds a set of reactive hooks and determin
 - **Transcript grounding.** Every quote/attribution is substring-checked against the real source (3-tier exact / whitespace-normalized / fuzzy) before it enters memory or a message.
 - **Pre-merge deletion guard.** A script reports the real deletions a branch makes relative to its merge-base (not the misleading two-dot diff) and flags shared-config edits, before any agent/worktree branch is merged.
 
-Full component detail is in the E5.1 section of `xantham-system-v35.md`. These are layered on top of the gate, not a replacement for it.
+Full component detail is in the E5.1 section of `xantham-system-v36.md`. These are layered on top of the gate, not a replacement for it.
 
 ## Known limitations
 
@@ -151,12 +151,12 @@ If you need an audited agentic stack for a regulated environment, this is not cu
 The blueprint code lives in this public repository. Before installing:
 
 - **Audit the install command.** It is a single paste in the README's install section. It tells Claude to read two files from `raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/`. Both files are public, plain-text Markdown. Read them directly if you want to see what the wizard will generate before running it.
-- **Verify the blueprint cryptographically.** Every commit to `main` regenerates `CHECKSUMS.sha256` with SHA256 hashes of the nine published artifacts (`xantham-system-v35.md`, `xantham-system-v34.md`, `xantham-system-v32.md`, `xantham-templates-v32.md`, `LICENSE`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `COMPARISON.md`). Run `bash scripts/verify-blueprint.sh` (or the curl one-liner in the README) to confirm the bytes you fetched match the bytes the maintainer published.
-- **Pin to a commit SHA you have reviewed.** The README's install section supports pinned-SHA URLs (`/<sha>/xantham-system-v35.md` instead of `/main/xantham-system-v35.md`). Pinning to a SHA defeats the "I trusted main, then the repo was compromised after my audit" attack and makes the install reproducible.
+- **Verify the blueprint cryptographically.** Every commit to `main` regenerates `CHECKSUMS.sha256` with SHA256 hashes of the published artifacts: the current landing file `xantham-system-v36.md`, the prior `xantham-system-v35.md`, `xantham-system-v34.md` and `xantham-system-v32.md` retained for reference, plus `xantham-templates-v32.md`, `LICENSE`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md` and `COMPARISON.md`. Run `bash scripts/verify-blueprint.sh` (or the curl one-liner in the README) to confirm the bytes you fetched match the bytes the maintainer published.
+- **Pin to a commit SHA you have reviewed.** The README's install section supports pinned-SHA URLs (`/<sha>/xantham-system-v36.md` instead of `/main/xantham-system-v36.md`). Pinning to a SHA defeats the "I trusted main, then the repo was compromised after my audit" attack and makes the install reproducible.
 - **Optional Docker sandbox.** `docker/Dockerfile.xantham-sandbox` builds a minimal throwaway environment if you want to run the first install inside a container before graduating to host. See `docker/README.md` for the full flow. Not required, presented as an option for users who want the strongest audit posture.
 - **MIT license.** This blueprint is MIT-licensed (see `LICENSE`). You can audit, modify, and redistribute. The maintainer makes no warranty.
 - **No telemetry to the maintainer.** Audit logs are local-only and gitignored. The blueprint does not phone home.
 
 ## Updates
 
-Security fixes ship as new commits on `main` with a `security:` prefix in the commit message. Watch the repo (GitHub bell -> Custom -> Releases + Issues) to get notified. Major safety-gate changes are also called out in the changelog section of `xantham-system-v35.md` (or the equivalent file on the latest version).
+Security fixes ship as new commits on `main` with a `security:` prefix in the commit message. Watch the repo (GitHub bell -> Custom -> Releases + Issues) to get notified. Major safety-gate changes are also called out in the changelog section of `xantham-system-v36.md` (or the equivalent file on the latest version).
