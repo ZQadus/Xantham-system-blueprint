@@ -152,6 +152,49 @@ The orchestrator runs under a small set of cross-project rules. They apply to ev
 
 These five show up again in the orchestration skill, the safety skill, and several feedback memories. They are the floor, not advice.
 
+### You orchestrate, you don't execute — the restraint half of delegation
+
+Most of this guide tells you **who to delegate to**. This section is the other half, and it is the one that actually decays: **what the orchestrator must never do itself**.
+
+The failure has a shape. The orchestrator is capable, the task looks small, doing it directly is obviously faster than writing a brief — so it does the task. Then the next one. Within a session it is no longer orchestrating; it is a single agent doing serial work with a crew sitting idle, and the operator is waiting behind every step. Nothing breaks loudly. The system just quietly stops being multi-agent, and the first visible symptom is that everything got slower.
+
+**Availability is the job.** A specialist doing the work imperfectly and being corrected costs less than the orchestrator doing it perfectly while the operator waits. That trade is the entire design.
+
+#### THE TEST IS A LIST, NOT A JUDGEMENT
+
+This is the part to copy exactly, including its form.
+
+The obvious way to write this rule is: *"doing it yourself is the exception and needs justification"*, followed by the exceptions — things that need judgement, things that need care, things that would be dangerous done wrong. Written that way it fails completely, and the failure is instructive: **every** task can be argued into one of those categories in the moment. "This needs care" is available for anything. A rule with open-ended exceptions is not a rule with exceptions; it is an exception with a rule attached.
+
+So the test is a **closed list**. Not on the list → dispatch. There is nothing to weigh and no case to make.
+
+**The orchestrator's own work — the complete list:**
+
+1. **Replying to the operator.** Always, immediately, never queued behind work.
+2. **The orchestrator's own layer** — its always-on instructions file, memory, skills, hooks, agent definitions, its own scripts and dispatch config.
+3. **Merges, and anything that puts code in front of users** — merging to a deploying branch, promoting a deploy, DNS, releases.
+4. **The irreversible** — destructive git or SQL, recursive deletes, production migrations, key rotation, money.
+5. **Anything that leaves the building** — a message, quote, proposal or file going to a client or any third party.
+6. **Scoping a dispatch** — reading enough to write a good brief. Then handing it over.
+
+Everything else goes out: debugging, building, fixing, investigating, auditing, deploying to preview, writing docs, reading a codebase — however small it looks, and **however much faster it would be to just do it**. Faster is the argument that produces the regression.
+
+#### The five-call limit — the same rule, as a number
+
+A policy you can agree with and still drift past needs a counter. Five hands-on tool calls (shell / edit / write) against a **project** without dispatching means you are executing, not orchestrating. Stop and dispatch, handing the agent everything already learned so nothing is re-derived.
+
+Two exemptions keep it honest rather than annoying:
+- **Read-only reconnaissance is exempt and uncounted.** Scoping is explicitly the orchestrator's own work (item 6), and a gate that punishes reading teaches you to dispatch blind briefs.
+- **The orchestrator's own repo is exempt** — that is item 2, its own layer.
+
+Wire it as a hook so it fires whether or not anyone remembers the rule (the delegation-gate in the gate manifest). When it fires, **dispatch — do not push through**. A gate you routinely override is a gate you have already switched off.
+
+#### Crew-first, never the generic agent
+
+When a named specialist fits, dispatch the specialist — never a generic catch-all. This is not etiquette. The crew carry a persona and their own accumulating memory directory, so each dispatch starts from what that role has already learned and writes back into it. A generic subagent is throwaway: it starts cold, learns something, and the learning dies with the process. Use the generic agent only for work no defined role covers — and if that keeps happening, the signal is that you are missing a specialist, not that the crew is the wrong tool.
+
+**Spawn counts, so "delegate more" is measurable:** one domain → **1 agent**. A feature → **2–3 in parallel** (builder + verifier + reviewer). Multi-project or research-plus-build → **4–6, all in the background**, reporting as they land. When two agents work the same repository, give each an explicit, non-overlapping file scope in its brief; two agents in one tree without a scope boundary will collide.
+
 ### The orchestration core loop
 
 Everything above — the crew, the three-way model ladder, the effort tiers, the five operating principles — collapses into one loop that runs on every substantive turn. This is the map; each step points back to the section that details it (it is a summary and cross-link, not new mechanism):
@@ -436,6 +479,35 @@ Everything above is third-party. Alongside it the orchestrator carries its **own
 **Operations**
 - `{{orchestrator_lower}}-sync` · `{{orchestrator_lower}}-maintenance` · `{{orchestrator_lower}}-commands` · `{{orchestrator_lower}}-safety` · `{{orchestrator_lower}}-observability` · `{{orchestrator_lower}}-blueprint-updates` (keeps this document and its private sibling honest whenever the architecture changes).
 
+### Where the depth actually lives — read this before concluding something is missing
+
+The list above is a **surface**: one line per skill, which is enough to know a capability exists and not enough to rebuild it. The mechanism, the numbers, and the incident each rule came from are further down this document, mostly inside narrative sections whose titles do not repeat the skill name. Searching for the skill name will not find them.
+
+That mismatch is the single most common way a reader concludes this guide is shallow when it is merely badly indexed. So: the map. Every destination is a section **title** — search for the title, not a line number, because both files get edited.
+
+| Looking for | Search for this section title |
+|---|---|
+| Why the orchestrator must dispatch instead of doing the work, the closed never-delegate list, the five-call limit, spawn counts | *You orchestrate, you don't execute — the restraint half of delegation* |
+| Which model tier to dispatch on; why heavier models run as pre-configured clones | *Model and effort per agent (and the clone trick for heavier models)* · *A fourth, reasoning-focused engine tier* |
+| The end-to-end turn: read → route → delegate → evidence → verify | *The orchestration core loop* |
+| Stopping a confident-but-wrong claim; counts, absences, completeness | *The confident-wrong gate* · *Persisted proof, not remembered proof* |
+| Proving a deploy does not silently drop a live feature | *No feature-drop on deploy* |
+| The per-project client log: the four-part entry, PROVENANCE, the pickup line | *A client/project log entry, in full* · templates appendix: `scripts/client-log-gate.sh`, `scripts/init-client-log.sh` |
+| The pre-production security checklist and who reviews it | *The pre-go-live security gate* · *Two review roles, not one — pre-commit and post-deploy* |
+| Why an advisory hook silently does nothing, and the one-line fix | *A gate that exits 0 is a gate you did not write* |
+| The gate/tracking file manifest and self-healing them | *Self-heal every tracking surface, and close the loop on what you detect* |
+| Scheduled jobs on Windows or Linux, job by job | *B13b. The scheduled layer on Windows and Linux — job by job* |
+| Whether Windows needs WSL2, Git Bash, or neither | *B8. Windows specific issues* |
+| The second engine on Windows/Linux, and the config-path trap | *11. Windows and Linux — what changes, and the one thing that bites* |
+| Two agents fighting over one messaging connection | the poll-lease subsection of the **Reliability stack** |
+| Making `sync` → `new session` actually restart the session, on all three OSes | Restarting the session in place — the loop-wrapper model |
+| The loop wrapper, the restart trigger, and the cold-start window opener | templates appendix: `scripts/{{orchestrator_lower}}-session.cmd`, `scripts/new-session.sh`, `scripts/new-session-launch.sh` |
+| Capture/ageing of skills, prompts, corrections, parked ideas | *Discussed-ideas capture* · *Give a captured idea a decision, or the capture is theatre* · *Human-in-the-loop command queue* |
+| Keeping the open-loop list honest across turns | *The blocked-items surface, and why it is rendered rather than recalled* |
+| Hooks that exist but are not in your settings file | *Hooks that run outside your settings file* |
+
+**The general lesson, since it will happen to your fork too.** New mechanisms get written as narrative — the story of the bug, then the fix — because that is how they are understood at the time. Narrative does not index. When you add a mechanism, add its one-line entry to the surface *and* a pointer to where the depth lives, or you will have written something nobody can find, which is close enough to not having written it.
+
 ---
 
 ## Extensions (opt-in - Advanced mode)
@@ -658,7 +730,7 @@ Zero. The hook runs in Bash, not Claude.
 
 **Dependencies**
 - `jq` (for JSON parsing in the hook): Mac `brew install jq` / Windows `winget install jqlang.jq`
-- Bash. Mac/Linux ships with bash. Windows users install Git Bash (`winget install Git.Git`) or use WSL2 (`wsl --install`). The .sh hooks assume bash, so PowerShell-only installs will not work.
+- Bash. Mac/Linux ships with bash. On Windows, install **Git Bash** (`winget install Git.Git`) — that is the supported path, and **WSL2 is not required** (it works, but it is heavier than you need). The .sh hooks assume bash, so a **plain-PowerShell-only install will not work**: the `.ps1` files that exist cover the auto-sync driver, not the hook pipeline. See Troubleshooting *B8. Windows specific issues* for the full three-way breakdown.
 
 **Install (Mac / Linux / Windows-Git-Bash, identical commands)**
 ```bash
@@ -1047,9 +1119,10 @@ ls memory/profile_*.md  # expect a profile file for the user
 
 **Install (Windows, Git Bash or WSL2)**
 ```bash
-# Identical to Mac steps above. Run inside Git Bash (winget install Git.Git)
-# or WSL2 (wsl --install). PowerShell-only installs will not work because
-# the dream scripts, active-recall scripts, and update-profile script are bash.
+# Identical to Mac steps above. Run inside Git Bash (winget install Git.Git) —
+# the supported Windows path. WSL2 (wsl --install) also works but is heavier
+# than you need. A plain-PowerShell-only install will NOT work, because the
+# dream scripts, active-recall scripts and update-profile script are all bash.
 
 # If running under WSL, the Python 3 in WSL is what python3 scripts/embed-memories.py
 # binds to. Make sure sqlite-vec is installed in that interpreter, not Windows-side:
@@ -1791,6 +1864,31 @@ bash scripts/codex.sh review-uncommitted "{{project_path}}"    # a real read-onl
 ls scripts/codex.sh scripts/codex-write.sh scripts/ensemble.sh scripts/lib/codex-persona.sh scripts/codex-gate-hook.sh
 ```
 
+### 11. Windows and Linux — what changes, and the one thing that bites
+
+This whole section is written in macOS paths, which makes it look macOS-only. It is not: the second engine is an npm package and the wrappers are bash, so it runs anywhere the rest of this system runs. But three details differ, and one of them fails in a way that looks like an auth problem when it is a path problem.
+
+**Install and sign-in are identical.** `npm i -g <second-engine-cli>` then the CLI's login command, on every OS. The login opens a browser for OAuth and behaves the same on Windows and Linux. If the browser does not open automatically — common over SSH and in some Windows terminals — the CLI prints a URL; open it manually and paste the code back. That is not a platform bug.
+
+**The config directory moves, and this is the one that bites.** Every path in this section is written `~/.codex/config.toml`. That resolves correctly under Git Bash and on Linux. It does **not** resolve from native PowerShell, which has no `~` convention of that kind:
+
+| | Config home |
+|---|---|
+| macOS / Linux | `~/.codex/` |
+| Windows (Git Bash) | `~/.codex/` → `C:\Users\<you>\.codex\` |
+| Windows (PowerShell) | `$env:USERPROFILE\.codex\` |
+
+The symptom when this goes wrong is misleading. The CLI creates a *fresh default* config wherever it looks, so instead of an error you get a second-engine run with **`sandbox_mode` unset and the safety gate unwired** — the containment linchpin described above, silently absent. It reads as "the second engine ignored my config." Verify the file the CLI is actually reading before trusting any of it:
+
+```powershell
+# Windows: confirm the floor is set where the CLI will actually look.
+Get-Content "$env:USERPROFILE\.codex\config.toml" | Select-String 'sandbox_mode','approval_policy'
+```
+
+**The wrappers stay bash, and so does the gate.** `codex.sh`, `codex-write.sh`, `ensemble.sh` and the gate shim have no `.ps1` ports and do not need them — they are invoked from the same bash the rest of the hook pipeline already requires (Git Bash on Windows). The write-lane's isolated `CODEX_HOME` under `data/runtime/` is a relative path, so it is portable as-is. The auth symlink is the one exception worth knowing: `ln -s` works under Git Bash only with Developer Mode enabled or an elevated shell. If symlink creation fails, copy `auth.json` instead and re-copy it when the token refreshes — it works, it just stops self-refreshing, which is a maintenance cost rather than a broken install.
+
+**Verify on Windows/Linux with the same commands**, substituting the config path above. If `codex.sh status` reports a floor you did not configure, you are reading a different config file than you wrote — fix the path before anything else.
+
 ---
 
 
@@ -2118,7 +2216,24 @@ Not documented. Core loop + safety gate + routing table existed from v1.
 ### Non-interactive auto-apply (for self-updating hosts)
 `bash scripts/install-blueprint.sh --auto` - the NON-INTERACTIVE clean-apply path used by the Xantham auto-sync subsystem (see the "Xantham Auto-Sync subsystem" section in xantham-templates-v32.md). It compares the version-file marker against the version of the blueprint files present in the tree and, on a clean FORWARD upgrade, bumps `blueprint_version:` and appends an `upgraded:` line. It NEVER prompts and NEVER runs an extension installer (newly-shipped advanced-default extensions are surfaced for a manual `--add`). It STOPS with exit 3 (non-destructive, marker untouched) on any ambiguity: no version file, a downgrade/divergence (marker ahead of shipped), or a malformed marker. Idempotent (re-run on the same version = no-op). Audit line written to `data/runtime/xantham-sync.log`. When generating `install-blueprint.sh`, include the `--auto` case so downstream hosts can self-update.
 
+**Two implementation rules for this script, both learned by having got them wrong.**
+
+*Derive the target version; never hardcode it.* A literal `TARGET_VERSION="vNN"` pinned in the installer goes stale the moment the blueprint files in the tree move on, and it fails in the most confusing possible direction: once the host marker is **ahead** of the stale literal, the downgrade guard trips and STOPS every single sync. The auto-update chain then reports a deliberate-looking safety stop, forever, while silently never delivering an update. Derive it from the highest `xantham-system-vNN.md` actually present in the tree, and **stop loudly if the derivation finds nothing** rather than falling back to a literal — a wrong target either blocks every sync or force-applies the wrong blueprint.
+
+*Derive the file list too, and make the empty case loud.* The copy step guards each file with "if it exists in the cache", which means a hardcoded filename that upstream has renamed is **skipped with no error** — the run copies nothing, reports "no change", and exits 0. A sync that delivers nothing while reporting success is worse than one that breaks, because nothing ever surfaces it. Glob the cache instead (version-proof *and* rename-proof), and treat "the glob matched nothing" as a hard STOP rather than a quiet no-op.
+
+**Windows: there is no `.ps1` port of this installer, and that is a deliberate choice.** The PowerShell auto-sync variants drive the clone/fast-forward/copy natively, then shell out to `bash install-blueprint.sh --auto` for the apply. So the honest prerequisite for the "Windows without touching bash" path is **`git` and `bash` on PATH** — on Windows, installing Git for Windows provides both, so in practice it is one install either way. A summary claiming the `.ps1` route "only needs git" is wrong, and wrong at the worst moment: the first sync with nothing to apply looks fine, and the `bash: command not found` lands on the first run that actually has an update. An honest prerequisite beats a PowerShell port of a 400-line installer that nobody has executed.
+
 ### Version file format
+
+⚠️ **`blueprint_version:` must be exactly `vNN` — digits only, no dot-suffix.** The auto-sync
+comparator (`version_int()` in `install-blueprint.sh`) matches `^v([0-9]+)$` and treats anything
+else as a malformed marker, which makes `--auto` STOP with exit 3 *every time*. A host whose file
+says `v31.3` therefore never upgrades again, and the failure is silent from the outside: the sync
+log records a refusal, the user sees a sync that "ran". The example below is shown with a historical
+dotted label for continuity with the changelog — **write `v31`, not `v31.3`, in the real file**, and
+put the point-release detail in the `upgraded:` comment where nothing parses it.
+
 `.{{orchestrator_lower}}-blueprint-version` (YAML):
 ```yaml
 blueprint_version: v31.3
@@ -5185,7 +5300,13 @@ When context usage approaches the warning threshold, the orchestrator runs a syn
 
 4. **Push to Brain** (if enabled). Session summary and updated project snapshots.
 
-5. **Tell the user.** "All synced. Start a new session to get a fresh context window."
+5. **Restart the session — don't ask the user to.** Run `scripts/new-session.sh`, which writes the
+   restart sentinel and ends the running `claude` so the loop wrapper relaunches it fresh in the
+   SAME window. See *Restarting the session in place — the loop-wrapper model* below for the
+   mechanism and the per-OS wiring. Only fall back to "start a new session yourself" when that
+   script exits 3, i.e. the window was not started through a wrapper and there is nothing to
+   relaunch. Reply on the message channel BEFORE you call it: the fresh session takes over the
+   channel and the old one cannot send once it has.
 
 The orchestrator never lets compaction wipe unsaved work. The sync must happen before context is lost. If you've been coding for an hour and context hits 85%, the orchestrator interrupts to save state. This feels annoying in the moment but prevents the far worse outcome of losing your entire session context and having to explain everything again.
 
@@ -6089,7 +6210,17 @@ The `claude install` command can delete custom aliases and rewrite shell config.
 
 **Symptom:** Various issues when running on Windows with PowerShell.
 
-**Note:** This system runs natively on Windows with PowerShell. WSL2 is NOT required.
+**Note — read this before you decide what to install.** **WSL2 is NOT required.** Git Bash (`winget install Git.Git`) is sufficient, and is the recommended Windows setup. What you cannot do is run this on **plain PowerShell alone**: the hook pipeline, the memory scripts and every gate in this guide are `.sh`, so they need a bash interpreter on PATH. Git Bash provides one; PowerShell does not.
+
+The distinction matters because these are three different claims and only the middle one is a real constraint:
+
+| Setup | Works? |
+|---|---|
+| Windows + Git Bash | **Yes** — the supported path. Everything in this guide runs. |
+| Windows + WSL2 | Yes, but heavier than you need. Mind which Python the memory scripts bind to (see the WSL note in the memory extension). |
+| Windows + PowerShell only | **No.** The `.ps1` files that exist cover the auto-sync driver only; they do not replace the `.sh` hook pipeline, and the sync's own final step shells out to bash. |
+
+A handful of subsystems ship `.ps1` twins (the auto-sync pair, the shell launch functions, auth-fallback). Those reduce how much you touch bash directly; they do not remove the bash dependency. Anywhere this guide says "Windows", read it as "Windows with Git Bash" unless it explicitly says otherwise.
 
 **SQLite not found:**
 Install SQLite for Windows:
@@ -6270,6 +6401,81 @@ Then ask your agent: "reload the launchd plists." It runs `launchctl unload` the
 **If you don't run any scheduled routines, you can skip this entirely.** This only affects users who set up the morning digest, weekly Monday maintenance, monthly retrospective, or the auth-failover canary. Telegram, terminal use, and ad-hoc agent work are not affected.
 
 **Windows note:** macOS launchd has no direct Windows equivalent. The closest analogues are **Windows Task Scheduler** (built-in, GUI) and **NSSM** (`winget install NSSM.NSSM` for service-style daemons). The TCC issue does not exist on Windows. Schedule a Bash script via Task Scheduler with the action `C:\Program Files\Git\bin\bash.exe -c "cd C:/Users/<you>/Documents/MyAgent && bash scripts/<routine>.sh"` and grant the running user full file-system access via the Action's "Run as" account. Windows users see no equivalent of the TCC block.
+
+See the next section for the per-job scheduling table — the Windows and Linux equivalents are given job by job, because "use Task Scheduler" is a mechanism, not an install.
+
+---
+
+### B13b. The scheduled layer on Windows and Linux — job by job
+
+Everything clock-driven in this guide is described in launchd terms, because that is where it was built. That is a macOS-only vocabulary, and a reader on another OS gets the hook-triggered half of the system working and then quietly ends up with **zero** scheduled jobs — no morning digest, no weekly review, no canaries, no watchdogs. Nothing announces this. The hooks keep firing, so the install feels complete.
+
+The fix is not a paragraph saying "use Task Scheduler." It is a row per job, so you can count them and see at a glance whether you installed them all.
+
+**The three schedulers, in one breath.** launchd takes a `.plist` with `StartInterval` (every N seconds) or `StartCalendarInterval` (a wall-clock time). Task Scheduler takes `schtasks /Create` with `/SC MINUTE /MO N` or `/SC DAILY /ST HH:MM`. systemd takes a `.timer` unit with `OnUnitActiveSec=` or `OnCalendar=`; plain `cron` covers the calendar cases and nothing sub-minute.
+
+| Job | Cadence | macOS (launchd) | Windows (Task Scheduler) | Linux (systemd timer / cron) |
+|---|---|---|---|---|
+| Morning digest | daily 08:07 local | `StartCalendarInterval` Hour 8 Minute 7 | `/SC DAILY /ST 08:07` | `OnCalendar=*-*-* 08:07` · cron `7 8 * * *` |
+| Upstream-changelog scan (AM) | daily 09:07 | `StartCalendarInterval` Hour 9 Minute 7 | `/SC DAILY /ST 09:07` | `OnCalendar=*-*-* 09:07` · cron `7 9 * * *` |
+| Upstream-changelog scan (PM) | daily 23:30 | `StartCalendarInterval` Hour 23 Minute 30 | `/SC DAILY /ST 23:30` | `OnCalendar=*-*-* 23:30` · cron `30 23 * * *` |
+| Second-engine changelog scan | daily 23:35 | `StartCalendarInterval` Hour 23 Minute 35 | `/SC DAILY /ST 23:35` | `OnCalendar=*-*-* 23:35` · cron `35 23 * * *` |
+| Corrections review | weekly Mon 08:37 | `StartCalendarInterval` Weekday 1 Hour 8 Minute 37 | `/SC WEEKLY /D MON /ST 08:37` | `OnCalendar=Mon *-*-* 08:37` · cron `37 8 * * 1` |
+| Database backup | daily 03:00 | `StartCalendarInterval` Hour 3 Minute 0 | `/SC DAILY /ST 03:00` | `OnCalendar=*-*-* 03:00` · cron `0 3 * * *` |
+| SLO canaries | every 5 min | `StartInterval` 300 | `/SC MINUTE /MO 5` | `OnUnitActiveSec=5min` · cron `*/5 * * * *` |
+| Messaging watchdog (tier 1) | every 10 s | `StartInterval` 10 | **not expressible** — see the sub-minute note | `OnUnitActiveSec=10s` |
+| Messaging watchdog (tier 2) | every 60 s | `StartInterval` 60 | `/SC MINUTE /MO 1` | `OnUnitActiveSec=60s` |
+| Session auto-restart | every 60 s | `StartInterval` 60 | `/SC MINUTE /MO 1` | `OnUnitActiveSec=60s` |
+| Signal-fire / proactive trigger | event-shaped, polled | `StartInterval` | `/SC MINUTE /MO n` | `OnUnitActiveSec=` |
+
+**The sub-minute problem, stated plainly.** Task Scheduler's finest granularity is **one minute**. The tier-1 messaging watchdog wants 10 seconds, and there is no `/SC` flag that expresses that. Do not silently install it at one minute and call it done — that is a sixfold reduction in how fast a dead poller is noticed. Two honest options: register a **one-minute** task whose script contains its own `for` loop with `sleep 10` (six passes, then exit — bounded, so a hung pass cannot accumulate), or install it as a **service** via NSSM and let the script loop forever. The loop-inside-a-minute-task approach is simpler and is what the Windows install note elsewhere in this guide already implies.
+
+**Windows, the exact shape.** Every job is a bash script, so every task invokes Git Bash rather than the script directly:
+
+```powershell
+# One job. Repeat per row of the table above.
+schtasks /Create /SC DAILY /ST 08:07 /TN "{{orchestrator_lower}}-morning-digest" `
+  /TR "\"C:\Program Files\Git\bin\bash.exe\" -c \"cd /c/Users/<you>/Documents/MyAgent && bash scripts/morning-digest.sh\""
+
+# Verify it exists and check the last result (0 = ran clean).
+schtasks /Query /TN "{{orchestrator_lower}}-morning-digest" /V /FO LIST | Select-String "Last Result","Next Run Time"
+```
+
+Two traps worth knowing before the first failure: a task created without `/RU`/`/RL` runs only while that user is **logged in** (add `/RU "<user>" /RL HIGHEST` for a job that must survive a logout), and Task Scheduler starts the process in `C:\Windows\System32` regardless of the script's location, which is why the `cd` above is not optional.
+
+**Linux, the exact shape.** A `.timer` plus its `.service`, both under `~/.config/systemd/user/`:
+
+```ini
+# ~/.config/systemd/user/{{orchestrator_lower}}-morning-digest.service
+[Unit]
+Description={{orchestrator_name}} morning digest
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documents/MyAgent
+ExecStart=/bin/bash scripts/morning-digest.sh
+```
+
+```ini
+# ~/.config/systemd/user/{{orchestrator_lower}}-morning-digest.timer
+[Unit]
+Description=Run the {{orchestrator_name}} morning digest daily
+[Timer]
+OnCalendar=*-*-* 08:07
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now {{orchestrator_lower}}-morning-digest.timer
+systemctl --user list-timers            # verify: NEXT and LEFT columns
+loginctl enable-linger "$USER"          # so user timers run without an active login
+```
+
+`Persistent=true` is the one worth keeping: it fires a missed job after the machine wakes, which `cron` will not do. If you would rather use cron, the table's cron column is a drop-in for every calendar row — but cron has no sub-minute support at all, so the watchdog rows still need the loop-script approach.
+
+**Verify the layer, don't assume it.** On every OS the failure mode is identical and silent — the job is registered but never runs. Check that each job has actually *fired*, not merely that it exists: `launchctl list | grep <label>` (macOS), `schtasks /Query /V /FO LIST` and read **Last Result** (Windows), `systemctl --user list-timers` and read **LAST** (Linux). A job with a next-run time and no last-run time has never executed once.
 
 ---
 
@@ -7256,3 +7462,180 @@ A curated, durable reference library (promoted material expected to stay useful 
 ### Use the arsenal, don't just own it
 
 Possessing a skill/plugin/tool/engine is not using it. On every substantive task, route through a selection framework rather than reaching for whatever's habitual: (1) WHO — the specialist whose domain this is, splitting a multi-domain ask across specialists; (2) WHICH ENGINE — match the engine to the work (the primary model for judgement/interface/client-facing, the second engine for backend and cheap drafts and now design generation too, a frontier reasoning tier for long-horizon agentic/security-audit/3D work but explicitly not visual design where it measures worst, the cheap fast clone for speed/parallelism); (3) WHICH SKILL/TOOL — the matching skill/plugin auto-surfaces on its trigger, so invoke it instead of hand-rolling what it already does; (4) MEASURED WINNERS, NOT VIBES — where a bake-off already exists on record, the numbers pick the engine, not habit. Prefer a published tool/library over building custom before reaching for any of this. A post-reply self-critique judge can make this enforceable: add an "arsenal-underuse" miss category that fires only when a SPECIFIC skill/tool/engine-routing-rule was nameable and skipped for hand-rolling or the wrong engine — never on a vague "could have been more thorough."
+
+---
+
+## Completeness pass — cross-platform parity and the gate layer (2026-09-13)
+
+A second structured audit, this one asking a narrower question: *if a fresh reader installs this on Windows or Linux, what silently does not exist?* The answer was concentrated in the newest layer, and the reason is worth naming before the fixes.
+
+**The discipline decays at the edge of the document.** The older subsystems here — the memory extension, the observability layer, the hardened safety gate, the reliability stack, auth-fallback — are meticulous about the Mac/Windows split, substituting Task Scheduler for launchd and `icacls` for `chmod` inline. The *newest* material is not: the gate/tracking layer added most recently is pure bash with almost no Windows caveat anywhere in it. Nothing made that happen deliberately. It is just what happens when each new mechanism is written on the machine it was built on, and the cross-platform pass is a separate act of attention that nobody scheduled. If you fork this guide and keep extending it, assume the same drift in your own additions and re-audit periodically — the fix is a recurring check, not a one-time cleanup.
+
+### The gate layer on Windows and Linux
+
+Every gate in this guide — the delegation gate, the client-log gate, the deploy-branch-push gate, the domain-truth gate, the still-chasing store, the gate self-test family — is a bash script invoked by a hook. There is no `.ps1` port of any of them, and they do not need one, **provided you read the prerequisite correctly**: the hook pipeline itself already requires bash (see *B8*), so a machine that can run the hooks can run the gates. There is no additional Windows dependency beyond the one you already accepted at install.
+
+Three portability details decide whether they actually fire:
+
+- **Line endings.** A `.sh` file checked out with CRLF fails with `bad interpreter: /usr/bin/env bash^M` — an error that reads like a missing interpreter, not a whitespace problem. The `git config --global core.autocrlf input` step in the prerequisites exists for exactly this; on Windows it is not optional for anyone editing gate scripts.
+- **`find -mmin`, `date -u`, `ps -o command=`.** These are the portability-sensitive calls the gates actually use. All three behave identically under Git Bash, WSL2 and Linux. The one to avoid adding is GNU-only `date -d`, which is absent on macOS — prefer `date -u +%Y-%m-%dT%H:%M:%SZ`, which is portable everywhere, and is what every gate here uses.
+- **Absolute paths in hook commands.** A hook's working directory is not guaranteed. Wire gates with a path anchored to the project-directory variable your harness provides rather than a relative `scripts/...`, or the gate silently never runs on the one OS where the harness resolves the cwd differently.
+
+**Verify the gates individually, because a hook that never fires is indistinguishable from a gate that found nothing.** Feed each one a synthetic payload on stdin and check the exit code — that is the only way to tell "clean" from "mute", and the two look identical in a log.
+
+### A gate that exits 0 is a gate you did not write
+
+This is the single highest-value thing in this section, and it is a one-line bug.
+
+A hook that writes to stderr and exits 0 has that output **discarded by the harness**. It never reaches the model and never reaches the operator. So an advisory gate written the obvious way — print a warning, exit successfully because nothing failed — produces a perfect, permanent, silent no-op. It logs. It looks healthy. It accumulates warnings in a file nobody reads.
+
+The way this is usually discovered is worse than the bug: the warnings pile up, the behaviour they were meant to correct continues, and the conclusion drawn is *"the model ignores the gate."* Nothing was ignored. Nothing arrived. One such gate wrote 77 warnings and delivered none of them.
+
+The fix is `exit 2`, and the reason it is safe depends on which event you are on:
+
+| Event | `exit 2` does | Safe for an advisory? |
+|---|---|---|
+| `PostToolUse` | shows stderr to the model; **the tool already ran** | **Yes** — it cannot block, undo or fail anything |
+| `PreToolUse` | **blocks the call** | No — only for gates that genuinely must block |
+
+So: `PostToolUse` advisories exit 2. And because exit 2 renders like an error, lead the message with an explicit *"the action SUCCEEDED — nothing failed, do not retry it"*, or a model reading it as a failure will retry an operation that already completed, turning a reminder into a duplicate-write bug.
+
+Two corollaries worth adopting with it. **Dedupe per target per window** — an un-deduped gate that says the same true thing fourteen times about the same file is how everyone learns to stop reading it, which then costs you the honest firings. And **log the suppressed firings too** (`suppressed: true`), so cutting the noise does not also destroy your ability to measure whether the gate is doing anything.
+
+### Two gates with concrete numbers
+
+Both are named elsewhere in this guide; the numbers are what make them enforceable rather than aspirational.
+
+- **The delegation gate — 5.** Five hands-on shell/edit/write calls against a project without dispatching trips it (see *You orchestrate, you don't execute*). Read-only recon and the orchestrator's own repo are exempt and uncounted.
+- **The second-engine leg gate — 25.** A dispatch brief touching backend-shaped work (schema, auth, permissions, API, payments, secrets) should name a second-engine review leg. The gate counts consecutive backend-shaped dispatches that shipped without one and blocks at the threshold, resetting the counter whenever a leg is actually paired. The precise number matters less than that it is finite and resets on the behaviour you want.
+
+Both were **warn-only for a period and delivered nothing at all**, for the `exit 0` reason above — the warnings were written and discarded. That history is the argument for making them default-block with an environment toggle to downgrade to warn, rather than the reverse. An advisory that never blocks is one you stop reading; and if it also never arrives, you never even learn that much.
+
+### Two review roles, not one — pre-commit and post-deploy
+
+"Get it reviewed" collapses two different jobs that fail differently, and a pipeline with only one of them has a predictable hole.
+
+| | **Security review** | **Application verification** |
+|---|---|---|
+| Runs | BEFORE the commit that ships | AFTER the deploy lands |
+| Reads | the diff, cold | the running product |
+| Asks | "does this introduce a vulnerability?" | "does the deployed thing actually do what was claimed?" |
+| Verdict | **BLOCK** or **APPROVE** | **SHIP** or **DO-NOT-SHIP** |
+| Catches | injection, authz gaps, leaked secrets, tenant-boundary holes | a green build that deployed the wrong commit, a feature dropped by a stale branch, an endpoint that 200s on the page and 500s on real input |
+
+Neither substitutes for the other. A clean security review says nothing about whether the deploy carried the right code; a passing live smoke test says nothing about whether the new code is safe. Run them as two distinct roles with two distinct verdicts, and keep the verdict words different — "approved" and "shipped" blur into each other in a status report in a way that "APPROVE" and "SHIP" do not.
+
+### The blocked-items surface, and why it is rendered rather than recalled
+
+Keep the list of things blocked on the operator in a **durable store with an append command**, and RENDER it into every reply from that store — never reconstruct it from memory of the conversation.
+
+The failure it prevents is specific and quiet: an item gets parked, several turns pass, the list is rebuilt from recollection, and the parked item is simply not in it. Nobody notices, because a list that looks complete *is* complete as far as anyone can tell. Nothing is dropped loudly.
+
+Two properties make it work:
+
+- **Append at the moment of blocking**, not at reply time. An item that has to be remembered until the end of the turn is an item that can be forgotten during it.
+- **One store, read by everything.** If a dashboard and a reply both render the same file, a disagreement between them is a *real bug you can see*, rather than two independent recollections quietly diverging. That shared-source property is most of the value — it converts a memory failure into a visible inconsistency.
+
+The store is append-only JSONL (one event per line: added / resolved / snoozed), so the current list is a fold over events rather than a mutable file that a concurrent writer can clobber. Same reason the audit log uses it: two processes appending lines cannot corrupt each other's records the way two processes rewriting a document can.
+
+### Hooks that run outside your settings file
+
+A blueprint that documents hook wiring purely as "add an entry to the settings file" will silently drop any hook that is **not** wired there — and a mature install usually has some.
+
+The pattern: one composer script is registered for a lifecycle event, and *it* runs several scripts in sequence internally. Only the composer appears in the settings file. Its children are invisible to any audit that greps settings for hook paths, so a reinstall from the blueprint reproduces the composer and quietly loses everything it called.
+
+If you use a composer, document its internal run-list next to it, and make the audit enumerate **both** — the settings entries *and* each composer's children. The general lesson generalises past hooks: when a task operates over a set, derive the set from the authoritative source rather than from the one entry point you happen to know about.
+
+Two ordering rules if you write one:
+- **Run the members sequentially and keep going after a non-zero exit**, capturing each result — otherwise the first advisory that exits 2 (see above) silently cancels every check after it.
+- **Put the cheap deterministic checks first.** A composer that spends its budget on an expensive check and gets cut short should have already run the fast ones.
+
+### Restarting the session in place — the loop-wrapper model
+
+"New session" is the one command that has to kill the thing executing it. That constraint decides
+the whole design, and it is why the obvious implementation — open a fresh terminal window — is the
+wrong one. The operator is usually not at the machine; they typed `new session` into a chat. A new
+window means two agents contending for one message channel, and the old one still holding it.
+
+So: restart **in place**. Same window, same channel, fresh context. Three OSes, **one model**:
+
+1. The window never runs the agent binary directly. It runs a **loop wrapper** that runs the agent.
+2. A restart writes a **sentinel file**, then ends the agent process.
+3. The wrapper's loop sees the agent exit, finds the sentinel, **consumes** it, and relaunches —
+   deliberately dropping any resume argument, because "new session" means fresh context.
+
+Only step 2's "end the process" differs per OS:
+
+| | Loop wrapper | Sentinel | How the process ends |
+|---|---|---|---|
+| **Windows** | `scripts/{{orchestrator_lower}}-session.cmd` (`goto loop`) | `data/runtime/restart-session.flag` | `taskkill //F //IM claude.exe` |
+| **macOS** | `bin/{{orchestrator_lower}}-launch.sh` (re-exec loop) | `data/runtime/force-fresh-next-launch` | `kill -TERM <pid from pid file>` |
+| **Linux** | same wrapper as macOS | same | same |
+
+Both wrappers and the trigger are in the templates appendix. Four things decide whether this works,
+and each of them has cost someone a working restart:
+
+- **The window must have been launched through the wrapper.** A bare `claude` has no loop behind it,
+  so the restart kills it and nothing comes back — the window just closes. Wire the shell function,
+  the desktop shortcut and every launcher to the wrapper, not to the binary.
+- **On Windows the kill must be a DIRECT `taskkill`.** An earlier version wrapped it as
+  `cmd //c start "title" ...`; MSYS/Git Bash mangle that quoting and Windows tries to execute the
+  window **title** as a program, failing with "Windows cannot find …". The direct call has no quoting
+  to mangle. This was the actual bug in a real install, and the fix is the version shipped here.
+- **The wrapper must consume the sentinel, and only on a re-exec.** Consuming it means exactly one
+  relaunch is fresh; checking it on the *first* launch destroys it before the kill it was written
+  for. And a wrapper that does not read the sentinel at all is the quiet failure mode — the trigger
+  writes the file, reports success, and the relaunch resumes the old session. The trigger cannot
+  detect this; it exits 0 whether or not anything is listening. **Both sides must agree on the exact
+  path.**
+- **Fresh must actually strip the resume argument.** A supervisor started as `<launcher> --resume`
+  will carry that flag into the "fresh" relaunch and land the operator back in the old conversation —
+  a restart that visibly works and changes nothing. Strip `--resume`/`--continue` on the
+  sentinel path only; the first launch must still honour them, because launching with `--resume` is
+  a user-facing mode, not a relaunch detail.
+
+**The two kills are not equally safe, and the guide should say so.** `taskkill //F //IM claude.exe`
+ends *every* claude process on the box — correct on a single-session desktop, wrong if you run two.
+The POSIX path signals only the PID the supervisor recorded, and only after confirming that PID is
+alive and is really the agent — matching `claude` as a **command token**, not as a substring, since
+`tail -f logs/claude-launch.log` and an editor holding a file named after the agent both contain the
+word. Prefer the PID-file discipline on any machine that runs more than one session.
+
+Everything above is named with the install's own configured agent name, never a fixed one: the
+wrapper is `{{orchestrator_lower}}-session.cmd`, the launcher is `{{launch_cmd}}`. A fresh install
+picks its own name at setup and every one of these paths follows it.
+
+### Persisted proof, not remembered proof
+
+The rule "run a verification command before claiming done" is obeyed exactly as well as it is checked. Writing the check down turns it into something auditable:
+
+- record the **claim**, the **command**, the command's **actual output**, and a verdict of PASS / FAIL / **UNVERIFIED**;
+- make **UNVERIFIED a first-class verdict**, so a claim you could not check is recorded as unchecked rather than quietly omitted — an omitted claim is indistinguishable from a verified one, which is precisely how unverified work ships;
+- store the **output, not a summary** ("tests pass" is an assertion; the runner's tail is evidence);
+- keep it **append-only**, so a later pass cannot rewrite an earlier FAIL into a PASS;
+- treat any run containing a FAIL *or* an UNVERIFIED as **not clean** — "mostly verified" is not verified.
+
+An installable implementation is in the templates appendix as `scripts/verify-artifact.sh`.
+
+**Read its exit semantics before you wire it into a gate — they do not match the rule above, and
+that gap is the whole subject of this section.** The shipped body exits `1` only on `FAIL`; an
+`UNVERIFIED` artifact exits `0`. So a caller that gates on the exit code accepts exactly the case
+this section tells you to reject, and does it silently — the artifact on disk correctly says
+UNVERIFIED while the pipeline reads success. If you want a blocking gate, branch on the recorded
+verdict field rather than on `$?`, or wrap the call and fail the wrapper on anything that is not
+PASS. Two related edges in the same body:
+
+- **`--from-stdin` cannot observe an exit code.** It records already-captured output, so there is no
+  status to inspect; the verdict computation counts it as a command that did not fail and lands on
+  **PASS**. Pass an explicit `--verdict` when recording stdin evidence, or you are writing a
+  self-issued pass for text you pasted in.
+- **The secret scrub is `key<separator>value`-shaped**, matching `api_key`/`token`/`password`/
+  `bearer`/`authorization` followed directly by `:` or `=`. It therefore does **not** catch a
+  JSON-quoted key (`"token": "..."`, where `"` sits between the key and the colon), and on
+  `Authorization: Bearer <token>` it sees only the 6-character word `Bearer` against an 8-character
+  minimum and redacts nothing — leaving the token itself in the artifact. Treat it as a
+  typo-and-accident net, not a containment boundary, and keep the artifacts gitignored.
+
+None of these are reasons to skip persisting proof. They are the reason to persist the **verdict**
+and read it, rather than trusting a process exit code to carry a three-state answer.
+

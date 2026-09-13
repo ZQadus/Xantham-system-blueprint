@@ -127,6 +127,6 @@ The hook layer is the security boundary, see `SECURITY.md` for the full threat m
 
 ## Where the code lives
 
-- **Blueprint files.** `xantham-system-v36.md` (landing, ~6700 lines) and `xantham-templates-v32.md` (template bodies, ~11400 lines). Both at the public repo root. The prior `xantham-system-v35.md`, `xantham-system-v34.md` and `xantham-system-v32.md` remain in the repo for reference.
+- **Blueprint files.** `xantham-system-v36.md` (landing, ~7600 lines) and `xantham-templates-v32.md` (template bodies, ~15900 lines). Both at the public repo root. The prior `xantham-system-v35.md`, `xantham-system-v34.md` and `xantham-system-v32.md` remain in the repo for reference.
 - **Generated install.** Lives at your install directory (default `~/Documents/<OrchestratorName>/`). Includes `CLAUDE.md`, `.claude/`, `.mcp.json`, `memory/`, `scripts/`, `data/`, `docs/`, `blueprints/`, `agent-memory/`, `Library/`.
 - **Per-project repos.** Each registered project lives in its own folder anywhere on your machine. The orchestrator learns about it via `docs/projects.md`. Each project ships its own `CLAUDE.md`, `HANDOFF.md`, `FEATURES.md`.

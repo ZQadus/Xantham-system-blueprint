@@ -2,9 +2,9 @@
 architectural_role: trunk
 ---
 
-# Xantham System Templates v31
+# Xantham System Templates v32
 
-Companion file to `xantham-system-v32.md`. This file contains every template body the install wizard copies verbatim into the user's filesystem (scripts, hooks, skills, agent configs, memory seeds, doc bodies).
+Companion file to `xantham-system-v36.md`. This file contains every template body the install wizard copies verbatim into the user's filesystem (scripts, hooks, skills, agent configs, memory seeds, doc bodies).
 
 The landing wizard file references each template by section anchor; this file is the single canonical store of bodies.
 
@@ -481,196 +481,1166 @@ Note: curl, wget, pip, and npm install are moved to deny. The user must explicit
 
 ## Template: .claude/hooks/safety-gate.sh
 
+The hook that stops destructive commands. This is the full working gate, not a
+skeleton, because a partial safety layer is worse than an obvious absence: a
+downstream install believes it is protected while recursive deletes, `git stash
+pop`, and write-then-execute pass straight through. (They did. Until 2026-07-28
+this block shipped at 15% of the real file with all three missing.)
+
+Five layers, in order:
+
+1. **MCP database gate** — reads the PreToolUse envelope's `tool_name` and SQL
+   payload, so a `DROP TABLE` issued through a database MCP tool is judged by the
+   same rules as one typed into Bash. SQL is comment-stripped and
+   whitespace-collapsed first, because `DROP/**/TABLE` is line-oriented grep's
+   blind spot. Tool names you do not have simply never match.
+2. **Always-blocked** — history rewrites and force-pushes to protected branches.
+   No approval opens these; run them in a real terminal or not at all.
+3. **Blocked pending approval** — deletion, destructive SQL, the git operations
+   that lose work, `sudo`. Each names the exact string to write to
+   `approved.txt`, which is consumed on first use.
+4. **Protected files** — credentials, and the gate's own files. Write/Edit to the
+   approval store, any `.claude/hooks/*`, or a `.claude/settings.json` is
+   HARD-blocked: without that, the agent approves its own destruction by editing
+   the approval file, or removes the gate entirely.
+5. **Write-then-execute and fetch-pipe-to-shell** — a payload written to an
+   unguarded path and then run through an interpreter never passes the direct
+   command greps. Executed scripts are resolved and their contents judged by the
+   same rules. Committed, unmodified first-party scripts are trusted and skipped,
+   so routine tooling is not gated on every run; anything untracked or modified
+   is scanned. Any git ambiguity defaults to scanning.
+
+**The escape hatch has to work or the gate is a wall.** A block prints the exact
+line to add to `{{project_path}}/data/approved.txt`; the hook creates that file
+on first run at `0600` and drops entries after 30 days. Approvals are one-time
+use. Keep `approved.txt` in `.gitignore` — a committed approval file lets any
+clone pre-approve its own destructive commands.
+
+`ORCHESTRATOR_HOME` overrides the workspace root used to resolve executed
+scripts. It exists because layer 4 hard-blocks edits to this file: if the
+installer substitutes `{{project_path}}` wrongly, an env var is the only way to
+correct it without editing a file the hook refuses to let you edit.
+
+Requires `jq`. Uses `perl` for SQL normalisation with a `sed`/`tr` fallback, and
+`git` for the trust check, failing safe to "scan" when git is unavailable.
+
+Honest posture: a string denylist is defence in depth, not a sandbox. It stops
+honest mistakes and obvious injected forms. It cannot be airtight against
+interpreter indirection or a payload committed before it is run.
+
 ```bash
 #!/bin/bash
-# SAFETY GATE
-# Blocks destructive commands and prompts the user for approval.
+# {{orchestrator_name}} SAFETY GATE
+# Blocks destructive commands and prompts {{user_name}} for approval via Telegram.
 # Exit 0 = allow. Exit 2 = block (message sent to Claude via stderr).
+# Also emits structured JSON on stdout for newer Claude Code versions:
+#   {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow|deny","permissionDecisionReason":"..."}}
+# Exit codes remain authoritative — JSON is advisory / future-proofing.
+#
+# APPROVAL FLOW:
+# 1. Hook blocks a dangerous command
+# 2. Claude sees the block reason and asks {{user_name}} on Telegram
+# 3. {{user_name}} says "yes" / "approved"
+# 4. Claude writes the command to {{project_path}}/data/approved.txt
+# 5. Claude retries the command
+# 6. Hook sees it's pre-approved, allows it, removes the approval
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.path // empty')
+# Claude Code's Write/Edit/NotebookEdit pass the target as file_path (Edit/Write)
+# or notebook_path (NotebookEdit); legacy `.path` kept as a fallback. Reading the
+# wrong key silently disables the protected-files guard (was dead pre 2026-06-01).
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // .tool_input.path // empty')
 
-if [ -z "$COMMAND" ] && [ -z "$FILE_PATH" ]; then
+# === MCP TOOL SURFACE (added 2026-06-02 — "never lose a database" gate) ===
+# The bash gate above only ever inspects Bash COMMAND + Write/Edit FILE_PATH.
+# Destructive actions issued through MCP DB tools (supabase / Neon) bypassed it
+# entirely — a DROP TABLE via mcp__supabase__execute_sql, or a whole-project
+# delete via mcp__Neon__delete_project, never went near this gate. We now read
+# the PreToolUse envelope's tool_name + the SQL payload so the same block-by-
+# default discipline covers the MCP surface. Purely additive: every existing
+# Bash / Write / Edit code path below is untouched, and any MCP tool NOT named
+# in the block lists falls straight through to the normal "all clear" exit so
+# reads, branch CREATION, normal migrations and inserts stay fully functional.
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
+# === SQL EXTRACTION — REAL field names read from the LIVE MCP tool schemas ===
+# Verified 2026-06-02 against the ACTUAL Neon + Supabase MCP input schemas. The
+# previous build guessed `sql_statements`/`statements`/`queries`, NONE of which
+# exist on any real tool, so every DROP via run_sql_transaction / the migration
+# tools sailed straight through. The real fields are:
+#   mcp__supabase__execute_sql             -> query          (string)
+#   mcp__supabase__apply_migration         -> query          (string)
+#   mcp__Neon__run_sql                     -> sql            (string)
+#   mcp__Neon__run_sql_transaction         -> sqlStatements  (ARRAY of strings, camelCase)
+#   mcp__Neon__prepare_database_migration  -> migrationSql   (string, camelCase)
+#   mcp__Neon__complete_database_migration -> migrationSql   (string, camelCase)
+# We read EXACTLY those fields. Arrays (sqlStatements) are flattened to
+# newline-joined text so a DROP buried at sqlStatements[3] is still inspected.
+MCP_SQL=$(echo "$INPUT" | jq -r '
+  def flat(x): if (x|type)=="array" then (x|join("\n")) else (x // empty) end;
+  [ flat(.tool_input.query),
+    flat(.tool_input.sql),
+    flat(.tool_input.sqlStatements),
+    flat(.tool_input.migrationSql) ]
+  | map(select(. != null and . != "")) | join("\n")
+' 2>/dev/null)
+
+# === SQL NORMALISATION (C3 — defeat comment/whitespace obfuscation) ===
+# grep is line-oriented, so `DROP/**/TABLE`, `DROP\nTABLE`, and `DROP -- c\nTABLE`
+# all slipped past a multi-line regex. Before ANY matching we collapse the
+# extracted SQL into a single normalized logical line:
+#   1. strip /* ... */ block comments (incl. multi-line)        -> single space
+#   2. strip -- line comments to end-of-line                    -> removed
+#   3. collapse every run of whitespace (newlines/tabs/spaces)  -> one space
+# Matchers below run against MCP_SQL_NORM. The raw MCP_SQL is still used for the
+# approval-key hash + the audit-log excerpt so an approval stays tied to the
+# exact bytes {{user_name}} saw. perl is in the macOS base install; if it is somehow
+# absent we fall back to sed+tr which covers the same three obfuscation classes.
+normalize_sql() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -0777 -pe '
+      s{/\*.*?\*/}{ }gs;     # /* ... */ block comments (non-greedy, dotall)
+      s{--[^\n]*}{ }g;       # -- line comments to EOL
+      s{\s+}{ }g;            # collapse all whitespace to single spaces
+      s{^\s+|\s+$}{}g;       # trim
+    '
+  else
+    tr '\n\t' '  ' \
+      | sed -E 's#/\*[^*]*\*+([^/*][^*]*\*+)*/# #g; s/--[^\n]*//g; s/[[:space:]]+/ /g; s/^ //; s/ $//'
+  fi
+}
+MCP_SQL_NORM=$(printf '%s' "$MCP_SQL" | normalize_sql)
+
+# === CATASTROPHIC-TOOL TARGET (M2 — bind an approval to the specific target) ===
+# An approval of `mcp__supabase__delete_project` must NOT green-light deleting
+# ANY project. We fold the key arg from tool_input into the approval key so the
+# approval only authorizes the exact project/branch {{user_name}} was shown. Real field
+# names per the live schemas:
+#   supabase delete_project / restore_project / pause_project -> project_id
+#   supabase delete_branch  / merge_branch    / reset_branch  -> branch_id
+#   Neon     delete_project                                   -> projectId
+#   Neon     delete_branch                                    -> projectId + branchId
+#   Neon     reset_from_parent                                -> projectId + branchIdOrName
+# We read the union of these and join non-empty values with ':' so e.g. a Neon
+# branch target becomes "<projectId>:<branchId>". Empty (no id supplied) => the
+# literal "?" so a target-less call still gets a deterministic, non-blank key.
+MCP_TARGET=$(echo "$INPUT" | jq -r '
+  [ .tool_input.project_id,
+    .tool_input.branch_id,
+    .tool_input.projectId,
+    .tool_input.branchId,
+    .tool_input.branchIdOrName ]
+  | map(select(. != null and . != "")) | join(":")
+' 2>/dev/null)
+[ -z "$MCP_TARGET" ] && MCP_TARGET="?"
+
+# === STRUCTURED OUTPUT HELPER ===
+# Emits JSON on stdout for modern Claude Code hook protocol, without disturbing
+# the stderr reason string (which existing versions of Claude Code read).
+#
+# Since v2.1.141 (May 14 2026), Claude Code supports a top-level
+# `terminalSequence` field that emits allowlisted OSC sequences for desktop
+# notifications, window titles, and bells. On deny we emit BEL + OSC 9
+# notification so {{user_name}} gets an audible + visible signal when safety-gate
+# blocks a destructive command, instead of the block being silent unless he
+# tails stderr.
+emit_decision() {
+  local decision="$1"  # "allow" or "deny"
+  local reason="${2:-}"
+  local notify_title="${3:-{{orchestrator_name}} safety-gate blocked}"
+  if [ "$decision" = "deny" ]; then
+    # Allowlisted sequences only: BEL (\x07) for bell + OSC 9 for notification.
+    # Per code.claude.com/docs/en/hooks, sequences must terminate with BEL or ST.
+    local seq
+    seq=$(printf '\007\033]9;%s\007' "$notify_title")
+    if [ -n "$reason" ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":%s},"terminalSequence":%s}\n' \
+        "$decision" "$(printf '%s' "$reason" | jq -Rs .)" "$(printf '%s' "$seq" | jq -Rs .)"
+    else
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s"},"terminalSequence":%s}\n' \
+        "$decision" "$(printf '%s' "$seq" | jq -Rs .)"
+    fi
+    return
+  fi
+  if [ -n "$reason" ]; then
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":%s}}\n' \
+      "$decision" "$(printf '%s' "$reason" | jq -Rs .)"
+  else
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s"}}\n' "$decision"
+  fi
+}
+
+# === MCP TOOL CLASSIFICATION (added 2026-06-02) ===
+# Decide up front whether this call is an MCP tool we care about. If it is a
+# DB-SQL tool (we'll inspect MCP_SQL) or a catastrophic destroy tool (we'll
+# block on the name), keep going past the "nothing to inspect" guard even
+# though COMMAND + FILE_PATH are empty. Tool names are matched as exact,
+# case-insensitive whole strings (anchored) so a substring can't smuggle a
+# block past, and an unrelated MCP tool name can't accidentally match.
+mcp_tool_is() {
+  # $1 = candidate tool name (lowercased). Remaining args = names to match.
+  local cand="$1"; shift
+  local t
+  for t in "$@"; do
+    [ "$cand" = "$t" ] && return 0
+  done
+  return 1
+}
+TOOL_NAME_LC=$(printf '%s' "$TOOL_NAME" | tr '[:upper:]' '[:lower:]')
+
+# DB-SQL tools — we inspect the SQL/query payload for destructive statements.
+# prepare_/complete_database_migration execute DDL (incl. DROP) via `migrationSql`
+# and were entirely absent from this list before (C2): the gate never fired for
+# them. Added here AND to the settings.json matcher regex so they reach the gate.
+MCP_IS_DB_SQL_TOOL=0
+if mcp_tool_is "$TOOL_NAME_LC" \
+    "mcp__supabase__execute_sql" \
+    "mcp__supabase__apply_migration" \
+    "mcp__neon__run_sql" \
+    "mcp__neon__run_sql_transaction" \
+    "mcp__neon__prepare_database_migration" \
+    "mcp__neon__complete_database_migration"; then
+  MCP_IS_DB_SQL_TOOL=1
+fi
+
+# Catastrophic destroy tools — block the call itself, every time.
+# H3 policy decision (2026-06-02, documented per the security review):
+#   merge_branch    -> GATED. Applies a dev branch's migrations to PRODUCTION.
+#                      A DROP/destructive migration on the branch becomes a prod
+#                      change with no SQL visible at call time, so the tool name
+#                      IS the destructive act. Treated catastrophic.
+#   restore_project -> GATED. Overwrites the project's CURRENT state with a
+#                      restore point — silently discards everything since. Data
+#                      loss by definition. Treated catastrophic.
+#   rebase_branch   -> NOT gated. Pulls newer PRODUCTION migrations DOWN onto a
+#                      dev branch to resolve drift. It mutates the dev branch
+#                      only, never production, and loses no prod data. Allowed.
+#                      (If a future schema makes it write prod, revisit.)
+MCP_IS_CATASTROPHIC_TOOL=0
+if mcp_tool_is "$TOOL_NAME_LC" \
+    "mcp__neon__delete_project" \
+    "mcp__neon__delete_branch" \
+    "mcp__neon__reset_from_parent" \
+    "mcp__supabase__delete_project" \
+    "mcp__supabase__delete_branch" \
+    "mcp__supabase__pause_project" \
+    "mcp__supabase__reset_branch" \
+    "mcp__supabase__merge_branch" \
+    "mcp__supabase__restore_project"; then
+  MCP_IS_CATASTROPHIC_TOOL=1
+fi
+
+# Nothing to inspect:
+#   - no Bash command, no Write/Edit file path, AND
+#   - not a DB-SQL MCP tool, AND
+#   - not a catastrophic MCP destroy tool.
+# (A DB-SQL tool with an empty MCP_SQL still falls through here to allow — an
+#  empty statement can't drop anything, and we never want to block a legit
+#  no-op read.)
+if [ -z "$COMMAND" ] && [ -z "$FILE_PATH" ] \
+   && { [ "$MCP_IS_DB_SQL_TOOL" = "0" ] || [ -z "$MCP_SQL" ]; } \
+   && [ "$MCP_IS_CATASTROPHIC_TOOL" = "0" ]; then
+  emit_decision "allow"
   exit 0
 fi
 
 TIMESTAMP=$(date -Iseconds)
-LOG_DIR="{{project_path}}/logs"
-LOG_FILE="$LOG_DIR/safety-gate.log"
-# NOTE: this file MUST be in .gitignore - a checked-in approval file would let any clone
-# of this repo bypass the gate. The 0600 perms below stop a malicious package's postinstall
-# script from pre-approving destructive commands by writing to it as another local user.
+LOG_FILE="{{project_path}}/logs/safety-gate.log"
 APPROVAL_FILE="{{project_path}}/data/approved.txt"
+APPROVAL_TTL_DAYS=30
 
-mkdir -p "$LOG_DIR" "$(dirname "$APPROVAL_FILE")"
-touch "$APPROVAL_FILE"
+# Ensure the log + approval dirs exist. On a fresh install neither is
+# present, and without the approval file the approval path — the only way
+# past a block() — cannot work at all.
+mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$APPROVAL_FILE")" 2>/dev/null
+touch "$APPROVAL_FILE" 2>/dev/null
 chmod 0600 "$APPROVAL_FILE" 2>/dev/null || true
 
-# Check for pre-approval
-CHECK_STRING="$COMMAND$FILE_PATH"
-if grep -qFx "$CHECK_STRING" "$APPROVAL_FILE" 2>/dev/null; then
-  grep -vFx "$CHECK_STRING" "$APPROVAL_FILE" > "$APPROVAL_FILE.tmp" && mv "$APPROVAL_FILE.tmp" "$APPROVAL_FILE"
-  echo "[$TIMESTAMP] APPROVED (pre-approved): $CHECK_STRING" >> "$LOG_FILE"
+# === TTL PRUNE + TIMESTAMP BACKFILL ===
+# Approval file format (new): "<epoch_seconds>|<command>" per line.
+# Legacy lines without the "<epoch>|" prefix are treated as written-now on first
+# sight (they get 30 days from now). Lines older than APPROVAL_TTL_DAYS are
+# dropped so stale approvals from previous sessions can't quietly green-light a
+# destructive op later.
+if [ -s "$APPROVAL_FILE" ]; then
+  NOW_EPOCH=$(date +%s)
+  TTL_SECONDS=$((APPROVAL_TTL_DAYS * 86400))
+  awk -F'|' -v now="$NOW_EPOCH" -v ttl="$TTL_SECONDS" '
+    NF >= 2 && $1 ~ /^[0-9]+$/ {
+      # Timestamped entry. Drop if expired. Rejoin command in case it contained pipes.
+      ts = $1
+      cmd = $2
+      for (i = 3; i <= NF; i++) cmd = cmd "|" $i
+      if (now - ts < ttl) {
+        printf "%s|%s\n", ts, cmd
+      }
+      next
+    }
+    NF > 0 {
+      # Legacy entry without timestamp — stamp with now.
+      printf "%s|%s\n", now, $0
+    }
+  ' "$APPROVAL_FILE" > "$APPROVAL_FILE.prune" && mv "$APPROVAL_FILE.prune" "$APPROVAL_FILE"
+fi
+
+# === MCP APPROVAL KEY (single-line, newline-free) ===
+# The approval store (data/approved.txt) is line-oriented: each entry is
+# "<epoch>|<command>" and the prune/match awk reads line by line. So an MCP
+# approval key MUST be a single line. SQL can contain newlines, so for DB-SQL
+# tools the key is "MCP-APPROVE <tool_name> <sha256(sql)>" — stable, unique to
+# that exact statement, and trivially copy-pasteable into approved.txt. For the
+# catastrophic destroy tools the key is "MCP-APPROVE <tool_name> <target>"
+# (M2): the target binds the approval to the exact project/branch {{user_name}} saw, so a
+# blanket approval can't authorize deleting a DIFFERENT project later.
+mcp_approve_key() {
+  if [ "$MCP_IS_DB_SQL_TOOL" = "1" ] && [ -n "$MCP_SQL" ]; then
+    local h
+    h=$(printf '%s' "$MCP_SQL" | shasum -a 256 2>/dev/null | awk '{print $1}')
+    printf 'MCP-APPROVE %s %s' "$TOOL_NAME" "$h"
+  elif [ "$MCP_IS_CATASTROPHIC_TOOL" = "1" ]; then
+    printf 'MCP-APPROVE %s %s' "$TOOL_NAME" "$MCP_TARGET"
+  fi
+}
+
+# === CHECK FOR PRE-APPROVAL ===
+# If {{user_name}} already approved this exact command, let it through and clear it.
+# For Bash/Write/Edit the approval key is the command + file path (unchanged).
+# For MCP tools the approval key is the single-line mcp_approve_key (see above).
+if [ -n "$COMMAND" ] || [ -n "$FILE_PATH" ]; then
+  CHECK_STRING="$COMMAND$FILE_PATH"
+elif [ "$MCP_IS_DB_SQL_TOOL" = "1" ] && [ -n "$MCP_SQL" ]; then
+  CHECK_STRING="$(mcp_approve_key)"
+elif [ "$MCP_IS_CATASTROPHIC_TOOL" = "1" ]; then
+  CHECK_STRING="$(mcp_approve_key)"
+else
+  CHECK_STRING="$COMMAND$FILE_PATH"
+fi
+if awk -F'|' -v cmd="$CHECK_STRING" '
+  NF >= 2 && $1 ~ /^[0-9]+$/ {
+    c = $2
+    for (i = 3; i <= NF; i++) c = c "|" $i
+    if (c == cmd) { found = 1; exit }
+  }
+  NF > 0 && $0 == cmd { found = 1; exit }
+  END { exit !found }
+' "$APPROVAL_FILE" 2>/dev/null; then
+  # Remove ONE matching approval entry (one-time-use, first-match). Both
+  # the project and global gates run per Bash call, so each call consumes
+  # one entry. Multiple identical entries (one per gate) keep duplicates
+  # so the second gate still finds a match. Match either new or legacy
+  # format. Fixed 2026-04-22 after batch rm consumed both entries in one pass.
+  awk -F'|' -v cmd="$CHECK_STRING" '
+    !consumed && NF >= 2 && $1 ~ /^[0-9]+$/ {
+      c = $2
+      for (i = 3; i <= NF; i++) c = c "|" $i
+      if (c == cmd) { consumed = 1; next }
+      print; next
+    }
+    !consumed && $0 == cmd { consumed = 1; next }
+    { print }
+  ' "$APPROVAL_FILE" > "$APPROVAL_FILE.tmp" && mv "$APPROVAL_FILE.tmp" "$APPROVAL_FILE"
+  echo "[$TIMESTAMP] APPROVED (pre-approved by {{user_name}}): $CHECK_STRING" >> "$LOG_FILE"
+  emit_decision "allow" "Pre-approved by {{user_name}} (one-time use, consumed)"
   exit 0
 fi
 
+# === HELPER: block with approval instructions ===
 block() {
   local REASON="$1"
   local CATEGORY="$2"
-  echo "BLOCKED: $REASON. Ask the user for approval. If approved, write the exact command to {{project_path}}/data/approved.txt (one command per line) then retry." >&2
+  local MSG="BLOCKED: $REASON. Ask {{user_name}} for approval on Telegram. If he approves, write the exact command to {{project_path}}/data/approved.txt (one command per line) then retry."
+  echo "$MSG" >&2
   echo "[$TIMESTAMP] BLOCKED ($CATEGORY): ${COMMAND}${FILE_PATH}" >> "$LOG_FILE"
+  emit_decision "deny" "$MSG"
   exit 2
 }
 
+# === HELPER: hard block (not even {{user_name}}-approval opens the gate) ===
 hard_block() {
   local REASON="$1"
   local CATEGORY="$2"
-  echo "HARD BLOCKED: $REASON. Cannot be approved through the hook. Run manually in Terminal if genuinely needed." >&2
+  local MSG="HARD BLOCKED: $REASON. This cannot be approved through the hook. Run manually in Terminal if you genuinely need this."
+  echo "$MSG" >&2
   echo "[$TIMESTAMP] HARD BLOCKED ($CATEGORY): $COMMAND" >> "$LOG_FILE"
+  emit_decision "deny" "$MSG"
   exit 2
 }
 
-# ================= CATEGORY 1: HARD BLOCKED (no approval possible) =================
+# === HELPER: block an MCP tool call with approval instructions ===
+# Mirrors block() but the approval key is the MCP tool name (+ SQL for DB
+# tools), so the message tells Claude exactly what to write to approved.txt.
+mcp_block() {
+  local REASON="$1"
+  local CATEGORY="$2"
+  local APPROVE_KEY="$3"   # what to write to approved.txt to green-light this exact call
+  local MSG="BLOCKED (MCP): $REASON. This could lose a database — ask {{user_name}} for approval on Telegram. If he approves, write this exact text to {{project_path}}/data/approved.txt then retry: ${APPROVE_KEY}"
+  echo "$MSG" >&2
+  echo "[$TIMESTAMP] BLOCKED ($CATEGORY) [tool=$TOOL_NAME]: $(printf '%s' "$MCP_SQL" | tr '\n' ' ' | cut -c1-300)" >> "$LOG_FILE"
+  emit_decision "deny" "$MSG"
+  exit 2
+}
+
+# === MCP DATABASE GATE (added 2026-06-02 — "never lose a database") ===
+# Runs BEFORE the bash checks. For an MCP call COMMAND + FILE_PATH are empty so
+# every grep on $COMMAND below safely no-ops; this block is the only thing that
+# fires for MCP tools. Everything not matched here (and every non-MCP call)
+# continues to the existing bash logic untouched.
+
+# --- B. Catastrophic destroy tools: block the call itself, every time ---
+# These delete/reset an entire database, branch, or project. No SQL to inspect —
+# the tool's existence IS the destructive act. Approval required every time.
+if [ "$MCP_IS_CATASTROPHIC_TOOL" = "1" ]; then
+  case "$TOOL_NAME_LC" in
+    mcp__neon__delete_project)      R="Neon delete_project destroys an ENTIRE Neon project (all branches + data)";;
+    mcp__neon__delete_branch)       R="Neon delete_branch destroys a database branch and its data";;
+    mcp__neon__reset_from_parent)   R="Neon reset_from_parent discards ALL data on this branch and resets it to its parent";;
+    mcp__supabase__delete_project)  R="Supabase delete_project destroys an ENTIRE Supabase project (database + storage + auth)";;
+    mcp__supabase__delete_branch)   R="Supabase delete_branch destroys a database branch and its data";;
+    mcp__supabase__pause_project)   R="Supabase pause_project takes a project offline (DB unreachable until manually restored)";;
+    mcp__supabase__reset_branch)    R="Supabase reset_branch wipes branch migrations/data back to a baseline";;
+    mcp__supabase__merge_branch)    R="Supabase merge_branch applies a dev branch's migrations to PRODUCTION (a destructive migration on the branch becomes a prod change)";;
+    mcp__supabase__restore_project) R="Supabase restore_project overwrites the project's CURRENT state with a restore point (loses everything since)";;
+    *)                              R="Catastrophic MCP database operation";;
+  esac
+  mcp_block "$R" "mcp-catastrophic" "$(mcp_approve_key)"
+fi
+
+# --- A. Destructive SQL passed to MCP DB tools: inspect the statement ---
+# Block: DROP DATABASE / DROP TABLE (+ other DROP <object>), TRUNCATE,
+# DELETE without WHERE, UPDATE without WHERE, ALTER ... DROP COLUMN.
+# Allow: SELECT / INSERT / CREATE / additive ALTER / normal migrations / any
+# DELETE|UPDATE that carries a real WHERE clause.
+if [ "$MCP_IS_DB_SQL_TOOL" = "1" ] && [ -n "$MCP_SQL" ]; then
+  MCP_APPROVE_KEY="$(mcp_approve_key)"
+  # ALL matchers below run against MCP_SQL_NORM — the comment-stripped,
+  # whitespace-collapsed single line (C3) — so `DROP/**/TABLE`, `DROP\nTABLE`
+  # and `DROP -- c\nTABLE` are normalized to plain `DROP TABLE` before matching.
+
+  # DROP DATABASE / SCHEMA / TABLE / etc., DROP OWNED BY <role> (H2), and
+  # TRUNCATE — always destructive.
+  if printf '%s' "$MCP_SQL_NORM" | grep -qEi '(DROP[[:space:]]+(DATABASE|SCHEMA|TABLE|USER|ROLE|INDEX|VIEW|MATERIALIZED[[:space:]]+VIEW|TRIGGER|FUNCTION|SEQUENCE|TYPE|OWNED[[:space:]]+BY)|TRUNCATE([[:space:]]+TABLE)?[[:space:]])'; then
+    mcp_block "Destructive SQL (DROP/TRUNCATE) via $TOOL_NAME" "mcp-sql-drop" "$MCP_APPROVE_KEY"
+  fi
+
+  # ALTER TABLE ... DROP [COLUMN] [IF EXISTS] <col> — permanently loses that
+  # column's data. COLUMN is OPTIONAL in Postgres (H1): `ALTER TABLE t DROP email`
+  # drops the column just like `... DROP COLUMN email`. We anchor on DROP not
+  # being followed by CONSTRAINT/DEFAULT/NOT (which are non-data-loss ALTERs) so
+  # an additive `... ALTER COLUMN x DROP DEFAULT` / `DROP NOT NULL` is allowed.
+  if printf '%s' "$MCP_SQL_NORM" | grep -qEi 'ALTER[[:space:]]+TABLE[[:space:]]+[^;]*DROP[[:space:]]+(COLUMN[[:space:]]+)?(IF[[:space:]]+EXISTS[[:space:]]+)?("?[A-Za-z_]"?)' \
+     && ! printf '%s' "$MCP_SQL_NORM" | grep -qEi 'ALTER[[:space:]]+TABLE[[:space:]]+[^;]*DROP[[:space:]]+(CONSTRAINT|DEFAULT|NOT[[:space:]]+NULL)'; then
+    mcp_block "ALTER TABLE DROP COLUMN via $TOOL_NAME permanently loses column data" "mcp-sql-drop-column" "$MCP_APPROVE_KEY"
+  fi
+
+  # DELETE FROM <table> with NO WHERE — deletes every row.
+  # A bare "DELETE FROM <table>" that reaches ; or end without a WHERE.
+  # Always-true WHERE (1=1 / true) is treated as no-WHERE.
+  if printf '%s' "$MCP_SQL_NORM" | grep -qEi 'DELETE[[:space:]]+FROM[[:space:]]+[A-Za-z0-9_."]+[[:space:]]*(;|$)'; then
+    mcp_block "DELETE without WHERE via $TOOL_NAME deletes ALL rows" "mcp-sql-delete-all" "$MCP_APPROVE_KEY"
+  fi
+  if printf '%s' "$MCP_SQL_NORM" | grep -qEi 'DELETE[[:space:]]+FROM[[:space:]]+[A-Za-z0-9_."]+[[:space:]]+WHERE[[:space:]]+(1[[:space:]]*=[[:space:]]*1|true)([[:space:]]|;|$)'; then
+    mcp_block "DELETE with always-true WHERE via $TOOL_NAME deletes ALL rows" "mcp-sql-delete-always-true" "$MCP_APPROVE_KEY"
+  fi
+
+  # UPDATE <table> SET ... with NO WHERE — rewrites every row.
+  # Match an UPDATE whose statement reaches a ; or end-of-string with no WHERE
+  # between SET and the terminator. Always-true WHERE is treated as no-WHERE.
+  if printf '%s' "$MCP_SQL_NORM" | grep -qEi 'UPDATE[[:space:]]+[A-Za-z0-9_."]+[[:space:]]+SET[[:space:]]+[^;]*(;|$)' \
+     && ! printf '%s' "$MCP_SQL_NORM" | grep -qEi 'UPDATE[[:space:]]+[A-Za-z0-9_."]+[[:space:]]+SET[[:space:]]+[^;]*[[:space:]]WHERE[[:space:]]'; then
+    mcp_block "UPDATE without WHERE via $TOOL_NAME rewrites ALL rows" "mcp-sql-update-all" "$MCP_APPROVE_KEY"
+  fi
+  if printf '%s' "$MCP_SQL_NORM" | grep -qEi 'UPDATE[[:space:]]+[A-Za-z0-9_."]+[[:space:]]+SET[[:space:]]+[^;]*[[:space:]]WHERE[[:space:]]+(1[[:space:]]*=[[:space:]]*1|true)([[:space:]]|;|$)'; then
+    mcp_block "UPDATE with always-true WHERE via $TOOL_NAME rewrites ALL rows" "mcp-sql-update-always-true" "$MCP_APPROVE_KEY"
+  fi
+
+  # Reached here: SQL is a read / insert / create / additive ALTER / WHERE-scoped
+  # mutation / normal migration. Allowed — fall through to the all-clear exit.
+fi
+
+# === CATEGORY 1: ALWAYS BLOCKED (no approval possible) ===
+# These are so catastrophic or history-destroying that even with approval,
+# we don't allow them through the hook. {{user_name}} must run them manually in Terminal.
+
+# Delete home / root filesystem
 if echo "$COMMAND" | grep -qEi 'rm\s+-(rf|fr)\s+(/|~|\$HOME)\s*$'; then
-  hard_block "This would delete your home directory or root" "catastrophic"
+  hard_block "This would delete your entire home directory or root filesystem" "catastrophic"
 fi
+
+# Disk formatting / partition ops
 if echo "$COMMAND" | grep -qEi '(mkfs\.|dd\s+if=|fdisk|diskutil\s+erase)'; then
-  hard_block "Disk formatting operation" "disk"
+  hard_block "Disk formatting / partition operation" "disk"
 fi
 
-# Git history rewrites
+# Git history rewrites — these are almost never recoverable
 if echo "$COMMAND" | grep -qEi 'git\s+filter-(branch|repo)'; then
-  hard_block "git filter-branch/filter-repo permanently rewrites history" "git-filter"
+  hard_block "git filter-branch/filter-repo permanently rewrites history — unrecoverable if pushed" "git-filter"
 fi
+
 if echo "$COMMAND" | grep -qEi '(git\s+update-ref\s+-d|git\s+reflog\s+expire|git\s+gc\s+.*--prune=now|git\s+gc\s+.*--aggressive)'; then
-  hard_block "Permanent reflog / ref cleanup - makes lost commits unrecoverable" "git-reflog"
+  hard_block "Permanent reflog / ref cleanup — makes it impossible to recover lost commits" "git-reflog"
 fi
 
-# Reject `-c push.default=...` shell-form pre-commands - known force-push bypass
-# (sets push.default for the single command, then a bare `git push` pushes current branch).
-if echo "$COMMAND" | grep -qEi 'git\s+-c\s+push\.default='; then
-  hard_block "git -c push.default=... pre-command override is a known bypass for branch-target detection" "git-push-default-override"
-fi
-
-# Refspec-prefixed forced push: `git push origin +HEAD:main`, `git push remote +branch:branch`.
-# The `+` in front of a refspec means "force this push" without using --force flag.
-if echo "$COMMAND" | grep -qEi 'git\s+push\s+\S+\s+\+'; then
-  hard_block "Refspec-prefixed forced push (+ before refspec) - same as --force, blocked unconditionally" "git-refspec-force"
-fi
-
-# Force push to protected branches
+# Force push to protected branches: main, master, production, prod, release, develop
+# Any push with --force / -f / --force-with-lease targeting one of these branches
+# is a hard block. This is what destroys shared history irrecoverably.
 if echo "$COMMAND" | grep -qEi 'git\s+push(\s+[^-]\S*)*\s+(--force|-f|--force-with-lease)(\s|=|$)' || \
    echo "$COMMAND" | grep -qEi 'git\s+push\s+.*(--force|-f|--force-with-lease).*\s+(origin\s+)?(main|master|production|prod|release|develop)(\s|$|:)'; then
+  # Only hard-block if the target branch is main/master/production/prod/release/develop OR unspecified (defaults to current branch which might be main)
   if echo "$COMMAND" | grep -qEi '(origin\s+)?(main|master|production|prod|release|develop)(\s|$|:)'; then
-    hard_block "Force push to protected branch - destroys shared history" "git-force-push-protected"
-  fi
-  # Bare `git push -f` (no remote, no branch) pushes current branch to its upstream.
-  # If current branch is main/master/etc. this slips past the named-branch check above.
-  # Hard-block any forced push that doesn't explicitly target a non-protected branch.
-  if ! echo "$COMMAND" | grep -qEi 'git\s+push\s+\S+\s+[A-Za-z0-9._/+:-]+(\s|$)'; then
-    hard_block "Force push without explicit branch target - defaults to current branch which may be protected" "git-force-push-implicit"
+    hard_block "Force push to protected branch (main/master/production/prod/release/develop) — this destroys shared history. Never allowed via the hook." "git-force-push-protected"
   fi
 fi
 
-# ================= CATEGORY 2: BLOCKED UNTIL APPROVED =================
-# Whitelist common CLI subcommands that use `rm` as a verb but are NOT filesystem deletes.
-# Without this, `vercel env rm`, `gh secret rm`, `docker rm`, `docker container rm`,
-# `docker image rm`, `docker volume rm`, `docker network rm`, `kubectl ... rm` all
-# false-positive on the rm regex below.
-if echo "$COMMAND" | grep -qE '\b(vercel\s+env|gh\s+secret|gh\s+variable|docker(\s+(container|image|volume|network))?|kubectl\s+(secret|configmap))\s+rm\b'; then
-  : # Allow - these are CLI resource-removal verbs, not filesystem deletes
-else
-  # File deletion (word-boundary safe so "form ", "arm " etc. don't false-trigger).
-  # Matches short flags (-r/-R/-f/-rf/-fr/-Rf/-fR) AND long flags (--recursive, --force).
-  if echo "$COMMAND" | grep -qE '(^|\s)rm\s+(-(r|R|f|rf|fr|Rf|fR|rR|Rr)\b|--recursive|--force)'; then
-    block "Recursive or forced file deletion detected" "rm-rf"
+# --- Codex CLI restraints ---
+# Codex is exposed to {{orchestrator_name}} ONLY through scripts/codex.sh wrapper. Direct
+# `codex exec`, `codex --sandbox danger-full-access`, `codex --ask-for-approval
+# never`, and other agent-mode subcommands are hard-blocked. Safe direct calls
+# (login, version, status, logout, update, --help, mcp-server config) pass.
+#
+# Skip these checks for git commit/log/show/diff/blame/tag and echo/printf/cat
+# so commit messages + audit prints can legitimately mention "codex exec" etc
+# without the regex false-firing on heredoc content.
+#
+# Also covers the common `cd <dir> && git commit ...` shape — without that, a
+# commit message that names a flag the wrapper-bypass rule blocks (e.g. the
+# very rule definition itself) would be unable to land.
+SKIP_CODEX_CHECKS=0
+if echo "$COMMAND" | grep -qE '^[[:space:]]*git[[:space:]]+(commit|tag|log|show|diff|blame)([[:space:]]|$)'; then
+  SKIP_CODEX_CHECKS=1
+fi
+if echo "$COMMAND" | grep -qE '(^|&&[[:space:]]*|;[[:space:]]*)git[[:space:]]+(commit|tag|log|show|diff|blame)([[:space:]]|$)'; then
+  SKIP_CODEX_CHECKS=1
+fi
+if echo "$COMMAND" | grep -qE '^[[:space:]]*(echo|printf|cat)([[:space:]]|$)'; then
+  SKIP_CODEX_CHECKS=1
+fi
+if [ "$SKIP_CODEX_CHECKS" = "0" ]; then
+  if echo "$COMMAND" | grep -qE '(^|[[:space:]/])codex[[:space:]]+(exec|agent|cloud|remote-control|app-server|exec-server|apply|sandbox)([[:space:]]|$)'; then
+    hard_block "Direct codex agent-mode invocation. Use scripts/codex.sh wrapper instead. Codex is restricted to read-only review in this environment." "codex-agent-mode"
   fi
-  if echo "$COMMAND" | grep -qE '(^|\s)rm\s'; then
+  if echo "$COMMAND" | grep -qE 'codex[[:space:]]+.*--sandbox[[:space:]]+(danger-full-access|workspace-write)'; then
+    hard_block "Codex --sandbox danger-full-access / workspace-write bypasses {{orchestrator_name}}'s read-only floor. Never allowed via the hook." "codex-sandbox-bypass"
+  fi
+  if echo "$COMMAND" | grep -qE 'codex[[:space:]]+.*--ask-for-approval[[:space:]]+never'; then
+    hard_block "Codex --ask-for-approval never bypasses the per-command approval floor. Never allowed via the hook." "codex-approval-bypass"
+  fi
+  if echo "$COMMAND" | grep -qE 'codex[[:space:]]+.*-c[[:space:]]+sandbox_permissions=' ; then
+    hard_block "Codex -c sandbox_permissions=... overrides the config-floor sandbox. Never allowed via the hook." "codex-config-override"
+  fi
+  if echo "$COMMAND" | grep -qE 'codex[[:space:]]+.*-c[[:space:]]+sandbox_mode='; then
+    hard_block "Codex -c sandbox_mode=... overrides the config-floor sandbox. Never allowed via the hook." "codex-config-override"
+  fi
+  if echo "$COMMAND" | grep -qE 'codex[[:space:]]+.*-c[[:space:]]+approval_policy='; then
+    hard_block "Codex -c approval_policy=... overrides the config-floor approval requirement. Never allowed via the hook." "codex-config-override"
+  fi
+
+  # Wrapper bypass-flag blocks. If anyone tries to call scripts/codex.sh or
+  # scripts/ensemble.sh with --no-redact / --unsafe / --dangerous / --skip-redact
+  # / --no-cap / --bypass, refuse at the hook layer. The wrappers also refuse
+  # internally — this is defense in depth so a typo'd flag at the Bash-tool
+  # layer doesn't slip through the wrapper's arg-parse later.
+  if echo "$COMMAND" | grep -qE 'scripts/codex\.sh[[:space:]]+.*(--no-redact|--skip-redact|--unsafe|--dangerous|--bypass)([[:space:]]|=|$)'; then
+    hard_block "scripts/codex.sh bypass-style flag is blocked. Codex is read-only-advisor-only in this environment." "codex-wrapper-bypass"
+  fi
+  if echo "$COMMAND" | grep -qE 'scripts/ensemble\.sh[[:space:]]+.*(--no-redact|--no-cap|--unsafe|--dangerous|--bypass)([[:space:]]|=|$)'; then
+    hard_block "scripts/ensemble.sh bypass-style flag is blocked. Ensemble runs are double-checked by design." "ensemble-wrapper-bypass"
+  fi
+fi
+
+# === CATEGORY 2: BLOCKED UNTIL {{user_name}} APPROVES ===
+
+# --- File deletion ---
+# Only match `rm` as a standalone command (not inside words like "form", "arm", "term").
+# `(^|\s|[(`])` ensures rm is at start of command, after whitespace, or after
+# subshell-open chars ( `$(`, backtick ) so `$(rm -rf foo)` and `\`rm -rf foo\``
+# are caught (gap surfaced by the gate's own test suite).
+#
+# The "recursive or forced" category is now ONLY for recursive deletions
+# (flag bundle contains r/R). `rm -f single-file` still gets blocked below
+# as plain "file deletion" — different label, still requires approval, but
+# doesn't misclassify a single-file delete as a recursive blast .
+#
+# CLI-subcommand whitelist: `vercel env rm`, `gh secret rm`, `gh env rm`,
+# `docker {image,volume,network,container} rm`, `docker rm` (container) —
+# these are API / resource removals, not filesystem deletions. Skip the rm
+# check entirely when we detect these shapes.
+#
+# Skip rm-check entirely on git commit/log/show/diff/blame and echo/printf/cat
+# so commit messages + audit prints can legitimately mention "rm -rf" without
+# the regex false-firing (gap surfaced 2026-05-23, sibling to the existing
+# SKIP_CODEX_CHECKS / SKIP_DB_CHECKS gates).
+SKIP_RM_CHECKS=0
+if echo "$COMMAND" | grep -qE '^[[:space:]]*git[[:space:]]+(commit|tag|log|show|diff|blame)([[:space:]]|$)'; then
+  SKIP_RM_CHECKS=1
+fi
+if echo "$COMMAND" | grep -qE '(^|&&[[:space:]]*|;[[:space:]]*)git[[:space:]]+(commit|tag|log|show|diff|blame)([[:space:]]|$)'; then
+  SKIP_RM_CHECKS=1
+fi
+if echo "$COMMAND" | grep -qE '^[[:space:]]*(echo|printf|cat)([[:space:]]|$)'; then
+  SKIP_RM_CHECKS=1
+fi
+
+if [ "$SKIP_RM_CHECKS" = "0" ]; then
+  if echo "$COMMAND" | grep -qE '\b(vercel\s+(env|domains|alias)\s+(rm|remove)|gh\s+(secret|variable|env|release|label|repo|ssh-key|gpg-key|auth\s+token)\s+(rm|remove|delete)|docker\s+(image|volume|network|container)?\s*rm|npm\s+rm|yarn\s+remove|pnpm\s+rm|bun\s+remove|brew\s+(uninstall|rm)|git\s+rm)\b'; then
+    :  # CLI resource removal — not filesystem delete, skip rm check
+  elif echo "$COMMAND" | grep -qE '(^|[[:space:]]|[(`])rm\s+-[A-Za-z]*[rR][A-Za-z]*([[:space:]]|$)'; then
+    block "Recursive file deletion detected" "rm-rf"
+  elif echo "$COMMAND" | grep -qE '(^|[[:space:]]|[(`])rm\s'; then
     block "File deletion detected" "rm"
   fi
-  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)(/usr)?/bin/rm\s'; then
+  # `/bin/rm` style invocation
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\||[(`])(/usr)?/bin/rm\s'; then
     block "File deletion via /bin/rm detected" "rm-path"
   fi
 fi
 
-# `find ... -delete` / `find ... -exec rm` - silent recursive deletion with no obvious rm token
-if echo "$COMMAND" | grep -qE '\bfind\s.*-delete\b'; then
-  block "find -delete silently removes every match" "find-delete"
+# --- Database destructors ---
+# IMPORTANT: skip these checks entirely if the command is a git commit
+# (commit messages legitimately reference destructive ops in post-mortems).
+# Heredoc content is just text from a shell perspective; the actual command
+# is `git commit -m ...`, which is non-destructive.
+SKIP_DB_CHECKS=0
+if echo "$COMMAND" | grep -qE '^[[:space:]]*git[[:space:]]+(commit|tag|log|show|diff|blame)([[:space:]]|$)'; then
+  SKIP_DB_CHECKS=1
 fi
-if echo "$COMMAND" | grep -qE '\bfind\s.*-exec\s+rm\b'; then
-  block "find -exec rm silently removes every match" "find-exec-rm"
-fi
-
-# rsync --delete - silent destination wipe of files not in source
-if echo "$COMMAND" | grep -qE '\brsync\s.*--delete\b'; then
-  block "rsync --delete removes files in destination that are missing from source - verify the source is what you think it is" "rsync-delete"
-fi
-
-# Database
-if echo "$COMMAND" | grep -qEi '(DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE)'; then
-  block "Destructive database operation (DROP/TRUNCATE)" "sql-drop"
-fi
-if echo "$COMMAND" | grep -qEi 'DELETE\s+FROM\s+\w+\s*[;$]'; then
-  block "DELETE FROM without WHERE clause" "sql-delete"
+# Also skip if it's clearly an echo/printf/cat printing the dangerous string.
+if echo "$COMMAND" | grep -qE '^[[:space:]]*(echo|printf|cat)([[:space:]]|$)'; then
+  SKIP_DB_CHECKS=1
 fi
 
-# Git destructive ops (non-protected branches)
+if [ "$SKIP_DB_CHECKS" = "0" ]; then
+  if echo "$COMMAND" | grep -qEi '(DROP\s+(TABLE|DATABASE|SCHEMA|USER|ROLE|INDEX|VIEW|TRIGGER|FUNCTION)|TRUNCATE\s+TABLE)'; then
+    block "Destructive database operation (DROP/TRUNCATE)" "sql-drop"
+  fi
+
+  # DELETE without WHERE OR with WHERE 1=1 / WHERE true
+  if echo "$COMMAND" | grep -qEi 'DELETE\s+FROM\s+\w+\s*[;$]'; then
+    block "DELETE FROM without WHERE clause, this deletes ALL rows" "sql-delete"
+  fi
+  if echo "$COMMAND" | grep -qEi 'DELETE\s+FROM\s+\w+\s+WHERE\s+(1\s*=\s*1|true|TRUE)'; then
+    block "DELETE FROM with always-true WHERE clause, this deletes ALL rows" "sql-delete-always-true"
+  fi
+
+  # ALTER TABLE DROP COLUMN (loses column data permanently)
+  if echo "$COMMAND" | grep -qEi 'ALTER\s+TABLE\s+\w+\s+DROP\s+COLUMN'; then
+    block "ALTER TABLE DROP COLUMN permanently loses that column's data" "sql-drop-column"
+  fi
+
+  # Postgres CLI tools
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)dropdb(\s|$)'; then
+    block "dropdb command deletes an entire Postgres database" "pg-dropdb"
+  fi
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)dropuser(\s|$)'; then
+    block "dropuser command deletes a Postgres user/role" "pg-dropuser"
+  fi
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)pg_drop_replication_slot'; then
+    block "pg_drop_replication_slot drops replication state" "pg-drop-replication"
+  fi
+
+  # MySQL CLI tools
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)mysqladmin\s+drop'; then
+    block "mysqladmin drop deletes a MySQL database" "mysql-drop"
+  fi
+
+  # MongoDB destructive ops
+  if echo "$COMMAND" | grep -qEi '\.dropDatabase\(\)|\.drop\(\)|\.deleteMany\s*\(\s*\{\s*\}'; then
+    block "MongoDB destructive operation (dropDatabase/drop/deleteMany with empty filter)" "mongo-drop"
+  fi
+
+  # Prisma destructive CLI flags (added after a production data wipe)
+  if echo "$COMMAND" | grep -qEi '(prisma|prisma-cli)\s+migrate\s+reset'; then
+    block "prisma migrate reset wipes ALL database rows. Run on a non-prod branch or back up first." "prisma-migrate-reset"
+  fi
+  if echo "$COMMAND" | grep -qEi 'prisma.*--force-reset'; then
+    block "Prisma --force-reset wipes ALL database rows" "prisma-force-reset"
+  fi
+  if echo "$COMMAND" | grep -qEi 'prisma\s+db\s+push.*--accept-data-loss'; then
+    block "prisma db push --accept-data-loss drops columns with data" "prisma-accept-data-loss"
+  fi
+  if echo "$COMMAND" | grep -qEi 'prisma\s+migrate\s+resolve.*--rolled-back'; then
+    block "prisma migrate resolve --rolled-back rewrites migration history" "prisma-rolled-back"
+  fi
+
+  # Supabase CLI destructive ops
+  if echo "$COMMAND" | grep -qEi 'supabase\s+db\s+reset'; then
+    block "supabase db reset wipes the entire local/remote database" "supabase-db-reset"
+  fi
+  if echo "$COMMAND" | grep -qEi 'supabase\s+storage.*rm\s'; then
+    block "supabase storage rm deletes storage bucket contents" "supabase-storage-rm"
+  fi
+
+  # Neon CLI destructive ops
+  if echo "$COMMAND" | grep -qEi 'neon(ctl)?\s+(branches?\s+delete|projects?\s+delete|databases?\s+delete)'; then
+    block "Neon CLI delete operation removes a branch/project/database" "neon-delete"
+  fi
+
+  # Cloudflare wrangler destructive ops
+  if echo "$COMMAND" | grep -qE 'wrangler\s+(r2\s+bucket\s+delete|kv\s+namespace\s+delete|d1\s+delete|secret\s+delete)'; then
+    block "wrangler delete operation removes a Cloudflare resource (r2/kv/d1/secret)" "wrangler-delete"
+  fi
+  if echo "$COMMAND" | grep -qE 'wrangler\s+d1\s+execute.*--remote.*DROP'; then
+    block "wrangler d1 execute remote DROP wipes table data on production D1" "wrangler-d1-drop"
+  fi
+
+  # Vercel destructive ops on env / projects
+  if echo "$COMMAND" | grep -qE 'vercel\s+(remove|rm)\s'; then
+    block "vercel remove deletes a project or deployment permanently" "vercel-remove"
+  fi
+  if echo "$COMMAND" | grep -qE 'vercel\s+env\s+rm'; then
+    block "vercel env rm removes an environment variable from production" "vercel-env-rm"
+  fi
+
+  # AWS destructive ops
+  if echo "$COMMAND" | grep -qE 'aws\s+s3\s+rb\s+.*--force'; then
+    block "aws s3 rb --force deletes an S3 bucket with all contents" "aws-s3-rb-force"
+  fi
+  if echo "$COMMAND" | grep -qE 'aws\s+rds\s+delete-db-(instance|cluster|snapshot)'; then
+    block "aws rds delete operation removes a database instance/cluster/snapshot" "aws-rds-delete"
+  fi
+  if echo "$COMMAND" | grep -qE 'aws\s+dynamodb\s+delete-table'; then
+    block "aws dynamodb delete-table removes a DynamoDB table" "aws-dynamodb-delete"
+  fi
+  if echo "$COMMAND" | grep -qE 'aws\s+ec2\s+terminate-instances'; then
+    block "aws ec2 terminate-instances destroys EC2 instances permanently" "aws-ec2-terminate"
+  fi
+
+  # GCP destructive ops
+  if echo "$COMMAND" | grep -qE 'gcloud\s+(projects\s+delete|sql\s+instances\s+delete)'; then
+    block "gcloud delete operation removes a project or SQL instance" "gcloud-delete"
+  fi
+
+  # Terraform destructive ops
+  if echo "$COMMAND" | grep -qE '(^|\s|;|&|\|)terraform\s+destroy'; then
+    block "terraform destroy tears down infrastructure" "terraform-destroy"
+  fi
+
+  # Kubernetes destructive ops
+  if echo "$COMMAND" | grep -qE 'kubectl\s+delete\s+(namespace|pv|pvc|deployment|statefulset)'; then
+    block "kubectl delete operation removes critical Kubernetes resources" "kubectl-delete-critical"
+  fi
+
+  # Docker volume / image deletion
+  if echo "$COMMAND" | grep -qE 'docker\s+(volume|system)\s+prune.*-f'; then
+    block "docker volume/system prune -f removes ALL unused volumes/data" "docker-prune"
+  fi
+
+  # Redis FLUSHALL / FLUSHDB
+  if echo "$COMMAND" | grep -qEi '(^|\s|;|&|\|)(redis-cli\s+)?(FLUSHALL|FLUSHDB)(\s|$)'; then
+    block "Redis FLUSHALL/FLUSHDB wipes the cache" "redis-flush"
+  fi
+fi  # end SKIP_DB_CHECKS
+
+# --- Git destructive operations ---
+# Force push (any form, any branch that isn't main/master — those are hard-blocked above)
 if echo "$COMMAND" | grep -qEi 'git\s+push(\s+\S+)*\s+(--force|-f)(\s|=|$)'; then
-  block "Force push detected" "git-force-push"
+  block "Force push detected. If you actually need this, confirm the target branch isn't shared or critical." "git-force-push"
 fi
 if echo "$COMMAND" | grep -qEi 'git\s+push.*--force-with-lease'; then
-  block "Force-push-with-lease still rewrites remote history" "git-force-lease"
+  block "Force-push-with-lease detected. Safer than --force but still rewrites remote history." "git-force-lease"
 fi
+
+# Push with --mirror (rewrites everything on remote)
 if echo "$COMMAND" | grep -qEi 'git\s+push\s+.*--mirror'; then
   block "git push --mirror can overwrite all remote refs" "git-mirror"
 fi
+
+# Push with --delete or :branch syntax (deletes remote branch)
 if echo "$COMMAND" | grep -qEi 'git\s+push\s+.*(--delete|:[A-Za-z0-9._/-]+\s*$)'; then
   block "Deleting a remote branch via push" "git-push-delete"
 fi
+
+# Reset --hard (destroys uncommitted work AND can drop local commits)
 if echo "$COMMAND" | grep -qEi 'git\s+reset\s+--hard'; then
-  block "git reset --hard drops uncommitted work and local commits" "git-reset-hard"
+  block "git reset --hard drops uncommitted work and can lose local commits" "git-reset-hard"
 fi
+
+# Branch force-delete
 if echo "$COMMAND" | grep -qEi 'git\s+branch\s+(-D|--delete\s+--force|-[a-zA-Z]*D[a-zA-Z]*)\s'; then
   block "Force-deleting a branch (git branch -D)" "git-branch-force-delete"
 fi
+
+# Clean (removes untracked / ignored files)
 if echo "$COMMAND" | grep -qEi 'git\s+clean\s+-[a-z]*f'; then
   block "git clean -f removes untracked files permanently" "git-clean"
 fi
+
+# Interactive rebase — can rewrite history arbitrarily
 if echo "$COMMAND" | grep -qEi 'git\s+rebase\s+(-i|--interactive)'; then
-  block "Interactive rebase can rewrite commits" "git-rebase-i"
+  block "Interactive rebase can rewrite commits. Confirm the branch isn't shared." "git-rebase-i"
 fi
+
+# Rebase --onto (advanced, frequently destructive)
 if echo "$COMMAND" | grep -qEi 'git\s+rebase\s+.*--onto'; then
-  block "git rebase --onto rewrites history" "git-rebase-onto"
+  block "git rebase --onto rewrites history in non-obvious ways" "git-rebase-onto"
 fi
+
+# Amend — rewrites the last commit, dangerous if already pushed
 if echo "$COMMAND" | grep -qEi 'git\s+commit\s+.*--amend'; then
-  block "git commit --amend rewrites the last commit" "git-amend"
+  block "git commit --amend rewrites the last commit. If already pushed, this requires force-push to remote." "git-amend"
 fi
+
+# Checkout with -- or restore that wipes working copy
 if echo "$COMMAND" | grep -qEi 'git\s+checkout\s+--\s+\.(\s|$)'; then
-  block "git checkout -- . wipes uncommitted changes" "git-checkout-wipe"
+  block "git checkout -- . wipes all uncommitted changes" "git-checkout-wipe"
 fi
 if echo "$COMMAND" | grep -qEi 'git\s+(restore|checkout)\s+\.(\s|$)'; then
-  block "git restore . / git checkout . wipes uncommitted changes" "git-restore-wipe"
+  block "git restore . / git checkout . wipes all uncommitted changes" "git-restore-wipe"
 fi
+
+# Checkout/restore FROM A REF over the working tree — silently overwrites unstaged
+# work (Opus 4.8 reached for `git checkout <ref> -- .` to "inspect" a branch and
+# nuked 14 unstaged files). Pattern: a ref token before `--`.
+# Safe read-only alternative is `git show <ref>:<path>` or `git worktree add`.
+if echo "$COMMAND" | grep -qEi 'git\s+checkout\s+[^ ]+\s+--(\s|$)'; then
+  block "git checkout <ref> -- <path> overwrites the working tree from a ref and destroys unstaged changes. To inspect a branch read-only use 'git show <ref>:<path>' or 'git worktree add'." "git-checkout-ref-overwrite"
+fi
+# git restore --source=<ref> ... does the same (pulls a ref over the working tree).
+if echo "$COMMAND" | grep -qEi 'git\s+restore\s+.*--source(=|[[:space:]])'; then
+  block "git restore --source=<ref> overwrites the working tree from a ref and destroys unstaged changes. Use 'git show <ref>:<path>' to inspect read-only." "git-restore-source-overwrite"
+fi
+
+# Broad staging (git add -A / --all / .) — a subagent
+# committing from a wrong branch-point with `git add -A` turns files-absent-in-the-
+# worktree into explicit DELETIONS that then fast-forward onto main. Stage named
+# files instead. Approvable if you genuinely mean "all".
+if echo "$COMMAND" | grep -qEi 'git\s+add\s+(-A|--all|\.|-[a-zA-Z]*A[a-zA-Z]*(\s|$))(\s|$)'; then
+  block "git add -A/--all/. stages everything including unintended deletions (the Opus 4.8 broad-staging data-loss pattern). Stage named files: 'git add path/to/file'. Approve only if you truly mean all." "git-add-all"
+fi
+
+# Stash drop / clear
 if echo "$COMMAND" | grep -qEi 'git\s+stash\s+(drop|clear)'; then
   block "git stash drop/clear permanently discards stashed work" "git-stash-drop"
 fi
-if echo "$COMMAND" | grep -qEi 'git\s+worktree\s+remove\s+.*(-f|--force)'; then
-  block "git worktree remove --force discards local changes" "git-worktree-force"
+
+# Stash pop / apply — the overwrite vector. An over-eager agent that pops a stash
+# onto the wrong branch (or auto-resolves the resulting conflict) silently
+# overwrites real work. This is the precise Opus-4.8 git-corruption report
+# (chained lint->commit->push->branch-switch left broken stashes over real work).
+if echo "$COMMAND" | grep -qEi 'git\s+stash\s+(pop|apply)'; then
+  block "git stash pop/apply can conflict-overwrite real work if popped onto the wrong/dirty branch. Confirm the target branch + tree state first (or re-apply manually)." "git-stash-pop"
 fi
 
-# Sudo
+# Chained stash + branch-switch in ONE command — the known antipattern. Stashing
+# then switching branches in the same command line strands uncommitted work on
+# the wrong branch and is what corrupted repos in the wild. Do it step by step
+# (so each step's tree state is visible) or use a dedicated worktree.
+if echo "$COMMAND" | grep -qEi 'git\s+stash(\s+(push|save))?(\s|$|&&|;)' \
+   && echo "$COMMAND" | grep -qEi 'git\s+(switch|checkout)\s+[^-]'; then
+  block "Chained 'git stash' + branch-switch in one command is the known git-corruption antipattern (strands/overwrites uncommitted work). Run the steps separately or use a git worktree." "git-stash-switch-chain"
+fi
+
+# Worktree remove --force
+if echo "$COMMAND" | grep -qEi 'git\s+worktree\s+remove\s+.*(-f|--force)'; then
+  block "git worktree remove --force discards local changes in the worktree" "git-worktree-force"
+fi
+
+# --- Sudo ---
 if echo "$COMMAND" | grep -qE '^\s*sudo\s'; then
   block "sudo command detected" "sudo"
 fi
 
-# ================= CATEGORY 3: PROTECTED FILES =================
+# === CATEGORY 3: PROTECTED FILES (approval required to edit) ===
 if [ -n "$FILE_PATH" ]; then
   if echo "$FILE_PATH" | grep -qEi '(\.env|\.env\.|id_rsa|id_ed25519|\.ssh/|\.gnupg/)'; then
     block "Edit to secrets/credentials file ($FILE_PATH)" "secrets"
   fi
 fi
 
+# === CATEGORY 3b: GATE-INTEGRITY FILES (C4 — Write/Edit HARD-BLOCKED) ===
+# The whole gate is worthless if the agent can edit the files that ARE the gate.
+# Three self-defeating vectors are closed here:
+#   1. data/approved.txt (project) / ~/.claude-approved.txt (global) — writing it
+#      is self-approval: the agent green-lights its own destructive op.
+#   2. .claude/hooks/* (project) AND ~/.claude/hooks/* (global) — overwriting
+#      safety-gate.sh (or any sibling hook) neuters enforcement.
+#   3. any settings.json / settings.local.json under a .claude dir — rewriting it
+#      unwires the gate from the PreToolUse matchers.
+# These are HARD-blocked (not even self-written approval opens them) precisely
+# because vector 1 would otherwise let the agent approve vectors 2 and 3. The
+# approval file is out-of-band only: {{user_name}} edits it in a real terminal, where this
+# hook does not run. Match on a NORMALIZED path (collapse `/./` and trailing `/`)
+# and use a path-segment-anchored regex so a benign file that merely CONTAINS the
+# substring (e.g. .../my-approved.txt.bak, .../settings.json.md) does not match.
+NORM_FILE_PATH=$(printf '%s' "$FILE_PATH" | sed -E 's#/\./#/#g; s#//+#/#g')
+if [ -n "$NORM_FILE_PATH" ]; then
+  # 1. approval store (project basename approved.txt, or global ~/.claude-approved.txt)
+  if printf '%s' "$NORM_FILE_PATH" | grep -qE '(^|/)(data/approved\.txt|\.claude-approved\.txt)$'; then
+    hard_block "Write/Edit to the safety-gate approval file ($FILE_PATH) is self-approval — it lets the agent green-light its own destructive ops. Only {{user_name}} edits this out-of-band in a real terminal." "protect-approval-file"
+  fi
+  # 2. any hook under a .claude/hooks dir (project .claude/hooks/* or global ~/.claude/hooks/*)
+  if printf '%s' "$NORM_FILE_PATH" | grep -qE '(^|/)\.claude/hooks/'; then
+    hard_block "Write/Edit to a .claude/hooks file ($FILE_PATH) would neuter the safety gate itself. Edit hooks out-of-band in a real terminal, then re-sync your hook copies." "protect-hook-files"
+  fi
+  # 3. any settings.json / settings.local.json under a .claude dir
+  if printf '%s' "$NORM_FILE_PATH" | grep -qE '(^|/)\.claude/([^/]+/)*settings(\.local)?\.json$'; then
+    hard_block "Write/Edit to a .claude settings.json ($FILE_PATH) could unwire the safety gate from its PreToolUse matchers. Edit it out-of-band in a real terminal." "protect-settings-json"
+  fi
+fi
+
+# === CATEGORY 4: WRITE-THEN-EXECUTE + FETCH-PIPE-TO-SHELL ========================
+# Ported (logic, not byte-copy) from a sibling agent gate.
+# PURELY ADDITIVE: every check above is untouched. Two new attack classes on the
+# Bash-COMMAND path only (MCP / Write / Edit calls have an empty $COMMAND, so the
+# guard below no-ops for them):
+#
+#   (3) Write-then-execute — the agent writes a payload via the Write tool into an
+#       UNGUARDED path (e.g. /tmp/x.sh or a new repo file) then runs it with an
+#       interpreter (bash/sh/zsh/python/node/ruby/perl/php), `source`, `.`, or a
+#       direct `./script`. A destructive command laundered through a file never
+#       goes near the direct-command greps above. We read that file's CONTENTS and
+#       judge them by the SAME destructive rules {{orchestrator_name}} already applies to a
+#       directly-typed command (GATE_DENY_* mirrors the CATEGORY-1/2/git patterns;
+#       GATE_SENSITIVE mirrors the CATEGORY-3/3b protected-file set). We scan a
+#       stripped copy (comments + quoted strings removed) so a mention of "rm" in a
+#       comment or an echo string is NOT a false positive.
+#   (4) Fetch-pipe-to-shell — `curl … | bash`, `wget -qO- … | sh`, `bash <(curl …)`,
+#       `eval "$(curl …)"`, and ${IFS}/quote-obfuscated variants.
+#
+# TRUST BOUNDARY ({{orchestrator_name}}-specific adaptation): {{orchestrator_name}}'s own scripts/*.sh are
+# first-party, reviewed, committed tools — ~21 of them legitimately contain `rm -rf`
+# on temp/test dirs. Blindly scanning every executed script would approval-gate
+# first-party maintenance scripts on every autonomous run = a regression. So an
+# executed script that is git-TRACKED and UNMODIFIED-vs-working-tree is TRUSTED and
+# its content is skipped; anything untracked, modified, or outside a repo is scanned.
+# A freshly-written payload is untracked/modified → scanned → blocked. Fail-safe:
+# any git ambiguity (no git, not a repo, error) defaults to SCAN.
+#
+# HONEST POSTURE: a bash-string denylist is DEFENSE IN
+# DEPTH, not a sandbox. It stops the model's honest mistakes and the obvious injected
+# forms; it cannot be airtight against a determined adversary (interpreter
+# indirection `p=rm;$p -rf`, `eval "$var"`, a payload committed to HEAD then run, a
+# script executed from a cwd we cannot model after an intervening `cd`). Blocks route
+# through the EXISTING block() so the Telegram-approval flow still applies.
+#
+# SYNC NOTE: GATE_DENY_A / GATE_RM_* / GATE_SENSITIVE mirror {{orchestrator_name}}'s inline
+# destructive patterns. If a new destructive pattern is added to the direct-command
+# checks above, mirror it here so a written-then-executed script is judged the same.
+
+GATE_SEP=$'\001'   # in-band separator sentinel (a byte no real command contains)
+GATE_ORCHESTRATOR_HOME="${ORCHESTRATOR_HOME:-{{project_path}}}"
+
+# Interpreters/fetchers used by layers 3 and 4.
+GATE_INTERP_ALT='(ba|z|k|da)?sh|python[0-9.]*|node|nodejs|ruby|perl|php'
+GATE_FETCH_PIPE_RE='(^|[^[:alnum:]_])(curl|wget|fetch)([^[:alnum:]_]).*\|[[:space:]]*(sudo[[:space:]]+)?('"$GATE_INTERP_ALT"')([[:space:]]|$)'
+GATE_FETCH_SUBST_RE='(^|[^[:alnum:]_])(eval|source|bash|sh|zsh|dash|ksh)[[:space:]].*[<$]\([[:space:]]*(sudo[[:space:]]+)?(curl|wget|fetch)([^[:alnum:]_]|$)'
+
+# No-whitelist destructive class (mirrors {{orchestrator_name}}'s CATEGORY-1/2/git patterns; run
+# case-insensitive to match {{orchestrator_name}}'s grep -Ei git/SQL checks).
+GATE_DENY_A='(mkfs\.|(^|[^[:alnum:]])dd[[:space:]]+if=|fdisk|diskutil[[:space:]]+erase|git[[:space:]]+filter-(branch|repo)|git[[:space:]]+update-ref[[:space:]]+-d|git[[:space:]]+reflog[[:space:]]+expire|git[[:space:]]+gc[[:space:]].*--(prune=now|aggressive)|git[[:space:]]+push([[:space:]]+[^[:space:]]+)*[[:space:]]+(--force|-f|--force-with-lease)([[:space:]]|=|$)|git[[:space:]]+push[[:space:]].*--(mirror|delete)|git[[:space:]]+reset[[:space:]]+--hard|git[[:space:]]+branch[[:space:]]+(-D|--delete[[:space:]]+--force|-[a-zA-Z]*D[a-zA-Z]*)[[:space:]]|git[[:space:]]+clean[[:space:]]+-[a-z]*f|git[[:space:]]+rebase[[:space:]]+(-i|--interactive|.*--onto)|git[[:space:]]+commit[[:space:]]+.*--amend|git[[:space:]]+checkout[[:space:]]+--[[:space:]]+\.([[:space:]]|$)|git[[:space:]]+(restore|checkout)[[:space:]]+\.([[:space:]]|$)|git[[:space:]]+checkout[[:space:]]+[^[:space:]]+[[:space:]]+--([[:space:]]|$)|git[[:space:]]+restore[[:space:]]+.*--source(=|[[:space:]])|git[[:space:]]+add[[:space:]]+(-A|--all|\.|-[a-zA-Z]*A[a-zA-Z]*([[:space:]]|$))([[:space:]]|$)|git[[:space:]]+stash[[:space:]]+(drop|clear|pop|apply)|git[[:space:]]+worktree[[:space:]]+remove[[:space:]]+.*(-f|--force)|(^|[^[:alnum:]])sudo[[:space:]]|DROP[[:space:]]+(TABLE|DATABASE|SCHEMA|USER|ROLE|INDEX|VIEW|TRIGGER|FUNCTION)|TRUNCATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE[[:space:]]+[A-Za-z0-9_."]+[[:space:]]+DROP[[:space:]]+COLUMN|(^|[^[:alnum:]])dropdb([[:space:]]|$)|(^|[^[:alnum:]])dropuser([[:space:]]|$)|(^|[^[:alnum:]])pg_drop_replication_slot|mysqladmin[[:space:]]+drop|\.dropDatabase\(\)|\.drop\(\)|\.deleteMany[[:space:]]*\([[:space:]]*\{[[:space:]]*\}|prisma[[:space:]]+migrate[[:space:]]+reset|prisma.*--force-reset|prisma[[:space:]]+db[[:space:]]+push.*--accept-data-loss|prisma[[:space:]]+migrate[[:space:]]+resolve.*--rolled-back|supabase[[:space:]]+db[[:space:]]+reset|supabase[[:space:]]+storage.*rm[[:space:]]|neon(ctl)?[[:space:]]+(branches?[[:space:]]+delete|projects?[[:space:]]+delete|databases?[[:space:]]+delete)|wrangler[[:space:]]+(r2[[:space:]]+bucket[[:space:]]+delete|kv[[:space:]]+namespace[[:space:]]+delete|d1[[:space:]]+delete|secret[[:space:]]+delete)|wrangler[[:space:]]+d1[[:space:]]+execute.*--remote.*DROP|vercel[[:space:]]+(remove|rm)[[:space:]]|vercel[[:space:]]+env[[:space:]]+rm|aws[[:space:]]+s3[[:space:]]+rb[[:space:]]+.*--force|aws[[:space:]]+rds[[:space:]]+delete-db-(instance|cluster|snapshot)|aws[[:space:]]+dynamodb[[:space:]]+delete-table|aws[[:space:]]+ec2[[:space:]]+terminate-instances|gcloud[[:space:]]+(projects[[:space:]]+delete|sql[[:space:]]+instances[[:space:]]+delete)|(^|[^[:alnum:]])terraform[[:space:]]+destroy|kubectl[[:space:]]+delete[[:space:]]+(namespace|pv|pvc|deployment|statefulset)|docker[[:space:]]+(volume|system)[[:space:]]+prune.*-f|(^|[^[:alnum:]])(redis-cli[[:space:]]+)?(FLUSHALL|FLUSHDB)([[:space:]]|$)|(^|[[:space:]/])codex[[:space:]]+(exec|agent|cloud|remote-control|app-server|exec-server|apply|sandbox)([[:space:]]|$))'
+
+# rm class (case-sensitive, per-segment) + the CLI-resource-removal whitelist that
+# {{orchestrator_name}} intentionally allows (git rm / npm rm / docker rm / vercel env rm / …).
+GATE_RM_RE='((^|[[:space:]]|[(`])rm[[:space:]]|(^|[[:space:]]|;|&|\|)(/usr)?/bin/rm[[:space:]])'
+GATE_RM_WHITELIST='(vercel[[:space:]]+(env|domains|alias)[[:space:]]+(rm|remove)|gh[[:space:]]+(secret|variable|env|release|label|repo|ssh-key|gpg-key|auth[[:space:]]+token)[[:space:]]+(rm|remove|delete)|docker[[:space:]]+(image|volume|network|container)?[[:space:]]*rm|npm[[:space:]]+rm|yarn[[:space:]]+remove|pnpm[[:space:]]+rm|bun[[:space:]]+remove|brew[[:space:]]+(uninstall|rm)|git[[:space:]]+rm)'
+
+# Protected-file set (mirrors {{orchestrator_name}}'s CATEGORY-3 secrets + CATEGORY-3b gate-integrity).
+GATE_SENSITIVE='(\.claude/hooks/|\.claude/([^/]*/)*settings(\.local)?\.json|(^|/)data/approved\.txt|(^|/)\.claude-approved\.txt|(^|/)\.env($|[^A-Za-z.])|(^|/)\.env\.|id_rsa|id_ed25519|\.ssh/|\.gnupg/)'
+
+# Strip quotes + collapse ${IFS}/$IFS whitespace evasion (does NOT touch $COMMAND).
+gate_normalise() {
+  printf '%s' "$1" | sed -e 's/["'"'"']//g' -e 's/${IFS}/ /g' -e 's/$IFS/ /g'
+}
+
+# Strip shell/py comments + quoted strings from a script body so we match real
+# invocations, not innocent mentions. Strings before comments so a '#' in a string
+# is handled first.
+gate_strip_noise() {
+  sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g' -e 's/#.*$//'
+}
+
+# Whitespace-normalise for structural matching: tab/CR -> space, squeeze spaces,
+# KEEP newlines (statement separators handled by the splitters).
+gate_build_flat() {
+  printf '%s' "$1" | tr '\t\r' '  ' | tr -s ' '
+}
+
+# Echo the first existing, readable, regular file among the resolution candidates
+# ($PWD, then the {{orchestrator_name}} workspace root, then the literal path).
+gate_resolve_file() {
+  local p="$1" c base
+  case "$p" in
+    /*)
+      [ -f "$p" ] && [ -r "$p" ] && { printf '%s' "$p"; return 0; }
+      return 1 ;;
+  esac
+  for base in "$PWD" "$GATE_ORCHESTRATOR_HOME"; do
+    [ -n "$base" ] || continue
+    c="$base/$p"
+    [ -f "$c" ] && [ -r "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  [ -f "$p" ] && [ -r "$p" ] && { printf '%s' "$p"; return 0; }
+  return 1
+}
+
+# TRUST BOUNDARY: true (0) if the file is git-tracked AND unmodified in its repo.
+# Fail-safe: git missing / not a repo / untracked / modified / any error => return 1
+# (NOT trusted => the content IS scanned).
+gate_is_trusted_script() {
+  local p="$1" dir base
+  command -v git >/dev/null 2>&1 || return 1
+  dir="$(dirname "$p")"; base="$(basename "$p")"
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  git -C "$dir" ls-files --error-unmatch -- "$base" >/dev/null 2>&1 || return 1
+  [ -z "$(git -C "$dir" status --porcelain -- "$base" 2>/dev/null)" ] || return 1
+  return 0
+}
+
+# True (0) if the text contains a {{orchestrator_name}}-denylisted destructive command. The rm
+# class + DELETE-without-WHERE are evaluated PER SEGMENT so a whitelisted `git rm`
+# on one line cannot mask an `rm -rf` on another (cross-line whitelist masking).
+gate_denylist_hit() {
+  local t="$1" seg s
+  printf '%s' "$t" | grep -iqE "$GATE_DENY_A" && return 0
+  s="${t//&&/$GATE_SEP}"; s="${s//||/$GATE_SEP}"; s="${s//;/$GATE_SEP}"; s="${s//|/$GATE_SEP}"; s="${s//&/$GATE_SEP}"; s="${s//$'\n'/$GATE_SEP}"
+  while IFS= read -r seg || [ -n "$seg" ]; do
+    [ -n "$seg" ] || continue
+    if ! printf '%s' "$seg" | grep -qE "$GATE_RM_WHITELIST"; then
+      printf '%s' "$seg" | grep -qE "$GATE_RM_RE" && return 0
+    fi
+    if printf '%s' "$seg" | grep -iqE 'DELETE[[:space:]]+FROM[[:space:]]+[A-Za-z0-9_."]+[[:space:]]*$'; then
+      return 0
+    fi
+    if printf '%s' "$seg" | grep -iqE 'DELETE[[:space:]]+FROM[[:space:]]+[A-Za-z0-9_."]+[[:space:]]+WHERE[[:space:]]+(1[[:space:]]*=[[:space:]]*1|true)([[:space:]]|;|$)'; then
+      return 0
+    fi
+  done < <(printf '%s' "$s" | tr "$GATE_SEP" '\n')
+  return 1
+}
+
+# True (0) if the text writes to a protected system file via the shell.
+gate_sensitive_write_hit() {
+  printf '%s' "$1" | grep -qE "(>|tee[[:space:]]|cp[[:space:]]|mv[[:space:]]|sed[[:space:]]+-i|chmod[[:space:]]).*$GATE_SENSITIVE"
+}
+
+# Read (bounded) a to-be-executed script and run its body through layers 1, 2, 4 —
+# UNLESS it is a trusted (committed + unmodified) first-party script.
+gate_scan_script_file() {
+  local f="$1" body bodyflat
+  [ -f "$f" ] && [ -r "$f" ] || return 0
+  gate_is_trusted_script "$f" && return 0
+  body="$(head -c 1048576 "$f" 2>/dev/null | gate_strip_noise)"
+  [ -n "$body" ] || return 0
+  if gate_denylist_hit "$body"; then
+    block "Executed script '$f' contains a destructive/data-loss command (write-then-exec)" "write-then-exec-deny"
+  fi
+  if gate_sensitive_write_hit "$body"; then
+    block "Executed script '$f' writes to a protected system file (write-then-exec)" "write-then-exec-sensitive"
+  fi
+  bodyflat="$(gate_build_flat "$body")"
+  gate_detect_fetch_pipe_shell "$bodyflat"
+}
+
+# Layer 4: split into statements (KEEP pipelines intact) and flag fetch->shell.
+gate_detect_fetch_pipe_shell() {
+  local flat="$1" seg s
+  s="${flat//&&/$GATE_SEP}"; s="${s//||/$GATE_SEP}"; s="${s//;/$GATE_SEP}"; s="${s//&/$GATE_SEP}"; s="${s//$'\n'/$GATE_SEP}"
+  while IFS= read -r seg || [ -n "$seg" ]; do
+    [ -n "$seg" ] || continue
+    if printf '%s' "$seg" | grep -iqE "$GATE_FETCH_PIPE_RE"; then
+      block "Network fetch piped into a shell/interpreter (curl|bash class)" "fetch-pipe-shell"
+    fi
+    if printf '%s' "$seg" | grep -iqE "$GATE_FETCH_SUBST_RE"; then
+      block "Network fetch executed via process/command substitution (curl|bash class)" "fetch-subst-shell"
+    fi
+  done < <(printf '%s' "$s" | tr "$GATE_SEP" '\n')
+}
+
+# Layer 3: split into fragments (also on the pipe) and deref any executed script.
+gate_detect_exec_targets() {
+  local flat="$1" frag s
+  s="${flat//&&/$GATE_SEP}"; s="${s//||/$GATE_SEP}"; s="${s//[;|&]/$GATE_SEP}"; s="${s//$'\n'/$GATE_SEP}"
+  while IFS= read -r frag || [ -n "$frag" ]; do
+    [ -n "$frag" ] || continue
+    gate_scan_fragment_for_exec "$frag"
+  done < <(printf '%s' "$s" | tr "$GATE_SEP" '\n')
+}
+
+# If a fragment invokes an interpreter/source on a file (or directly execs a local
+# script), resolve that file and scan its contents.
+gate_scan_fragment_for_exec() {
+  local frag="$1" first rest base is_interp=0 tok f="" resolved guard=0
+  while [ "${frag# }" != "$frag" ]; do frag="${frag# }"; done
+  while [ "${frag% }" != "$frag" ]; do frag="${frag% }"; done
+  [ -n "$frag" ] || return 0
+
+  # strip leading command wrappers + inline VAR=val assignments (bounded)
+  while [ "$guard" -lt 8 ]; do
+    guard=$((guard + 1))
+    first="${frag%% *}"
+    case "$first" in
+      sudo|command|nice|nohup|time|exec|\\)
+        frag="${frag#"$first"}"
+        while [ "${frag# }" != "$frag" ]; do frag="${frag# }"; done ;;
+      env)
+        frag="${frag#env}"
+        while [ "${frag# }" != "$frag" ]; do frag="${frag# }"; done
+        while :; do
+          first="${frag%% *}"
+          case "$first" in
+            *=*) frag="${frag#"$first"}"; while [ "${frag# }" != "$frag" ]; do frag="${frag# }"; done ;;
+            *) break ;;
+          esac
+        done ;;
+      *=*)
+        frag="${frag#"$first"}"
+        while [ "${frag# }" != "$frag" ]; do frag="${frag# }"; done ;;
+      *) break ;;
+    esac
+  done
+
+  first="${frag%% *}"
+  [ -n "$first" ] || return 0
+  base="${first##*/}"
+  case "$base" in
+    bash|sh|zsh|dash|ksh|python|python2|python3|python3.[0-9]*|node|nodejs|ruby|perl|php|source) is_interp=1 ;;
+    .) is_interp=1 ;;
+  esac
+
+  if [ "$is_interp" -eq 1 ]; then
+    rest="${frag#"$first"}"
+    set -f
+    # shellcheck disable=SC2086
+    for tok in $rest; do
+      case "$tok" in
+        -c|-e|-r|-p|--command|--eval|--exec|-m)
+          set +f; return 0 ;;   # inline code / module — already scanned in the raw string
+        \<*)
+          f="${tok#<}"; [ -n "$f" ] && break ;;
+        -*)
+          continue ;;
+        *)
+          f="$tok"; break ;;
+      esac
+    done
+    set +f
+    if [ -n "$f" ] && resolved="$(gate_resolve_file "$f")"; then
+      gate_scan_script_file "$resolved"
+    fi
+    return 0
+  fi
+
+  # direct exec of a local script: ./x.sh, ../x.sh, /abs/x.sh, dir/x.sh
+  case "$first" in
+    ./*|../*|/*|*/*)
+      if resolved="$(gate_resolve_file "$first")"; then
+        case "$resolved" in
+          *.sh|*.bash|*.zsh|*.py|*.rb|*.pl|*.php|*.js|*.mjs|*.cjs) gate_scan_script_file "$resolved" ;;
+          *) head -c 2 "$resolved" 2>/dev/null | grep -q '#!' && gate_scan_script_file "$resolved" ;;
+        esac
+      fi ;;
+  esac
+  return 0
+}
+
+# Only the Bash-COMMAND path runs these (MCP/Write/Edit have an empty $COMMAND).
+if [ -n "$COMMAND" ]; then
+  GATE_FLAT="$(gate_build_flat "$(gate_normalise "$COMMAND")")"
+  gate_detect_fetch_pipe_shell "$GATE_FLAT"   # 4. curl|bash directly on the command line
+  gate_detect_exec_targets "$GATE_FLAT"       # 3. write-then-execute of a local script
+fi
+
+# All clear
+emit_decision "allow"
 exit 0
 ```
 
@@ -1132,7 +2102,176 @@ fi
 
 ## Template: scripts/history.sh
 
-Unified history search across four sources in one pass: Telegram JSONL history, audit logs (live `data/audit/*.jsonl` and archived `data/audit/archive/YYYY/MM.jsonl.gz`), `git log`, and memory markdown. Supports `--from YYYY-MM-DD` / `--to YYYY-MM-DD` date range filters. Ships as `scripts/history.sh` in the reference implementation - copy that file verbatim. The `history <query>` command wraps it.
+Unified history search across four sources in one pass: Telegram JSONL history, audit logs (live `data/audit/*.jsonl` and archived `data/audit/archive/YYYY/MM.jsonl.gz`), `git log`, and memory markdown. Supports `--from YYYY-MM-DD` / `--to YYYY-MM-DD` date range filters and `--only <source>` to restrict the sweep. Output is grouped by source, so you can see which corpus a signal came from rather than a flat merged list. The `history <query>` command wraps it. Requires `jq`.
+
+Note `--help` prints the header block by line range (`sed -n '3,22p'`), so if you edit the usage comment keep it the same length or fix that range to match.
+
+```bash
+#!/usr/bin/env bash
+# history — unified search across every durable {{orchestrator_name}} history source.
+#
+# Greps a query (or date range) across:
+#   1. Telegram conversation history (data/telegram-history/*.jsonl)
+#   2. Live audit log        (data/audit/*.jsonl)
+#   3. Archived audit log    (data/audit/archive/**/*.jsonl.gz)
+#   4. Git commit history    (log + messages)
+#   5. Memory markdown       (memory/ + agent-memory/)
+#
+# Output is grouped by source so you can see where a signal came from.
+#
+# Usage:
+#   bash scripts/history.sh <query>                          # full-corpus search
+#   bash scripts/history.sh <query> --from 2026-04-10        # on/after date
+#   bash scripts/history.sh <query> --from 2026-04-10 --to 2026-04-20
+#   bash scripts/history.sh --only telegram  "invoice"       # restrict sources
+#
+# Notes:
+# - Case-insensitive by default.
+# - --only accepts: telegram, audit, git, memory, all (default)
+# - Date filters applied only where per-record timestamps are parseable.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+QUERY=""
+FROM=""
+TO=""
+ONLY="all"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --from) FROM="$2"; shift 2 ;;
+    --to) TO="$2"; shift 2 ;;
+    --only) ONLY="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+      exit 0
+      ;;
+    --*) echo "Unknown flag: $1" >&2; exit 2 ;;
+    *)
+      if [ -z "$QUERY" ]; then QUERY="$1"; else QUERY="$QUERY $1"; fi
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$QUERY" ] && [ -z "$FROM" ] && [ -z "$TO" ]; then
+  echo "Usage: history <query> [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--only telegram|audit|git|memory|all]" >&2
+  exit 2
+fi
+
+in_range() {
+  # args: ts (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS...)
+  local ts="$1"
+  ts="${ts:0:10}"
+  [ -n "$FROM" ] && [[ "$ts" < "$FROM" ]] && return 1
+  [ -n "$TO" ] && [[ "$ts" > "$TO" ]] && return 1
+  return 0
+}
+
+should_include() {
+  # args: source name (telegram|audit|git|memory)
+  [ "$ONLY" = "all" ] && return 0
+  [ "$ONLY" = "$1" ] && return 0
+  return 1
+}
+
+matches_query() {
+  [ -z "$QUERY" ] && return 0
+  # case-insensitive grep
+  echo "$1" | grep -iqF "$QUERY"
+}
+
+hit_count=0
+print_section() {
+  printf "\n\033[1m=== %s ===\033[0m\n" "$1"
+}
+
+# --- 1. Telegram history ----------------------------------------------
+if should_include telegram; then
+  print_section "Telegram history"
+  local_count=0
+  for f in "$REPO_ROOT/data/telegram-history/"*.jsonl; do
+    [ -f "$f" ] || continue
+    while IFS= read -r line; do
+      ts="$(echo "$line" | jq -r '.ts // empty' 2>/dev/null)"
+      [ -z "$ts" ] && continue
+      in_range "$ts" || continue
+      text="$(echo "$line" | jq -r '"\(.sender // "?"): \(.text // "")"' 2>/dev/null)"
+      [ -z "$text" ] && continue
+      if matches_query "$text"; then
+        printf "[%s] %s\n" "${ts:0:16}" "${text:0:160}"
+        local_count=$((local_count + 1))
+        hit_count=$((hit_count + 1))
+      fi
+    done < "$f"
+  done
+  [ "$local_count" = "0" ] && echo "  (no matches)"
+fi
+
+# --- 2. Audit live ----------------------------------------------------
+audit_grep() {
+  # args: source file (stream), tag
+  local stream="$1" tag="$2"
+  local n=0
+  while IFS= read -r line; do
+    ts="$(echo "$line" | jq -r '.ts // empty' 2>/dev/null)"
+    [ -z "$ts" ] && continue
+    in_range "$ts" || continue
+    if matches_query "$line"; then
+      tool="$(echo "$line" | jq -r '.tool // "?"' 2>/dev/null)"
+      cmd="$(echo "$line" | jq -r '(.args.command // .args.path // .args.query // .args.pattern // "") | tostring' 2>/dev/null | head -c 160)"
+      printf "[%s] %-18s %s\n" "${ts:0:16}" "$tool" "$cmd"
+      n=$((n + 1))
+      hit_count=$((hit_count + 1))
+    fi
+  done
+  echo "  ($n hit(s) from $tag)"
+}
+
+if should_include audit; then
+  print_section "Audit log (live + archived)"
+  for f in "$REPO_ROOT/data/audit/"*.jsonl; do
+    [ -f "$f" ] || continue
+    cat "$f" | audit_grep - "$(basename "$f")"
+  done
+  for f in "$REPO_ROOT/data/audit/archive/"*/*.jsonl.gz; do
+    [ -f "$f" ] || continue
+    zcat "$f" | audit_grep - "archive/$(basename "$(dirname "$f")")/$(basename "$f")"
+  done
+fi
+
+# --- 3. Git log -------------------------------------------------------
+if should_include git; then
+  print_section "Git commit log"
+  git_args=()
+  [ -n "$FROM" ] && git_args+=(--since="$FROM")
+  [ -n "$TO" ]   && git_args+=(--until="$TO 23:59:59")
+  if [ -n "$QUERY" ]; then
+    git_args+=(--grep="$QUERY" --regexp-ignore-case)
+  fi
+  git -C "$REPO_ROOT" log "${git_args[@]}" --oneline --date=short --pretty='[%ad] %h %s' 2>/dev/null | head -40 || true
+fi
+
+# --- 4. Memory markdown -----------------------------------------------
+if should_include memory; then
+  print_section "Memory files (content match)"
+  if [ -n "$QUERY" ]; then
+    # --exclude-dir='.*' keeps dot-prefixed private carveouts out of history
+    # search. grep -r already recurses into memory/semantic/<type>/ etc.
+    grep -ril --include='*.md' --exclude-dir='.*' -- "$QUERY" "$REPO_ROOT/memory" "$REPO_ROOT/agent-memory" 2>/dev/null | head -30 | while IFS= read -r f; do
+      rel="${f#$REPO_ROOT/}"
+      printf "  %s\n" "$rel"
+    done
+  else
+    echo "  (no query — skipped)"
+  fi
+fi
+
+echo ""
+printf "Total hits: %d\n" "$hit_count"
+```
 
 ---
 
@@ -1952,29 +3091,84 @@ done
 
 ## Template: scripts/redact-secrets.sh
 
-`stdin-to-stdout filter that masks common credential patterns before content lands on disk (HANDOFF.md, reflections, telegram tail embeds). Mac/Linux compatible BSD/GNU sed -E. Pattern regexes are the script's value, not placeholders.`
+Credential scrubber: a stdin-to-stdout filter that masks secrets before content
+lands on disk or leaves the machine. `codex.sh` pipes every payload through it,
+so this file is the boundary between a review bundle and a leaked key — which is
+why the whole thing ships. The block this replaces knew 5 of the 23 credential
+classes below; a JWT, a database URL with a password in it, an `Authorization:
+Bearer` header, and a multi-line private key all passed through it untouched.
+
+Two stages. `awk` first, to collapse multi-line PEM `PRIVATE KEY` blocks — sed is
+line-oriented and cannot span them. Then the single-line rules, where **order is
+load-bearing**: specific service prefixes must run before the generic `sk-…` and
+the raw-base64 catch-all, or the wrong marker wins.
+
+The regexes are the value here; there is nothing to parameterise. POSIX
+character classes throughout, so it behaves the same under BSD sed (macOS) and
+GNU sed (Linux/WSL). The final raw-base64 rule is deliberately greedy and will
+sometimes eat legitimate base64 — that trade is intentional.
 
 ```bash
 #!/usr/bin/env bash
-# redact-secrets: stdin→stdout filter that masks common credential patterns.
+# redact-secrets — stdin→stdout filter that masks common credential patterns.
 #
-# Used by update-handoff.sh and reflect.sh before embedding telegram tail
-# content into files that land on disk (HANDOFF.md, reflections). Defends
-# against the case where any committed file leaks a credential into a public
-# fork / clone / context-bundle later.
+# Used by update-handoff.sh, reflect.sh and the Codex wrapper before content
+# lands on disk or leaves the machine (HANDOFF.md, reflections, review
+# bundles). Those files get committed: a credential that reaches one becomes
+# a total-account-compromise risk the moment the repo is forked, flipped
+# public, or handed to a tool as context.
+#
+# Two-stage pipeline:
+#   Stage 1 (awk): collapse multiline PEM "-----BEGIN ... PRIVATE KEY-----"
+#                  … "-----END … PRIVATE KEY-----" blocks to one marker line.
+#                  sed is line-oriented and cannot span the block cleanly.
+#   Stage 2 (sed): the single-line credential rules below. Order matters —
+#                  specific service prefixes run BEFORE the generic sk-… and
+#                  the raw base64 catch-all so the correct marker wins.
 #
 # Patterns covered:
-#   - Anthropic:        sk-ant-api-... / sk-ant-...
-#   - Stripe:           sk_live_... / sk_test_...
-#   - GitHub PAT:       ghp_... / github_pat_...
-#   - Slack:            xoxb-... / xoxp-... / xoxa-...
-#   - Telegram bot:     digits:AA... 33-char token form
-#   - OpenAI / generic: sk-... 20+ char
-#   - AWS access key:   AKIA[0-9A-Z]{16}
-#   - Vercel API token: vcp_...
-#   - Bearer-ish URLs:  token=XXXXX in query strings
+#   - Anthropic:        sk-ant-api-... / sk-ant-...            → REDACTED_ANTHROPIC
+#   - JWT (base64url):  eyJ....<b64>.<b64>                     → REDACTED_JWT
+#                       covers Supabase LEGACY anon/service_role, Auth0, Firebase, GCP id-tokens
+#   - Supabase new keys: sb_secret_... / sb_publishable_...    → REDACTED_SUPABASE_SECRET / _PUBLISHABLE
+#                       (2026-era non-JWT format; too short for the base64 catch-all)
+#   - Google OAuth:     ya29....                               → REDACTED_GOOGLE_OAUTH
+#   - Google API key:   AIza + 35 chars (Maps, Gemini, etc.)  → REDACTED_GOOGLE_API_KEY
+#   - SendGrid:         SG.<22>.<43>                           → REDACTED_SENDGRID
+#   - Twilio:           AC<32 hex> / SK<32 hex>               → REDACTED_TWILIO
+#   - Stripe:           sk_live_ / sk_test_ / pk|rk_live|test_ → REDACTED_STRIPE_*
+#   - GitHub:           gh[pousr]_... / github_pat_...         → REDACTED_GITHUB_PAT
+#   - Slack:            xox[baprs]-...                         → REDACTED_SLACK
+#   - Telegram bot:     digits:AA... 33-char token form        → REDACTED_TELEGRAM_BOT
+#   - AWS access key:   AKIA[0-9A-Z]{16}                       → REDACTED_AWS_KEY
+#   - OpenAI / generic: sk-proj- / sk-svcacct- / sk-... 20+    → REDACTED_OPENAI*
+#   - Vercel API token: vcp_...                                → REDACTED_VERCEL_TOKEN
+#   - Exchange token:   cxtk_... (agent-to-agent relay)     → REDACTED_EXCHANGE_TOKEN
+#   - Polar / Resend:   polar_..._... / re_...                 → REDACTED_POLAR_TOKEN / RESEND_KEY
+#   - PEM private key:  -----BEGIN … PRIVATE KEY----- block    → REDACTED_PRIVATE_KEY
+#   - DB URLs w/ creds: scheme://user:pass@host                → scheme://REDACTED_DBURL@host
+#   - Assignment forms: token= / api_key= / password= / secret= / client_secret=
+#                       / aws_secret_access_key= <value>       → …=REDACTED
+#   - Authorization:    Authorization: Bearer <token> / Bearer <token> → REDACTED_BEARER
+#   - MASTER_KEY:       master_key=... / x-master-key: ...      → REDACTED_MASTER_KEY
+#   - Near-keyword:     "master key <value>", "api key = <value>" etc. → REDACTED_NEAR_KEYWORD
+#   - Raw long base64:  any 60+ char run of [A-Za-z0-9+/] with optional ==
+#                       padding. Catches credentials posted bare without a
+#                       prefix (added 2026-05-03 after MASTER_KEY paste).
+#                       Trade-off: may over-match legitimate base64 in URLs
+#                       and embedded payloads — safety wins over readability.
+#                       This is the ONE deliberately-greedy rule; it predates
+#                       the 2026-07 hardening and is kept for defense-in-depth.
+#   - Bare strong password: Capital letter + letters + digits + a symbol,
+#                       e.g. "SuperAdmin123!" — the classic complexity-rule
+#                       shape, sent with no "password:" label (added
+#                       2026-07-20 after a bare email+password pair arrived
+#                       over Telegram with no prefix the other rules could
+#                       key off). Narrow/conservative: requires the exact
+#                       Cap+letters+digits+symbol run so ordinary prose can't
+#                       match it.                    → REDACTED_PASSWORD_LIKE
 #
-# Replacement: REDACTED_<type>. Same length not preserved; readability wins
+# Replacement: REDACTED_<type>. Same length not preserved — readability wins
 # over format-preservation here.
 #
 # Usage:
@@ -1983,22 +3177,61 @@ done
 
 set -uo pipefail
 
-# Chain of sed rules. BSD sed (macOS default) supports -E but not \d, so use
-# POSIX character classes. GNU sed (Linux / Windows-WSL) accepts the same -E
-# regex syntax, no branching needed.
+# Stage 1 — collapse multiline PEM PRIVATE KEY blocks. A block that opens and
+# closes on the SAME physical line does NOT arm the swallow flag (that inline
+# case is handled by sed below); only a genuine multiline block is swallowed.
+# Only "PRIVATE KEY" armours match — public keys and certificates are not secret.
+awk '
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/ {
+    print "REDACTED_PRIVATE_KEY"
+    if ($0 !~ /-----END [A-Z0-9 ]*PRIVATE KEY-----/) inkey = 1
+    next
+  }
+  inkey && /-----END [A-Z0-9 ]*PRIVATE KEY-----/ { inkey = 0; next }
+  inkey { next }
+  { print }
+' | \
+# Stage 2 — single-line credential rules. BSD sed (macOS default) supports -E
+# but not \d, so use POSIX character classes. Per-rule delimiters (#) are used
+# where the pattern contains a literal slash, to avoid escaping.
 sed -E \
   -e 's/sk-ant-api[0-9]*-[A-Za-z0-9_-]{20,}/REDACTED_ANTHROPIC/g' \
   -e 's/sk-ant-[A-Za-z0-9_-]{20,}/REDACTED_ANTHROPIC/g' \
+  -e 's/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{6,}/REDACTED_JWT/g' \
+  -e 's/sb_secret_[A-Za-z0-9_]{16,}/REDACTED_SUPABASE_SECRET/g' \
+  -e 's/sb_publishable_[A-Za-z0-9_]{16,}/REDACTED_SUPABASE_PUBLISHABLE/g' \
+  -e 's/ya29\.[0-9A-Za-z_-]{20,}/REDACTED_GOOGLE_OAUTH/g' \
+  -e 's/AIza[0-9A-Za-z_-]{35,}/REDACTED_GOOGLE_API_KEY/g' \
+  -e 's/(^|[^A-Za-z0-9])SG\.[A-Za-z0-9_-]{22,}\.[A-Za-z0-9_-]{43,}/\1REDACTED_SENDGRID/g' \
+  -e 's/(^|[^A-Za-z0-9])AC[0-9a-fA-F]{32}/\1REDACTED_TWILIO/g' \
+  -e 's/(^|[^A-Za-z0-9])SK[0-9a-fA-F]{32}/\1REDACTED_TWILIO/g' \
   -e 's/sk_live_[A-Za-z0-9]{20,}/REDACTED_STRIPE_LIVE/g' \
   -e 's/sk_test_[A-Za-z0-9]{20,}/REDACTED_STRIPE_TEST/g' \
-  -e 's/ghp_[A-Za-z0-9]{30,}/REDACTED_GITHUB_PAT/g' \
+  -e 's/(^|[^A-Za-z0-9])(pk|rk)_(live|test)_[0-9A-Za-z]{16,}/\1REDACTED_STRIPE_KEY/g' \
+  -e 's/gh[pousr]_[A-Za-z0-9]{30,}/REDACTED_GITHUB_PAT/g' \
   -e 's/github_pat_[A-Za-z0-9_]{40,}/REDACTED_GITHUB_PAT/g' \
-  -e 's/xox[bap]-[A-Za-z0-9-]{30,}/REDACTED_SLACK/g' \
+  -e 's/xox[baprs]-[A-Za-z0-9-]{10,}/REDACTED_SLACK/g' \
   -e 's/[0-9]{8,10}:AA[A-Za-z0-9_-]{33}/REDACTED_TELEGRAM_BOT/g' \
   -e 's/AKIA[0-9A-Z]{16}/REDACTED_AWS_KEY/g' \
   -e 's/vcp_[A-Za-z0-9]{20,}/REDACTED_VERCEL_TOKEN/g' \
-  -e 's/(token|api_key|apikey|access_token)=[A-Za-z0-9_.-]{20,}/\1=REDACTED/gi' \
-  -e 's/sk-[A-Za-z0-9]{20,}/REDACTED_OPENAI/g'
+  -e 's/cxtk_[A-Za-z0-9]{20,}/REDACTED_EXCHANGE_TOKEN/g' \
+  -e 's/polar_[a-z]+_[A-Za-z0-9_.-]{20,}/REDACTED_POLAR_TOKEN/g' \
+  -e 's/(^|[^A-Za-z0-9])re_[A-Za-z0-9_]{16,}/\1REDACTED_RESEND_KEY/g' \
+  -e 's/sk-proj-[A-Za-z0-9_-]{20,}/REDACTED_OPENAI_PROJECT/g' \
+  -e 's/sk-svcacct-[A-Za-z0-9_-]{20,}/REDACTED_OPENAI_SERVICE/g' \
+  -e 's/sk-[A-Za-z0-9]{20,}/REDACTED_OPENAI/g' \
+  -e 's#(postgres(ql)?|mysql|mariadb|mongodb([+]srv)?|rediss?|amqps?)://[^[:space:]:@/]+:[^[:space:]@/]+@#\1://REDACTED_DBURL@#g' \
+  -e 's/(token|api_key|apikey|access_token|master_key|MASTER_KEY)=[A-Za-z0-9_.-]{20,}/\1=REDACTED/gi' \
+  -e 's#(password|passwd|pwd|client_secret|api[_-]?secret|aws_secret_access_key)([[:space:]]*[=:][[:space:]]*['"'"'"]?)[^[:space:]'"'"'";,&]{8,}#\1\2REDACTED#gi' \
+  -e 's#([Aa]uthorization:[[:space:]]*[Bb]earer[[:space:]]+)[A-Za-z0-9._~+/=-]{10,}#\1REDACTED_BEARER#g' \
+  -e 's#([Bb]earer[[:space:]]+)[A-Za-z0-9._~+/=-]{20,}#\1REDACTED_BEARER#g' \
+  -e 's/(x-master-key:|master_key:|MASTER_KEY:)[[:space:]]*[A-Za-z0-9_.\/-]{20,}/\1 REDACTED_MASTER_KEY/gi' \
+  -e 's/(master[ _-]?key|api[ _-]?key|password|secret|token|bearer|credential|access[ _-]?key)([[:space:]]+(is|=|:))?[[:space:]]+[A-Za-z0-9+/=_-]{40,}/\1 REDACTED_NEAR_KEYWORD/gi' \
+  -e 's#-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*-----END [A-Z0-9 ]*PRIVATE KEY-----#REDACTED_PRIVATE_KEY#g' \
+  -e 's#-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----#REDACTED_PRIVATE_KEY#g' \
+  -e 's/(^|[^A-Za-z0-9])[A-Z][A-Za-z]{2,}[0-9]{1,4}[!@#$%^&*][^A-Za-z0-9]/\1REDACTED_PASSWORD_LIKE /g' \
+  -e 's/(^|[^A-Za-z0-9])[A-Z][A-Za-z]{2,}[0-9]{1,4}[!@#$%^&*]$/\1REDACTED_PASSWORD_LIKE/g' \
+  -e 's/(^|[^A-Za-z0-9+/=])[A-Za-z0-9+/]{60,}={0,2}([^A-Za-z0-9+/=]|$)/\1REDACTED_LONG_BASE64\2/g'
 ```
 
 ---
@@ -3196,7 +4429,21 @@ echo "($COUNT entries collapsed into 1 rule, logged to $PROMOTED_LOG)"
 
 ## Template: scripts/log-telegram.sh
 
-`Append a Telegram message to the monthly JSONL ledger at data/telegram-history/YYYY-MM.jsonl. Outbound is auto-logged by the PostToolUse hook on every reply call; inbound is logged manually after the reply tool fires (NEVER before, that's user-visible latency).`
+`Append a Telegram message to the monthly JSONL ledger at data/telegram-history/YYYY-MM.jsonl. Redacts credential-shaped substrings from the text BEFORE it reaches any sink (this file, a dashboard sidecar, or a remote push, if you have those wired downstream of this script). Outbound is auto-logged by the PostToolUse hook on every reply call; inbound is logged manually after the reply tool fires (NEVER before, that's user-visible latency).`
+
+⚠️ **Read this before you wire the inbound call — it is the whole reason this script takes a FILE PATH and not the message text.** The obvious call, and the one an orchestrator will write for itself unless you stop it, is:
+
+`bash scripts/log-telegram.sh "user" "<msg>" "<project>" false`
+
+That puts the sender's **raw inbound text inside a double-quoted bash word**, and double quotes do not stop command substitution. A message containing `` ` `` or `$( )` therefore **executes in your orchestrator's shell before this script ever runs**, and the output lands in the log the rest of your system reconciles against. No attacker is needed: a pasted markdown snippet with backticks is an ordinary thing to send and triggers it by accident.
+
+**Nothing the script can do fixes that** — the expansion happens in the caller's shell, before `argv` exists. Only the call pattern can. So this template takes `--text-file` **and nothing else**: the orchestrator writes the message with its file-writing tool (which never touches a shell) and passes the path. A path is a fixed, well-formed token; the message body never enters a command string.
+
+```
+bash scripts/log-telegram.sh --text-file /abs/path/to/msg.txt <sender> [project] [has_image]
+```
+
+If you are adapting an existing logger, **do not keep the positional form "for compatibility"** — a compatibility path that is unsafe for untrusted text is just the vulnerability with a longer name, and the pasted-backticks case will find it.
 
 <!-- Only generate if messaging=telegram -->
 
@@ -3204,29 +4451,90 @@ echo "($COUNT entries collapsed into 1 rule, logged to $PROMOTED_LOG)"
 #!/usr/bin/env bash
 # Log a Telegram message to the monthly JSONL file.
 #
-# Usage: bash scripts/log-telegram.sh <sender> <text> [project] [has_image]
-#   sender:    "{{user_name_lower}}" or "{{orchestrator_name_lower}}"
-#   text:      message content
-#   project:   optional project name
-#   has_image: "true" or "false" (default false)
+# Usage: bash scripts/log-telegram.sh --text-file <path> <sender> [project] [has_image] [--image-path /abs/path]
+#   --text-file: REQUIRED. Path to a file containing the message body.
+#   sender:      "{{user_name_lower}}" or "{{orchestrator_name_lower}}"
+#   project:     optional project name
+#   has_image:   "true" or "false" (default false)
+#   --image-path: optional local file path. Recorded in the log only.
+#
+# WHY --text-file IS THE ONLY ACCEPTED FORM (command injection)
+# ------------------------------------------------------------------
+# The natural call is:
+#     bash scripts/log-telegram.sh "{{user_name_lower}}" "<msg>" "<project>" false
+# where <msg> is RAW inbound text pasted into a shell command string. Double
+# quotes do NOT stop command substitution, so a message containing $(...) or
+# backticks EXECUTES before this script runs. Demonstrated:
+#     msg='hello $(id -un) world'  ->  logged as "hello youruser world"
+#     msg='see `id -un` here'      ->  logged as "see youruser here"
+# No attacker is required — a pasted markdown snippet with backticks, an
+# ordinary thing to send, triggers it by accident and silently corrupts the
+# log that everything else reconciles against.
+#
+# NOTHING THIS SCRIPT CAN DO FIXES THAT: the expansion happens in the caller's
+# shell, before argv exists. Only the CALL PATTERN can be fixed. So the only
+# accepted path has no shell interpolation at all — the orchestrator writes the
+# message with its file-writing tool (which never touches a shell) and passes
+# the PATH. A positional text form is deliberately NOT offered: keeping one
+# "for compatibility" preserves the exact hole this closes.
 #
 # IMPORTANT: never call this BEFORE the reply tool. It adds 1-2s of
 # user-visible latency. Outbound is already auto-logged by the PostToolUse
 # hook (see .claude/hooks/log-telegram-hook.sh). Inbound is the only
 # remaining manual call.
 
-set -euo pipefail
+set -uo pipefail
 
-SENDER="${1:?Usage: log-telegram.sh <sender> <text> [project] [has_image]}"
-TEXT="${2:?Usage: log-telegram.sh <sender> <text> [project] [has_image]}"
-PROJECT="${3:-}"
-HAS_IMAGE="${4:-false}"
+if [ "${1:-}" != "--text-file" ]; then
+  echo "log-telegram.sh: --text-file is REQUIRED." >&2
+  echo "  Usage: log-telegram.sh --text-file <path> <sender> [project] [has_image]" >&2
+  echo "  Passing the message as a positional argument allows command" >&2
+  echo "  substitution in the CALLER's shell. Write the text to a file first." >&2
+  exit 2
+fi
+
+TEXT_FILE="${2:?--text-file needs a path}"
+[ -r "$TEXT_FILE" ] || { echo "log-telegram.sh: cannot read $TEXT_FILE" >&2; exit 1; }
+TEXT="$(cat "$TEXT_FILE")"
+SENDER="${3:?Usage: log-telegram.sh --text-file <path> <sender> [project] [has_image]}"
+PROJECT="${4:-}"
+HAS_IMAGE="${5:-false}"
+
+# Optional --image-path /abs/path, parsed after the fixed arguments.
+IMAGE_PATH=""
+shift 5 2>/dev/null || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --image-path) IMAGE_PATH="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Redact credentials ONCE, here, before $TEXT reaches this file or any other
+# sink you wire downstream of it (a dashboard sidecar, a remote push, etc).
+# See "Redact at the point of write, not downstream" earlier in this guide —
+# fixing it where the data enters means every sink inherits it for free.
+# Fails OPEN on a redactor error: losing the message is worse than logging it
+# unredacted to a private sink, and the redactor is defence in depth, not a
+# licence to paste credentials into chat in the first place. It only knows the
+# patterns it knows, so "check the redactor covers it first" still stands.
+REDACTOR="$SCRIPT_DIR/redact-secrets.sh"
+if [[ -x "$REDACTOR" || -f "$REDACTOR" ]]; then
+  REDACTED=$(printf '%s' "$TEXT" | bash "$REDACTOR" 2>/dev/null) && [[ -n "$REDACTED" ]] && TEXT="$REDACTED"
+fi
+
 HISTORY_DIR="$SCRIPT_DIR/../data/telegram-history"
 MONTH_FILE="$HISTORY_DIR/$(date -u +%Y-%m).jsonl"
 
 mkdir -p "$HISTORY_DIR"
+
+# An image path supplied on the command line implies has_image, so the record
+# stays consistent with whatever renders it.
+if [[ -n "$IMAGE_PATH" && -f "$IMAGE_PATH" ]]; then
+  HAS_IMAGE="true"
+fi
 
 jq -nc \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
@@ -3236,6 +4544,12 @@ jq -nc \
   --arg has_image "$HAS_IMAGE" \
   '{ts: $ts, sender: $sender, text: $text, project: $project, has_image: ($has_image == "true")}' \
   >> "$MONTH_FILE"
+
+# If you wire additional sinks downstream of this script (a dashboard sidecar,
+# a remote push), call them HERE — after the redaction above, never before it,
+# and never with $TEXT interpolated into a command string. Guard each one so a
+# missing optional sink cannot break inbound logging:
+#   [ -f "$SCRIPT_DIR/<your-sink>.sh" ] && bash "$SCRIPT_DIR/<your-sink>.sh" --text "$TEXT" >/dev/null 2>&1 || true
 ```
 
 ---
@@ -3269,18 +4583,213 @@ echo "Total: $count projects ready for batch sync"
 
 ## Template: scripts/sync-project-memories.sh
 
+Pushes the orchestrator's memories out to each registered project's own Claude Code memory directory, so a session opened directly in a project folder still loads the relevant context. Source of truth is `docs/projects.md`: each `## Project` heading plus its sibling `Folder:` line. Two selection rules — every file in `GLOBALS` is copied unconditionally, and any other memory whose *content* matches keywords derived from the project name is copied too. It then regenerates that project's `MEMORY.md` index from the `description:` frontmatter of what it copied. Edit the `GLOBALS` array to match your own always-on memories.
+
 ```bash
 #!/usr/bin/env bash
-# Sync relevant memories to individual project memory directories
+# Sync relevant {{orchestrator_name}} memories to every registered project's memory directory.
+#
+# Source of truth: docs/projects.md. Reads each ## Project heading + sibling
+# "Folder: <rel-path>" line, resolves the project's absolute folder, derives the
+# Claude Code memory dir slug from it, and copies relevant memories in.
+#
+# Memory selection per project:
+#   - Every global memory (always copied)
+#   - Every memory file whose content matches the keywords derived from the
+#     project name (slug + common aliases). Grep is case-insensitive.
+#
+# Usage: bash scripts/sync-project-memories.sh
+# No args. Runs for every project with a Folder: line.
 
-PROJECT_MEMORY="$HOME/.claude/projects/$(echo "{{project_path}}" | sed 's|/|-|g; s|^-||')/memory"
-SYNCED=0
+set -euo pipefail
 
-echo "Syncing memories to projects..."
-# This script syncs global feedback memories to each registered project.
-# Customize the project list and keyword matching for your projects.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Claude Code namespaces each project's memory by its absolute path with the
+# separators flattened to dashes. Derive it rather than hardcoding it.
+ORCHESTRATOR_MEMORY="$HOME/.claude/projects/$(echo "{{project_path}}" | sed 's|/|-|g; s|^-||')/memory"
+PROJECTS_FILE="$REPO_ROOT/docs/projects.md"
+SYNCED_TOTAL=0
+PROJECTS_TOUCHED=0
+PROJECTS_SKIPPED=0
 
-echo "Done. $SYNCED files synced."
+if [ ! -d "$ORCHESTRATOR_MEMORY" ]; then
+  echo "ERROR: orchestrator memory dir not found at $ORCHESTRATOR_MEMORY" >&2
+  exit 1
+fi
+
+if [ ! -f "$PROJECTS_FILE" ]; then
+  echo "ERROR: $PROJECTS_FILE not found" >&2
+  exit 1
+fi
+
+# Global memories that apply to every project. Edit this list as needed.
+GLOBALS=(
+  feedback_human_writing.md
+  feedback_always_reply_telegram.md
+  feedback_always_reply_immediately.md
+  feedback_agent_attribution.md
+  feedback_agent_signing.md
+  feedback_dont_mix_projects.md
+  feedback_verify_competitors.md
+  feedback_use_agent_skills.md
+  feedback_fix_properly.md
+  feedback_verify_github_deploy.md
+  feedback_signoff.md
+)
+
+# Slugify: "NHS Rota AI" -> "nhs-rota-ai", "Acme Tool (Legacy)" -> "acme-tool-legacy"
+# Portable across bash 3.2 (macOS default) and 4+.
+slugify() {
+  local s="$1"
+  s="$(echo "$s" | tr '[:upper:]' '[:lower:]')"
+  s="$(echo "$s" | tr -c 'a-z0-9' ' ')"   # non-alnum -> space
+  s="$(echo "$s" | tr -s ' ')"             # collapse spaces
+  s="$(echo "$s" | sed 's/^ //; s/ $//')"  # trim
+  s="$(echo "$s" | tr ' ' '-')"            # spaces -> dashes
+  echo "$s"
+}
+
+# Build keyword regex from project name + aliases. Used as grep -iE pattern.
+build_keywords() {
+  local name="$1"
+  local name_lower
+  name_lower="$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+  local keywords
+  keywords="$(slugify "$name" | tr '-' '|')"
+  # Single-word fallback: also match the raw lowercased name
+  keywords="$keywords|$name_lower"
+  echo "$keywords"
+}
+
+# Parse docs/projects.md into NAME + FOLDER pairs.
+current_name=""
+current_folder=""
+
+flush_current() {
+  [ -z "$current_name" ] && return
+  # Resolve absolute folder path.
+  local folder_raw="$current_folder"
+  local abs_folder=""
+  if [ -z "$folder_raw" ]; then
+    echo "  SKIP: $current_name (no Folder: line in projects.md)"
+    PROJECTS_SKIPPED=$((PROJECTS_SKIPPED + 1))
+    current_name=""
+    current_folder=""
+    return
+  fi
+  # Strip leading / trailing whitespace + any parenthetical placeholder like "(externally hosted, no local repo)"
+  folder_raw="$(echo "$folder_raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [[ "$folder_raw" == \(*\) ]]; then
+    # Placeholder, no local folder — skip
+    echo "  SKIP: $current_name (folder placeholder: $folder_raw)"
+    PROJECTS_SKIPPED=$((PROJECTS_SKIPPED + 1))
+    current_name=""
+    current_folder=""
+    return
+  fi
+  # Resolve: dev/* -> $HOME/dev/*, otherwise $HOME/Documents/*
+  if [[ "$folder_raw" == dev/* ]]; then
+    abs_folder="$HOME/$folder_raw"
+  elif [[ "$folder_raw" == /* ]]; then
+    abs_folder="$folder_raw"
+  else
+    abs_folder="$HOME/Documents/$folder_raw"
+  fi
+
+  if [ ! -d "$abs_folder" ]; then
+    echo "  SKIP: $current_name (folder not found: $abs_folder)"
+    PROJECTS_SKIPPED=$((PROJECTS_SKIPPED + 1))
+    current_name=""
+    current_folder=""
+    return
+  fi
+
+  # Derive Claude Code memory slug from absolute path:
+  # /home/you/Documents/Foo -> -home-you-Documents-Foo
+  local project_key
+  project_key="$(echo "$abs_folder" | sed 's|/|-|g; s|^-||')"
+  local target_dir="$HOME/.claude/projects/$project_key/memory"
+  mkdir -p "$target_dir"
+
+  local count=0
+
+  # Copy globals — a basename in GLOBALS may live anywhere under
+  # $ORCHESTRATOR_MEMORY once memories are filed into subdirectories
+  # (e.g. memory/semantic/feedback/feedback_human_writing.md), so resolve
+  # via find and keep the GLOBALS list a flat basename array.
+  # Dot-prefixed dirs are pruned: they are private carveouts, never synced out.
+  local mem mem_src
+  for mem in "${GLOBALS[@]}"; do
+    mem_src="$(find "$ORCHESTRATOR_MEMORY" -type d -name '.*' -prune -o -name "$mem" -type f -print 2>/dev/null | head -1)"
+    if [ -n "$mem_src" ] && [ -f "$mem_src" ]; then
+      cp "$mem_src" "$target_dir/$mem"
+      count=$((count + 1))
+    fi
+  done
+
+  # Copy keyword matches — recurse into any memory subdirectories
+  # (memory/semantic/<type>/, memory/episodic/, memory/procedural/).
+  # Prune dot-prefixed dirs so private carveouts stay out of project copies.
+  local keywords
+  keywords="$(build_keywords "$current_name")"
+  if [ -n "$keywords" ]; then
+    local mem_file
+    while IFS= read -r mem_file; do
+      [ -z "$mem_file" ] && continue
+      [ "$(basename "$mem_file")" = "MEMORY.md" ] && continue
+      if grep -qiE "$keywords" "$mem_file" 2>/dev/null; then
+        cp "$mem_file" "$target_dir/$(basename "$mem_file")"
+        count=$((count + 1))
+      fi
+    done < <(find "$ORCHESTRATOR_MEMORY" -type d -name '.*' -prune -o -name "*.md" -type f -print 2>/dev/null)
+  fi
+
+  # Dedupe count (cp above may overwrite same file from globals + keyword match)
+  count="$(find "$target_dir" -maxdepth 1 -name '*.md' -not -name 'MEMORY.md' | wc -l | tr -d ' ')"
+
+  # Regenerate MEMORY.md index for this project
+  {
+    echo "# Project Memories"
+    echo ""
+    echo "Synced from {{orchestrator_name}}. Last sync: $(date '+%Y-%m-%d %H:%M')"
+    echo ""
+    local mf
+    for mf in "$target_dir"/*.md; do
+      [ "$(basename "$mf")" = "MEMORY.md" ] && continue
+      local bn
+      bn="$(basename "$mf")"
+      local desc
+      desc="$(awk '/^---$/{c++; if(c==2) exit; next} c==1 && /^description:/{sub(/^description:[[:space:]]*/,""); print; exit}' "$mf")"
+      [ -z "$desc" ] && desc="(no description)"
+      echo "- [$bn]($bn) — $desc"
+    done
+  } > "$target_dir/MEMORY.md"
+
+  echo "  SYNCED: $current_name -> $count files -> $project_key"
+  SYNCED_TOTAL=$((SYNCED_TOTAL + count))
+  PROJECTS_TOUCHED=$((PROJECTS_TOUCHED + 1))
+
+  current_name=""
+  current_folder=""
+}
+
+echo "Syncing {{orchestrator_name}} memories to registered projects..."
+echo ""
+
+while IFS= read -r line; do
+  if [[ "$line" =~ ^##[[:space:]]+(.+)$ ]]; then
+    # New project heading — flush previous
+    flush_current
+    current_name="${BASH_REMATCH[1]}"
+    current_folder=""
+  elif [[ "$line" =~ ^Folder:[[:space:]]*(.*)$ ]]; then
+    current_folder="${BASH_REMATCH[1]}"
+  fi
+done < "$PROJECTS_FILE"
+flush_current
+
+echo ""
+echo "Done. Touched $PROJECTS_TOUCHED projects, $SYNCED_TOTAL file copies, $PROJECTS_SKIPPED skipped."
 ```
 
 ---
@@ -10406,6 +11915,11 @@ REPO_ROOT="${REPO_ROOT:-$HOME/Documents/MyAgent}"
 LOG_FILE="$REPO_ROOT/logs/{{orchestrator_lower}}-launch.log"
 QUIT_MARKER="$HOME/.{{orchestrator_lower}}-quit"
 DISABLE_MARKER="$HOME/.{{orchestrator_lower}}-no-supervisor"
+# "new session" sentinel. Repo-relative (NOT under $HOME like the markers above)
+# so it is per-install and lands in the gitignored runtime dir. scripts/new-session.sh
+# writes it; the re-exec loop below consumes it. Both sides MUST agree on this exact
+# path — a mismatch is silent: the trigger reports success, the relaunch resumes.
+FORCE_FRESH_FLAG="$REPO_ROOT/data/runtime/force-fresh-next-launch"
 
 mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
 touch "$LOG_FILE"
@@ -10482,8 +11996,40 @@ while true; do
     exit 0
   fi
 
+  # "new session" override. scripts/new-session.sh writes this sentinel DURING a
+  # running session and then kills claude; the kill lands us here on the next
+  # re-exec iteration, and this is the only place that makes the relaunch FRESH.
+  #
+  # Without this block the sentinel is written by a trigger that nothing reads:
+  # the else-branch below unconditionally appends --resume, so "new session"
+  # silently returns the SAME conversation. The trigger reports success either
+  # way, which is what makes the failure invisible.
+  #
+  # Checked ONLY on a re-exec (first_iteration -ne 1). On the very first launch
+  # the user's own args already give a fresh session, and consuming it there
+  # would destroy the sentinel before the kill it was written for.
+  force_fresh=0
+  if [ "$first_iteration" -ne 1 ] && [ -f "$FORCE_FRESH_FLAG" ]; then
+    force_fresh=1
+    rm -f "$FORCE_FRESH_FLAG" 2>/dev/null   # consume: exactly ONE fresh relaunch
+    log "force-fresh sentinel consumed; this relaunch is FRESH (no --resume)"
+  fi
+
   if [ "$first_iteration" -eq 1 ]; then
-    launch_args=("${user_args[@]}")
+    # First launch: honour the user's args VERBATIM, including --resume. These
+    # two branches must stay separate — folding them together would strip
+    # --resume here too and silently break `<launcher> --resume` as a launch
+    # mode, which is a user-facing feature, not a relaunch detail.
+    launch_args=("${user_args[@]+"${user_args[@]}"}")
+  elif [ "$force_fresh" -eq 1 ]; then
+    # Explicit "new session": strip any resume arg the supervisor was ITSELF
+    # started with. A wrapper launched as `<launcher> --resume` would otherwise
+    # carry it into the "fresh" relaunch and land the user back in the old
+    # session — the restart would appear to work and change nothing.
+    launch_args=()
+    for a in "${user_args[@]+"${user_args[@]}"}"; do
+      [ "$a" = "--resume" ] || [ "$a" = "--continue" ] || launch_args+=("$a")
+    done
   else
     launch_args=("${user_args[@]}")
     has_resume=0
@@ -10926,93 +12472,1127 @@ touch "$REPO_ROOT/data/runtime/last-stop-hook.txt"
 
 ## Template: scripts/codex.sh (v31.3 optional Codex advisor)
 
-Read-only Cortana-restrained wrapper around OpenAI's Codex CLI. Output to stdout or a markdown sidecar, never touches files directly. 7 subcommands. Requires OpenAI API key + Codex CLI installed locally. Pairs with the `{{orchestrator_lower}}-codex-ensemble` skill.
+Read-only safety-wrapped entry point for OpenAI's Codex CLI. Output goes to stdout and a markdown sidecar under `data/research/codex-<subcommand>/`; it never edits files. 12 subcommands across three surfaces (diff review / advisor / live research).
+
+This is the full working wrapper, not a skeleton, because the guards **are** the tool. Three of them exist only because the thin version failed in production:
+
+* **`review_scope_guard`** — refuses a review whose range is empty. An empty diff does not produce an empty review: Codex has read access and explores the repo on its own, so it returns confident, file-anchored findings that are indistinguishable from a real review. Pointing `review-vs-main` at a checkout sitting on the base branch produced ten such findings.
+* **`concat_dir_budget` + `rank_of` + the BUNDLE INVENTORY footer** — the `audit` path bundles a directory under a byte budget. Without an inventory, a bundle that includes *some* files reads exactly like a complete one, and a partial audit gets quoted as "clean". `rank_of` also orders real source ahead of config and docs so a README cannot crowd out the file being audited.
+* **`coverage_banner` / `coverage_header_line`** — put the coverage verdict at the top of the report and last on stdout. A warning buried mid-report is not a warning.
+
+Every subcommand pipes its input through `scripts/redact-secrets.sh` before it leaves the machine. Note the boundary: the `codex review` surface reads the working tree itself, so redaction covers what the wrapper *sends*, not what Codex reads locally — the read-only sandbox floor in `~/.codex/config.toml` is what constrains that.
+
+Requires the Codex CLI installed and authenticated. Pairs with the `{{orchestrator_lower}}-codex-ensemble` and `{{orchestrator_lower}}-codex-reviewer` skills.
 
 ```bash
 #!/usr/bin/env bash
-# codex.sh — read-only Codex advisor. Output never modifies files directly.
+# codex.sh — safety-wrapped entry point for the OpenAI Codex CLI.
 #
-# Subcommands:
-#   status                       Check Codex install + auth
-#   preflight                    Verify env + redact-secrets coverage
-#   generate <prompt>            Code generation
-#   debug <prompt>               Debugging assistance
-#   refactor <prompt>            Refactor suggestion
-#   test <prompt>                Test scaffolding
-#   audit <prompt>               Code review
-#   architect <prompt>           Architectural advice
-#   review-uncommitted           Review the current uncommitted diff
-#   review-vs-main               Review HEAD vs main
-#   review-commit <sha>          Review a specific commit
+# Codex is exposed as a READ-ONLY ADVISOR across these entry points
+# (no file writes, no agent-mode, no sandbox override):
+#   - review-uncommitted / review-vs-main / review-commit  (diff review)
+#   - generate <prompt>                                    (code generation)
+#   - debug <error-text-or-file>                           (failure diagnosis)
+#   - refactor <file-path>                                 (refactor proposals)
+#   - test <file-path>                                     (test generation)
+#   - audit <directory-or-file>                            (security audit)
+#   - architect <design-doc-path>                          (architecture critique)
+#   - research <query>                                     (LIVE web research)
 #
-# Hard constraints:
-#   * Every prompt is piped through scripts/redact-secrets.sh first
-#   * Bypass flags (--no-redact / --unsafe / --bypass) are refused at this layer
-#     AND hard-blocked by the safety-gate hook
-#   * Output goes to stdout or data/runtime/codex-output-<ts>.md, NEVER edits files
+# Every subcommand:
+#   1. Runs preflight (CLI installed + auth + config-floor + daily cap)
+#   2. Pipes input through scripts/redact-secrets.sh (strips creds)
+#   3. Saves output to data/research/codex-<subcommand>/<ts>-<slug>.md
+#   4. Appends one JSONL line to data/codex-calls.jsonl
+#   5. Advisor subcommands use `codex review -` on stdin (no write). `research`
+#      uses `codex exec` WITHOUT a --sandbox override, so the read-only config
+#      floor is inherited (still no write, no agent mode).
+#
+# Wrapper enforces in concert with the safety-gate hook:
+#   - Sandbox locked to read-only via ~/.codex/config.toml
+#   - Approval policy locked to on-request
+#   - Direct `codex exec / apply / sandbox / agent` blocked by safety-gate
+#
+# Usage:
+#   bash scripts/codex.sh status
+#   bash scripts/codex.sh review-uncommitted [project_dir]
+#   bash scripts/codex.sh review-vs-main [project_dir] [base_branch]
+#   bash scripts/codex.sh review-commit <sha> [project_dir]
+#   bash scripts/codex.sh generate "<prompt>"
+#   bash scripts/codex.sh debug "<error-text>" | <file-path>
+#   bash scripts/codex.sh refactor <file-path>
+#   bash scripts/codex.sh test <file-path>
+#   bash scripts/codex.sh audit <directory-or-file>
+#   bash scripts/codex.sh architect <design-doc-path>
+#   bash scripts/codex.sh research "<query>"
+#   bash scripts/codex.sh --help
+#
+# Never call `codex` directly from a Bash tool — the safety gate will block
+# anything that isn't a vetted setup command (login, version, status). The
+# wrapper IS the contract.
 
 set -uo pipefail
 
-REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-REDACT="$REPO_ROOT/scripts/redact-secrets.sh"
-CODEX_BIN="${CODEX_BIN:-codex}"
-
-# Refuse bypass flags at the wrapper layer (defense in depth; safety-gate also blocks)
+# Defense in depth — refuse bypass-style flags before they reach codex.
+# The safety-gate hook also blocks these at the tool layer, but the wrapper
+# is the contract: if someone calls the wrapper directly, the wrapper itself
+# must reject "give me unsafe mode" arguments.
 for arg in "$@"; do
   case "$arg" in
-    --no-redact|--skip-redact|--unsafe|--dangerous|--bypass)
-      echo "ERROR: bypass flag '$arg' is refused. Codex wrapper is read-only by design." >&2
-      exit 1
+    --no-redact|--unsafe|--dangerous|--skip-redact|--bypass)
+      echo "[codex.sh] ERROR: bypass-style flag '$arg' is refused by the wrapper." >&2
+      echo "  Codex is read-only-advisor-only in this environment. Run Codex directly in a terminal if you genuinely need an unsafe mode." >&2
+      exit 99
       ;;
   esac
 done
 
-cmd="${1:-status}"; shift || true
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+REVIEW_DIR="$REPO_ROOT/data/research/codex-reviews"
+LOG_FILE="$REPO_ROOT/data/codex-calls.jsonl"
+REDACTOR="$REPO_ROOT/scripts/redact-secrets.sh"
 
-case "$cmd" in
-  status)
-    if command -v "$CODEX_BIN" >/dev/null 2>&1; then
-      echo "codex CLI: $(command -v "$CODEX_BIN")"
-      "$CODEX_BIN" --version 2>/dev/null || true
-    else
-      echo "ERROR: codex CLI not on PATH. Install per upstream docs."
-      exit 2
+mkdir -p "$REVIEW_DIR" 2>/dev/null
+[ -f "$LOG_FILE" ] || touch "$LOG_FILE"
+
+# Per-day soft cap on Codex invocations. Behavioural not financial on a
+# flat-rate plan — protects against runaway loops.
+DAILY_CALL_CAP="${CODEX_DAILY_CALL_CAP:-50}"
+
+# Wall-clock ceiling (seconds) for a single `research` run. Multi-source web
+# browsing is legitimately slow, so this is generous; overridable. On timeout the
+# run is killed and callers fall back to their other search tools — research
+# never hangs.
+RESEARCH_TIMEOUT="${CODEX_RESEARCH_TIMEOUT:-480}"
+
+# ---------------------------------------------------------------------------
+# Pre-flight
+# ---------------------------------------------------------------------------
+
+preflight() {
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "[codex.sh] ERROR: codex CLI not on PATH. Install with: npm install -g @openai/codex" >&2
+    exit 2
+  fi
+
+  # Auth check. `codex login status` returns 0 if logged in, non-zero otherwise.
+  if ! codex login status >/dev/null 2>&1; then
+    echo "[codex.sh] ERROR: not logged in. Run: codex login" >&2
+    exit 3
+  fi
+
+  # Config safety floor. Required keys must be set in ~/.codex/config.toml.
+  local cfg="$HOME/.codex/config.toml"
+  if [ ! -f "$cfg" ]; then
+    echo "[codex.sh] ERROR: ~/.codex/config.toml missing. Cannot verify safety floor." >&2
+    exit 4
+  fi
+  if ! grep -q '^sandbox_mode = "read-only"' "$cfg"; then
+    echo "[codex.sh] ERROR: sandbox_mode = \"read-only\" not in $cfg. Refusing to run." >&2
+    exit 5
+  fi
+  if ! grep -q '^approval_policy = "on-request"' "$cfg"; then
+    echo "[codex.sh] ERROR: approval_policy = \"on-request\" not in $cfg. Refusing to run." >&2
+    exit 6
+  fi
+
+  # Redactor present. Without it nothing may leave the machine.
+  if [ ! -f "$REDACTOR" ]; then
+    echo "[codex.sh] ERROR: $REDACTOR missing. Refusing to run." >&2
+    exit 7
+  fi
+
+  # Daily call cap. Count today's lines in the log.
+  local today calls_today
+  today=$(date -u +%Y-%m-%d)
+  calls_today=$(grep -c "\"date\":\"$today\"" "$LOG_FILE" 2>/dev/null) || calls_today=0
+  if [ "${calls_today:-0}" -ge "$DAILY_CALL_CAP" ]; then
+    echo "[codex.sh] ERROR: daily call cap of $DAILY_CALL_CAP reached for $today. Bump via CODEX_DAILY_CALL_CAP if needed." >&2
+    exit 8
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Audit logging
+# ---------------------------------------------------------------------------
+
+log_call() {
+  local subcommand="$1" project="$2" status="$3" output_file="$4" extra="$5"
+  local ts iso day
+  ts=$(date -u +%s)
+  iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  day=$(date -u +%Y-%m-%d)
+  # Single JSONL line with controlled escaping. Project + extra fields kept
+  # short so the line stays grep-able.
+  local proj_clean status_clean
+  proj_clean=$(printf '%s' "$project" | tr -d '"\n\r')
+  status_clean=$(printf '%s' "$status" | tr -d '"\n\r')
+  printf '{"ts":%d,"iso":"%s","date":"%s","subcommand":"%s","project":"%s","status":"%s","output":"%s","extra":"%s"}\n' \
+    "$ts" "$iso" "$day" "$subcommand" "$proj_clean" "$status_clean" "$output_file" "$extra" \
+    >> "$LOG_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: status
+# ---------------------------------------------------------------------------
+
+cmd_status() {
+  local today calls_today
+  today=$(date -u +%Y-%m-%d)
+  calls_today=$(grep -c "\"date\":\"$today\"" "$LOG_FILE" 2>/dev/null) || calls_today=0
+  echo "[codex.sh] codex wrapper, status check"
+  echo "  codex version: $(codex --version 2>&1 | head -1)"
+  echo "  codex auth:    $(codex login status 2>&1 | head -3 | tr '\n' ' ' | sed 's/  */ /g')"
+  echo "  config floor:  $(grep -E '^(sandbox_mode|approval_policy)' "$HOME/.codex/config.toml" 2>/dev/null | tr '\n' ' ')"
+  echo "  daily cap:     $DAILY_CALL_CAP (today's calls: $calls_today)"
+  echo "  audit log:     $LOG_FILE"
+  echo "  reviews dir:   $REVIEW_DIR"
+  echo ""
+  echo "  Subcommands:"
+  echo "    Diff review:  review-uncommitted | review-vs-main | review-commit"
+  echo "    Advisor:      generate | debug | refactor | test | audit | architect"
+  echo "    Research:     research \"<query>\" (LIVE web browsing; read-only floor)"
+  echo "    Meta:         status | preflight | --help"
+  echo ""
+  echo "  Run 'bash scripts/codex.sh --help' for full usage."
+}
+
+# ---------------------------------------------------------------------------
+# Review-path scope reporting + the empty-review refusal
+# ---------------------------------------------------------------------------
+
+# Count changed files in a range. Kept in one place so the guard and the banner
+# can never disagree about what "empty" means.
+changed_file_count() {
+  local project_dir="$1" range="$2" n
+  n=$( (cd "$project_dir" && git diff --name-only $range 2>/dev/null) | wc -l | tr -d ' ')
+  printf '%s' "${n:-0}"
+}
+
+# Scope line for the REVIEW paths.
+#
+# These do not use concat_dir_budget — they pass the whole `git diff`, so they do
+# not have the partial-bundle failure mode the audit path had. But an operator
+# still cannot tell from the output WHAT was reviewed, and the standing rule is
+# that a verdict always arrives with its scope attached. Printed last, for the
+# same reason as coverage_banner: the tail is where people actually look.
+review_scope_banner() {
+  local project_dir="$1" range="$2"
+  local files bytes
+  files=$(changed_file_count "$project_dir" "$range")
+  bytes=$( (cd "$project_dir" && git diff $range 2>/dev/null) | wc -c | tr -d ' ')
+  printf '[codex.sh] scope: %s changed file(s), %s bytes of diff reviewed (whole diff, not sampled).\n' \
+    "$files" "$bytes"
+  if [ "${bytes:-0}" -gt 200000 ]; then
+    printf '[codex.sh] NOTE: that is a large diff — a verdict on it is thinner per file than a focused review.\n' >&2
+  fi
+}
+
+# REFUSE an empty review, BEFORE spending a call or writing a report.
+#
+# `review-vs-main` pointed at a checkout sitting on `main` gives the range
+# main...main — nothing at all. It still produced TEN confident findings with
+# file:line references, because Codex has read access and explores the repo on
+# its own when the diff gives it nothing. The saved report carried no sign the
+# diff was empty; only the console scope line did, printed after the fact.
+#
+# So the failure mode is a report indistinguishable from a real review, which
+# would then be quoted as "reviewed and clean". Same family as the audit path's
+# partial bundle, one step worse: there the verdict covered SOME files, here it
+# covered none.
+#
+# A review with nothing in scope is not a clean review, it is not a review. Exit
+# non-zero so a caller that chains on success stops too.
+review_scope_guard() {
+  local project_dir="$1" range="$2"
+  local files
+  files=$(changed_file_count "$project_dir" "$range")
+  [ "${files:-0}" -gt 0 ] && return 0
+  {
+    printf '\n========================================================================\n'
+    printf '  NOTHING TO REVIEW — the range %s is empty (0 changed files).\n' "$range"
+    printf '  Refusing to run: an empty diff still yields confident findings,\n'
+    printf '  because Codex explores the repo when the diff gives it nothing.\n'
+    printf '  Usual cause: the checkout is ON the base branch, so it is being\n'
+    printf '  compared with itself. Check out the branch under review, or point\n'
+    printf '  this at a worktree that has it.\n'
+    printf '========================================================================\n\n'
+  } >&2
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: review-uncommitted
+# ---------------------------------------------------------------------------
+
+cmd_review_uncommitted() {
+  local project_dir="${1:-$PWD}"
+  local project_name out_file diff_redacted_tmp
+  project_name=$(basename "$project_dir" | tr ' ' '-')
+  out_file="$REVIEW_DIR/$(date -u +%Y-%m-%d-%H%M%S)-${project_name}-uncommitted.md"
+  diff_redacted_tmp=$(mktemp)
+  trap 'rm -f "${diff_redacted_tmp:-}"' RETURN
+
+  if ! git -C "$project_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "[codex.sh] ERROR: $project_dir is not a git repo (or worktree)" >&2
+    log_call "review-uncommitted" "$project_name" "error-not-git" "" ""
+    exit 9
+  fi
+
+  # Nothing staged or unstaged -> refuse, before spending a call.
+  if ! review_scope_guard "$project_dir" "HEAD"; then
+    log_call "review-uncommitted" "$project_name" "refused-empty-diff" "" ""
+    exit 10
+  fi
+
+  # Pre-redact the diff — the belt-and-braces artefact kept alongside the report.
+  ( cd "$project_dir" && git diff HEAD ) | bash "$REDACTOR" > "$diff_redacted_tmp"
+
+  echo "[codex.sh] Running codex review --uncommitted on $project_dir"
+  echo "[codex.sh] Output: $out_file"
+
+  # Codex review reads from the working tree directly. The wrapper enforces
+  # sandbox + approval via config floor; we pass --uncommitted to scope it.
+  # If Codex tries to write anywhere, the read-only sandbox blocks it.
+  (
+    cd "$project_dir"
+    printf '# Codex review of uncommitted changes in %s\n\n' "$project_name" > "$out_file"
+    printf 'Date: %s UTC\nBase: HEAD\nWrapper: scripts/codex.sh review-uncommitted\n\n---\n\n' "$(date -u)" >> "$out_file"
+    codex review --uncommitted 2>&1 | tee -a "$out_file"
+    exit "${PIPESTATUS[0]:-0}"
+  )
+  local rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    log_call "review-uncommitted" "$project_name" "ok" "$out_file" ""
+    echo "[codex.sh] Review saved: $out_file"
+  else
+    log_call "review-uncommitted" "$project_name" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+  review_scope_banner "$project_dir" "HEAD"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: review-vs-main
+# ---------------------------------------------------------------------------
+
+cmd_review_vs_main() {
+  local project_dir="${1:-$PWD}" base="${2:-main}"
+  local project_name out_file
+  project_name=$(basename "$project_dir" | tr ' ' '-')
+  out_file="$REVIEW_DIR/$(date -u +%Y-%m-%d-%H%M%S)-${project_name}-vs-${base}.md"
+
+  if ! git -C "$project_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "[codex.sh] ERROR: $project_dir is not a git repo (or worktree)" >&2
+    log_call "review-vs-main" "$project_name" "error-not-git" "" "$base"
+    exit 9
+  fi
+
+  # Nothing in the range -> refuse, before spending a call or writing a report.
+  # See review_scope_guard: an empty diff produced ten confident findings once.
+  if ! review_scope_guard "$project_dir" "${base}...HEAD"; then
+    log_call "review-vs-main" "$project_name" "refused-empty-diff" "" "$base"
+    exit 10
+  fi
+
+  echo "[codex.sh] Running codex review --base $base on $project_dir"
+  echo "[codex.sh] Output: $out_file"
+
+  (
+    cd "$project_dir"
+    printf '# Codex review of HEAD vs %s in %s\n\n' "$base" "$project_name" > "$out_file"
+    printf 'Date: %s UTC\nBase: %s\nWrapper: scripts/codex.sh review-vs-main\n\n---\n\n' "$(date -u)" "$base" >> "$out_file"
+    codex review --base "$base" 2>&1 | tee -a "$out_file"
+    exit "${PIPESTATUS[0]:-0}"
+  )
+  local rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    log_call "review-vs-main" "$project_name" "ok" "$out_file" "$base"
+    echo "[codex.sh] Review saved: $out_file"
+  else
+    log_call "review-vs-main" "$project_name" "exit-$rc" "$out_file" "$base"
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+  review_scope_banner "$project_dir" "${base}...HEAD"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: review-commit <sha>
+# ---------------------------------------------------------------------------
+
+cmd_review_commit() {
+  local sha="${1:-}" project_dir="${2:-$PWD}"
+  if [ -z "$sha" ]; then
+    echo "[codex.sh] ERROR: review-commit needs a SHA" >&2
+    exit 10
+  fi
+  local project_name out_file
+  project_name=$(basename "$project_dir" | tr ' ' '-')
+  out_file="$REVIEW_DIR/$(date -u +%Y-%m-%d-%H%M%S)-${project_name}-${sha}.md"
+
+  if ! git -C "$project_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "[codex.sh] ERROR: $project_dir is not a git repo (or worktree)" >&2
+    log_call "review-commit" "$project_name" "error-not-git" "" "$sha"
+    exit 9
+  fi
+
+  if ! git -C "$project_dir" rev-parse --verify --quiet "$sha^{commit}" >/dev/null 2>&1; then
+    echo "[codex.sh] ERROR: $sha is not a commit in $project_dir" >&2
+    log_call "review-commit" "$project_name" "error-bad-sha" "" "$sha"
+    exit 11
+  fi
+
+  echo "[codex.sh] Running codex review --commit $sha on $project_dir"
+  echo "[codex.sh] Output: $out_file"
+
+  (
+    cd "$project_dir"
+    printf '# Codex review of commit %s in %s\n\n' "$sha" "$project_name" > "$out_file"
+    printf 'Date: %s UTC\nCommit: %s\nWrapper: scripts/codex.sh review-commit\n\n---\n\n' "$(date -u)" "$sha" >> "$out_file"
+    codex review --commit "$sha" 2>&1 | tee -a "$out_file"
+    exit "${PIPESTATUS[0]:-0}"
+  )
+  local rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    log_call "review-commit" "$project_name" "ok" "$out_file" "$sha"
+    echo "[codex.sh] Review saved: $out_file"
+  else
+    log_call "review-commit" "$project_name" "exit-$rc" "$out_file" "$sha"
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+  review_scope_banner "$project_dir" "${sha}^..${sha}"
+}
+
+# ---------------------------------------------------------------------------
+# Helpers shared by generate/debug/refactor/test/audit/architect
+# ---------------------------------------------------------------------------
+
+# Portable bounded run for the web-research exec (macOS ships no `timeout`).
+# perl's alarm survives exec, so SIGALRM (default: terminate) reaches the exec'd
+# child (exit 142 = 128 + SIGALRM(14)). If perl is absent, run unbounded
+# (best-effort).
+run_bounded() {
+  local secs="$1"; shift
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec @ARGV or die "exec failed: $!\n"' "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
+# Slugify a string for filenames. Keep it short, alpha-numeric + dashes.
+slugify() {
+  local input="$1"
+  printf '%s' "$input" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' \
+    | cut -c1-40
+}
+
+# Ensure an output dir exists. Echo the dir.
+ensure_subcommand_dir() {
+  local sub="$1"
+  # $REVIEW_DIR = data/research/codex-reviews. Siblings live at codex-<sub>.
+  local parent
+  parent=$(dirname "$REVIEW_DIR")
+  local d="$parent/codex-$sub"
+  mkdir -p "$d" 2>/dev/null
+  printf '%s' "$d"
+}
+
+# Copy a file into the bundle, truncated at 50KB so one big file cannot blow
+# the context window. The truncation is announced in-band.
+cap_to_50kb() {
+  local src="$1" dst="$2"
+  local size
+  size=$(wc -c < "$src" | tr -d ' ')
+  if [ "${size:-0}" -le 51200 ]; then
+    cp "$src" "$dst"
+  else
+    head -c 51200 "$src" > "$dst"
+    printf '\n[wrapper] TRUNCATED at 50KB (original %s bytes)\n' "$size" >> "$dst"
+  fi
+}
+
+# Run codex review with stdin. The prompt is the instruction; the redacted
+# content is piped in. Output streams to the caller AND to $out_file.
+#
+# We use `codex review -` to read the review instructions from stdin. The
+# wrapper then composes:
+#   <instruction header>
+#   <separator>
+#   <redacted user content>
+# all on a single stdin stream. codex review treats this as the review prompt.
+#
+# This stays inside the read-only review surface — codex review is the same
+# binary path used for review-uncommitted / vs-main / commit.
+run_codex_advisor() {
+  local subcommand="$1" instruction="$2" content_redacted_tmp="$3" out_file="$4"
+
+  echo "[codex.sh] Running codex advisor ($subcommand)"
+  echo "[codex.sh] Output: $out_file"
+
+  {
+    printf '%s\n\n' "$instruction"
+    printf -- '----- input -----\n'
+    cat "$content_redacted_tmp"
+    printf -- '\n----- end input -----\n'
+  } | codex review - 2>&1 | tee -a "$out_file"
+  return "${PIPESTATUS[1]:-$?}"
+}
+
+# ---------------------------------------------------------------------------
+# Directory bundler for `audit`
+#
+# Three failure modes this exists to close, all found the hard way:
+#   1. Missing extensions — an allow-list that omits a type makes that code
+#      INVISIBLE to the review while the run still reports success.
+#   2. Lockfiles and generated noise eating the budget. Now excluded.
+#   3. No ordering — `find` returns filesystem order, so whether Codex saw auth
+#      code or a changelog was luck. Now source is bundled before config/docs.
+# Plus a per-file cap so one large file cannot dominate, and an explicit
+# inventory so a thin bundle is visible instead of silent.
+# ---------------------------------------------------------------------------
+concat_dir_budget() {
+  local dir="$1" budget_bytes="$2" out="$3"
+  local per_file_cap=$(( budget_bytes / 3 ))
+  : > "$out"
+  local total=0 included=0 skipped_big=0 skipped_budget=0
+  local skipped_names=""
+
+  # Rank 1 = real source, 2 = schema/scripts, 3 = config/docs. Bundle in that
+  # order so the security-relevant material is never crowded out by a README.
+  rank_of() {
+    case "$1" in
+      *.ts|*.tsx|*.mts|*.cts|*.js|*.jsx|*.mjs|*.cjs|*.vue|*.svelte|*.astro) echo 1 ;;
+      *.py|*.go|*.rs|*.rb|*.java|*.kt|*.scala|*.swift|*.m|*.h|*.c|*.cpp|*.cs|*.php|*.ex|*.exs|*.dart|*.lua) echo 1 ;;
+      *.sql|*.sh|*.bash|*.zsh|*.tf|*.gradle) echo 2 ;;
+      *) echo 3 ;;
+    esac
+  }
+
+  local sorted
+  sorted=$(find "$dir" -type f \
+    -not -path '*/\.git/*' -not -path '*/node_modules/*' -not -path '*/.next/*' \
+    -not -path '*/build/*' -not -path '*/dist/*' -not -path '*/.venv/*' \
+    -not -path '*/Pods/*' -not -path '*/DerivedData/*' -not -path '*/coverage/*' \
+    -not -path '*/__snapshots__/*' -not -path '*/vendor/*' \
+    ! -name 'pnpm-lock.yaml' ! -name 'package-lock.json' ! -name 'yarn.lock' \
+    ! -name 'bun.lockb' ! -name 'Cargo.lock' ! -name 'poetry.lock' \
+    ! -name 'composer.lock' ! -name 'Gemfile.lock' ! -name '*.lock' \
+    ! -name '*.min.js' ! -name '*.min.css' ! -name '*.map' ! -name '*.d.ts' \
+    \( -name '*.swift' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' \
+       -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.mts' \
+       -o -name '*.cts' -o -name '*.vue' -o -name '*.svelte' -o -name '*.astro' \
+       -o -name '*.py' -o -name '*.go' -o -name '*.rs' \
+       -o -name '*.rb' -o -name '*.java' -o -name '*.kt' -o -name '*.scala' \
+       -o -name '*.m' -o -name '*.mm' -o -name '*.h' -o -name '*.hpp' \
+       -o -name '*.c' -o -name '*.cpp' -o -name '*.cc' -o -name '*.cs' \
+       -o -name '*.php' -o -name '*.ex' -o -name '*.exs' -o -name '*.dart' \
+       -o -name '*.lua' -o -name '*.pl' -o -name '*.r' -o -name '*.jl' \
+       -o -name '*.sh' -o -name '*.bash' -o -name '*.zsh' -o -name '*.sql' \
+       -o -name '*.tf' -o -name '*.gradle' -o -name '*.css' -o -name '*.scss' \
+       -o -name '*.md' -o -name '*.yml' \
+       -o -name '*.yaml' -o -name '*.json' -o -name '*.toml' \) \
+    -print 2>/dev/null | while IFS= read -r f; do
+        printf '%s\t%s\n' "$(rank_of "$f")" "$f"
+      done | sort -k1,1n -k2,2 | cut -f2-)
+
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    local size rel
+    size=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+    [ -n "$size" ] || continue
+    rel="${f#"$dir"/}"
+
+    # One oversized file must never consume the whole budget — but the cap must
+    # not evict the very code being reviewed. A 26KB module carrying an entire
+    # entitlement decision was dropped at budget/3 while a README competed for
+    # the same space. So the cap is rank-aware: real source gets half the budget,
+    # config and docs keep the tighter third. A genuinely huge generated file
+    # still cannot dominate.
+    local this_cap="$per_file_cap"
+    if [ "$(rank_of "$f")" -le 2 ]; then
+      this_cap=$(( budget_bytes / 2 ))
     fi
-    if [ -z "${OPENAI_API_KEY:-}" ]; then
-      echo "WARN: OPENAI_API_KEY not set in env"
-    else
-      echo "OPENAI_API_KEY: set (length=${#OPENAI_API_KEY})"
+    if [ "$size" -gt "$this_cap" ]; then
+      skipped_big=$((skipped_big + 1))
+      skipped_names="${skipped_names}${rel} (${size}b, over per-file cap ${this_cap}b); "
+      continue
     fi
-    ;;
-  preflight)
-    bash "$0" status
-    [ -x "$REDACT" ] && echo "redact-secrets.sh: ok" || { echo "ERROR: $REDACT missing or not executable"; exit 3; }
-    ;;
-  generate|debug|refactor|test|audit|architect)
-    prompt="$*"
-    [ -z "$prompt" ] && { echo "usage: codex.sh $cmd <prompt>"; exit 1; }
-    redacted="$(echo "$prompt" | bash "$REDACT")"
-    "$CODEX_BIN" "$redacted"
-    ;;
-  review-uncommitted)
-    diff_text="$(cd "$REPO_ROOT" && git diff)"
-    redacted="$(echo "$diff_text" | bash "$REDACT")"
-    echo "$redacted" | "$CODEX_BIN" "Review this diff for correctness, safety, and style. Be specific."
-    ;;
-  review-vs-main)
-    diff_text="$(cd "$REPO_ROOT" && git diff main...HEAD)"
-    redacted="$(echo "$diff_text" | bash "$REDACT")"
-    echo "$redacted" | "$CODEX_BIN" "Review HEAD vs main. Be specific."
-    ;;
-  review-commit)
-    sha="${1:-}"; [ -z "$sha" ] && { echo "usage: codex.sh review-commit <sha>"; exit 1; }
-    diff_text="$(cd "$REPO_ROOT" && git show "$sha")"
-    redacted="$(echo "$diff_text" | bash "$REDACT")"
-    echo "$redacted" | "$CODEX_BIN" "Review this commit. Be specific."
-    ;;
+    # Budget exhausted for THIS file — skip it and try the next (smaller) one
+    # rather than abandoning everything after it.
+    if [ $((total + size)) -gt "$budget_bytes" ]; then
+      skipped_budget=$((skipped_budget + 1))
+      continue
+    fi
+
+    printf '\n## %s\n\n```\n' "$rel" >> "$out"
+    cat "$f" >> "$out"
+    printf '\n```\n' >> "$out"
+    total=$((total + size))
+    included=$((included + 1))
+  done <<< "$sorted"
+
+  # COVERAGE GUARD — the silent-partial hole.
+  #
+  # An empty-bundle warning alone only fires at ZERO files, so a bundle that
+  # includes SOME files always looks healthy. An audit once bundled 5 files and
+  # dropped EVERY .mjs — including the module holding the entire entitlement
+  # decision — because .mjs was missing from the type filter. The reviewer
+  # pronounced the result clean. A partial bundle that reads as complete is
+  # worse than no bundle at all, because it launders an unreviewed file as
+  # reviewed.
+  #
+  # So: count every file the path filter admitted, compare against what the TYPE
+  # filter kept, and name the extensions we threw away. Reviewing a fraction is
+  # fine; not knowing it was a fraction is not.
+  local eligible type_excluded excluded_exts
+  eligible=$(printf '%s\n' "$sorted" | grep -c '[^[:space:]]') || eligible=0
+  excluded_exts=$(find "$dir" -type f \
+    -not -path '*/\.git/*' -not -path '*/node_modules/*' -not -path '*/.next/*' \
+    -not -path '*/build/*' -not -path '*/dist/*' -not -path '*/.venv/*' \
+    -not -path '*/Pods/*' -not -path '*/DerivedData/*' -not -path '*/coverage/*' \
+    -not -path '*/__snapshots__/*' -not -path '*/vendor/*' \
+    ! -name '*.lock' ! -name '*.min.js' ! -name '*.min.css' ! -name '*.map' \
+    ! -name '*.d.ts' ! -name '*.png' ! -name '*.jpg' ! -name '*.jpeg' \
+    ! -name '*.gif' ! -name '*.svg' ! -name '*.ico' ! -name '*.woff*' \
+    ! -name '*.zip' ! -name '*.pdf' ! -name '.DS_Store' \
+    -print 2>/dev/null \
+    | grep -v -F -x -f <(printf '%s\n' "$sorted") 2>/dev/null \
+    | sed -n 's/.*\.\([A-Za-z0-9][A-Za-z0-9]*\)$/\1/p' \
+    | sort | uniq -c | sort -rn | head -6 \
+    | awk '{ printf "%s(%s) ", $2, $1 }')
+  type_excluded=$(printf '%s' "$excluded_exts" | wc -w | tr -d ' ')
+
+  # Inventory footer — makes a thin, partial or empty bundle loud instead of silent.
+  {
+    printf '\n[wrapper] BUNDLE INVENTORY: %s of %s eligible files, %s bytes (budget %s).\n' \
+      "$included" "$eligible" "$total" "$budget_bytes"
+    [ "$skipped_big" -gt 0 ] && printf '[wrapper] skipped %s oversized: %s\n' "$skipped_big" "$skipped_names"
+    [ "$skipped_budget" -gt 0 ] && printf '[wrapper] skipped %s more once the budget filled.\n' "$skipped_budget"
+    if [ -n "$excluded_exts" ]; then
+      printf '[wrapper] NOT bundled, excluded by file type: %s\n' "$excluded_exts"
+      printf '[wrapper] ^ if a reviewed-critical extension is in that list, the verdict does NOT cover it.\n'
+    fi
+    if [ "$eligible" -gt 0 ] && [ "$included" -lt "$eligible" ]; then
+      printf '[wrapper] WARNING: PARTIAL BUNDLE — %s of %s eligible files were left out. Any verdict covers only what is above.\n' \
+        "$((eligible - included))" "$eligible"
+    fi
+    [ "$included" -eq 0 ] && printf '[wrapper] WARNING: NO FILES BUNDLED — any verdict below is meaningless.\n'
+  } >> "$out"
+
+  # Export coverage so the CALLER can surface it. Writing the warning only into
+  # the bundle put it ~1100 lines deep in the saved report, where it was read
+  # past twice: once as a file-type exclusion, once as a budget truncation. Both
+  # times a partial bundle produced a confident-sounding clean verdict on files
+  # Codex never saw. A warning that must be scrolled to is not a warning.
+  BUNDLE_INCLUDED="$included"
+  BUNDLE_ELIGIBLE="$eligible"
+  BUNDLE_SKIPPED_NAMES="$skipped_names"
+  export BUNDLE_INCLUDED BUNDLE_ELIGIBLE BUNDLE_SKIPPED_NAMES
+
+  [ "$included" -gt 0 ]
+}
+
+# Emit the coverage verdict where it CANNOT be missed: the top of the saved
+# report, and the very last thing on stdout. The tail is where an operator looks,
+# so the tail is where this has to be.
+coverage_banner() {
+  local out_file="$1"
+  local inc="${BUNDLE_INCLUDED:-0}" elig="${BUNDLE_ELIGIBLE:-0}"
+  [ "$elig" -gt 0 ] || return 0
+  if [ "$inc" -lt "$elig" ]; then
+    printf '\n'
+    printf '========================================================================\n' >&2
+    printf '  PARTIAL AUDIT — %s of %s files reviewed. %s NOT SEEN.\n' "$inc" "$elig" "$((elig - inc))" >&2
+    printf '  Any "cleared" or "no findings" verdict covers ONLY the %s bundled.\n' "$inc" >&2
+    [ -n "${BUNDLE_SKIPPED_NAMES:-}" ] && printf '  Left out: %s\n' "$BUNDLE_SKIPPED_NAMES" >&2
+    printf '  Re-run per-file over the rest before trusting this.\n' >&2
+    printf '========================================================================\n' >&2
+  else
+    printf '[codex.sh] coverage: all %s eligible files reviewed.\n' "$inc"
+  fi
+}
+
+# A one-line coverage verdict for the TOP of the report, so opening the file
+# answers "what does this actually cover?" before any finding is read.
+coverage_header_line() {
+  local inc="${BUNDLE_INCLUDED:-0}" elig="${BUNDLE_ELIGIBLE:-0}"
+  [ "$elig" -gt 0 ] || return 0
+  if [ "$inc" -lt "$elig" ]; then
+    printf '> **PARTIAL — %s of %s files reviewed; %s were NOT seen.** Every verdict\n> below, including any clearance, covers only the %s bundled files.\n' \
+      "$inc" "$elig" "$((elig - inc))" "$inc"
+    [ -n "${BUNDLE_SKIPPED_NAMES:-}" ] && printf '> Left out: %s\n' "$BUNDLE_SKIPPED_NAMES"
+    printf '\n'
+  else
+    printf 'Coverage: all %s eligible files reviewed.\n\n' "$inc"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: generate <prompt>
+# ---------------------------------------------------------------------------
+
+cmd_generate() {
+  local prompt="${1:-}"
+  if [ -z "$prompt" ]; then
+    echo "[codex.sh] ERROR: generate needs a prompt string" >&2
+    echo "  usage: bash scripts/codex.sh generate \"<your prompt>\"" >&2
+    exit 11
+  fi
+
+  local out_dir slug out_file tmp_in
+  out_dir=$(ensure_subcommand_dir "generate")
+  slug=$(slugify "$prompt")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-generate}.md"
+  tmp_in=$(mktemp)
+  trap 'rm -f "${tmp_in:-}"' RETURN
+
+  printf '%s' "$prompt" | bash "$REDACTOR" > "$tmp_in"
+
+  printf '# Codex generation\n\n' > "$out_file"
+  printf 'Date: %s UTC\nWrapper: scripts/codex.sh generate\n\n---\n\n' "$(date -u)" >> "$out_file"
+
+  local instruction
+  instruction=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+    "You are a code generator running in read-only review mode." \
+    "Do not propose to write files, run commands, or apply patches — just produce code." \
+    "Return ONLY the generated code wrapped in a single fenced block with the correct language tag, plus a 1-2 sentence rationale beneath." \
+    "If the request is ambiguous, ask one clarifying question instead of guessing." \
+    "Match the conventions of the language/framework implied by the prompt." \
+    "Never include real secrets — placeholders only.")
+
+  run_codex_advisor "generate" "$instruction" "$tmp_in" "$out_file"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log_call "generate" "$slug" "ok" "$out_file" ""
+    echo "[codex.sh] Generation saved: $out_file"
+  else
+    log_call "generate" "$slug" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: debug <error-text-or-file>
+# ---------------------------------------------------------------------------
+
+cmd_debug() {
+  local arg="${1:-}"
+  if [ -z "$arg" ]; then
+    echo "[codex.sh] ERROR: debug needs an error string or file path" >&2
+    echo "  usage: bash scripts/codex.sh debug \"<error text>\" | <file-path>" >&2
+    exit 12
+  fi
+
+  local out_dir slug out_file tmp_in tmp_raw
+  out_dir=$(ensure_subcommand_dir "debug")
+  slug=$(slugify "$arg")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-debug}.md"
+  tmp_in=$(mktemp)
+  tmp_raw=$(mktemp)
+  trap 'rm -f "${tmp_in:-}" "${tmp_raw:-}"' RETURN
+
+  # If arg is a readable file, read its contents (capped at 50KB).
+  if [ -f "$arg" ] && [ -r "$arg" ]; then
+    cap_to_50kb "$arg" "$tmp_raw"
+  else
+    printf '%s\n' "$arg" > "$tmp_raw"
+  fi
+
+  bash "$REDACTOR" < "$tmp_raw" > "$tmp_in"
+
+  printf '# Codex debug session\n\n' > "$out_file"
+  printf 'Date: %s UTC\nWrapper: scripts/codex.sh debug\n\n---\n\n' "$(date -u)" >> "$out_file"
+
+  local instruction
+  instruction=$(printf '%s\n%s\n%s\n%s\n%s' \
+    "You are a senior debugger in read-only mode. The input below is an error / stack trace / failing log." \
+    "Diagnose: identify the most likely root cause, NOT a band-aid. Walk the reader through how you reached the diagnosis." \
+    "Return: (1) Likely root cause, (2) Evidence trail in the log, (3) Recommended fix (code shape, not full implementation), (4) Risk if the fix is wrong." \
+    "If the log contains insufficient info, list the specific extra context you need." \
+    "Never propose running commands, just diagnose.")
+
+  run_codex_advisor "debug" "$instruction" "$tmp_in" "$out_file"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log_call "debug" "$slug" "ok" "$out_file" ""
+    echo "[codex.sh] Debug report saved: $out_file"
+  else
+    log_call "debug" "$slug" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: refactor <file-path>
+# ---------------------------------------------------------------------------
+
+cmd_refactor() {
+  local file_path="${1:-}"
+  if [ -z "$file_path" ]; then
+    echo "[codex.sh] ERROR: refactor needs a file path" >&2
+    echo "  usage: bash scripts/codex.sh refactor <file-path>" >&2
+    exit 13
+  fi
+  if [ ! -f "$file_path" ]; then
+    echo "[codex.sh] ERROR: $file_path is not a file" >&2
+    exit 14
+  fi
+
+  local out_dir slug out_file tmp_in tmp_raw base
+  out_dir=$(ensure_subcommand_dir "refactor")
+  base=$(basename "$file_path")
+  slug=$(slugify "$base")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-refactor}.md"
+  tmp_in=$(mktemp)
+  tmp_raw=$(mktemp)
+  trap 'rm -f "${tmp_in:-}" "${tmp_raw:-}"' RETURN
+
+  cap_to_50kb "$file_path" "$tmp_raw"
+  bash "$REDACTOR" < "$tmp_raw" > "$tmp_in"
+
+  printf '# Codex refactor proposal\n\n' > "$out_file"
+  printf 'Date: %s UTC\nFile: %s\nWrapper: scripts/codex.sh refactor\n\n---\n\n' "$(date -u)" "$file_path" >> "$out_file"
+
+  local instruction
+  instruction=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+    "You are a senior code reviewer in read-only mode. The input below is the current contents of a single source file." \
+    "Propose a refactor: improved readability / structure / safety, but functionally equivalent." \
+    "Return: (1) Top 3 issues in the current code with file-anchored line refs, (2) A unified-diff-style proposed change (only the touched hunks, not full file), (3) Tradeoffs of the refactor." \
+    "Do NOT propose a rewrite from scratch unless the file is obviously beyond saving — say why if you do." \
+    "If the file is fine as-is, say so plainly and stop." \
+    "Never propose running commands or applying the diff — the human will decide.")
+
+  run_codex_advisor "refactor" "$instruction" "$tmp_in" "$out_file"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log_call "refactor" "$base" "ok" "$out_file" ""
+    echo "[codex.sh] Refactor proposal saved: $out_file"
+  else
+    log_call "refactor" "$base" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: test <file-path>
+# ---------------------------------------------------------------------------
+
+cmd_test() {
+  local file_path="${1:-}"
+  if [ -z "$file_path" ]; then
+    echo "[codex.sh] ERROR: test needs a file path" >&2
+    echo "  usage: bash scripts/codex.sh test <file-path>" >&2
+    exit 15
+  fi
+  if [ ! -f "$file_path" ]; then
+    echo "[codex.sh] ERROR: $file_path is not a file" >&2
+    exit 16
+  fi
+
+  local out_dir slug out_file tmp_in tmp_raw base
+  out_dir=$(ensure_subcommand_dir "test")
+  base=$(basename "$file_path")
+  slug=$(slugify "$base")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-test}.md"
+  tmp_in=$(mktemp)
+  tmp_raw=$(mktemp)
+  trap 'rm -f "${tmp_in:-}" "${tmp_raw:-}"' RETURN
+
+  cap_to_50kb "$file_path" "$tmp_raw"
+  bash "$REDACTOR" < "$tmp_raw" > "$tmp_in"
+
+  printf '# Codex test suite\n\n' > "$out_file"
+  printf 'Date: %s UTC\nFile: %s\nWrapper: scripts/codex.sh test\n\n---\n\n' "$(date -u)" "$file_path" >> "$out_file"
+
+  local instruction
+  instruction=$(printf '%s\n%s\n%s\n%s\n%s' \
+    "You are a senior test author in read-only mode. The input below is the current contents of a single source file." \
+    "Produce a comprehensive test suite for the public functions / types in this file. Cover happy paths, edge cases, and failure modes." \
+    "Pick the idiomatic test framework for the language (XCTest for Swift, Vitest/Jest for TS, pytest for Python, etc.). State which you picked and why." \
+    "Return: (1) Tests as a single fenced code block with the correct language tag, (2) A short list of cases that you considered but skipped (with reason)." \
+    "Never propose running commands — just produce the test file content.")
+
+  run_codex_advisor "test" "$instruction" "$tmp_in" "$out_file"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log_call "test" "$base" "ok" "$out_file" ""
+    echo "[codex.sh] Test suite saved: $out_file"
+  else
+    log_call "test" "$base" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: audit <directory-or-file>
+# ---------------------------------------------------------------------------
+
+cmd_audit() {
+  local target="${1:-}"
+  if [ -z "$target" ]; then
+    echo "[codex.sh] ERROR: audit needs a directory or file path" >&2
+    echo "  usage: bash scripts/codex.sh audit <directory-or-file>" >&2
+    exit 17
+  fi
+  if [ ! -e "$target" ]; then
+    echo "[codex.sh] ERROR: $target does not exist" >&2
+    exit 18
+  fi
+
+  local out_dir slug out_file tmp_in tmp_raw base
+  out_dir=$(ensure_subcommand_dir "audit")
+  base=$(basename "$target")
+  slug=$(slugify "$base")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-audit}.md"
+  tmp_in=$(mktemp)
+  tmp_raw=$(mktemp)
+  trap 'rm -f "${tmp_in:-}" "${tmp_raw:-}"' RETURN
+
+  if [ -d "$target" ]; then
+    concat_dir_budget "$target" 51200 "$tmp_raw"
+  else
+    cap_to_50kb "$target" "$tmp_raw"
+  fi
+  bash "$REDACTOR" < "$tmp_raw" > "$tmp_in"
+
+  printf '# Codex security audit\n\n' > "$out_file"
+  printf 'Date: %s UTC\nTarget: %s\nWrapper: scripts/codex.sh audit\n\n' "$(date -u)" "$target" >> "$out_file"
+  coverage_header_line >> "$out_file"
+  printf -- '---\n\n' >> "$out_file"
+
+  local instruction
+  instruction=$(printf '%s\n%s\n%s\n%s\n%s' \
+    "You are a senior application-security reviewer in read-only mode. The input below is one or more source files." \
+    "Scan for vulnerabilities + dangerous patterns: injection (SQL / command / template), auth/authorisation bypass, insecure storage of secrets, missing input validation, weak crypto, race conditions, SSRF/CSRF/XSS, IDOR, prototype pollution, path traversal, unsafe deserialisation, broken access control, regex DoS." \
+    "Return: (1) Findings table — severity / category / file:line / 1-line description, (2) For each Critical / High finding, a paragraph on exploit path + recommended fix, (3) Things you spot-checked and explicitly cleared." \
+    "Apply OWASP Top 10 as floor, not ceiling. Be specific — vague findings are worse than no findings." \
+    "Never propose running commands — just report.")
+
+  run_codex_advisor "audit" "$instruction" "$tmp_in" "$out_file"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log_call "audit" "$base" "ok" "$out_file" ""
+    echo "[codex.sh] Audit saved: $out_file"
+  else
+    log_call "audit" "$base" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+  # LAST, deliberately. An operator reads the TAIL of a run — that is exactly
+  # where a partial bundle gets missed, so that is where the coverage verdict
+  # now goes.
+  coverage_banner "$out_file"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: architect <design-doc-path>
+# ---------------------------------------------------------------------------
+
+cmd_architect() {
+  local design_path="${1:-}"
+  if [ -z "$design_path" ]; then
+    echo "[codex.sh] ERROR: architect needs a design doc path" >&2
+    echo "  usage: bash scripts/codex.sh architect <design-doc-path>" >&2
+    exit 19
+  fi
+  if [ ! -f "$design_path" ]; then
+    echo "[codex.sh] ERROR: $design_path is not a file" >&2
+    exit 20
+  fi
+
+  local out_dir slug out_file tmp_in tmp_raw base
+  out_dir=$(ensure_subcommand_dir "architect")
+  base=$(basename "$design_path")
+  slug=$(slugify "$base")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-architect}.md"
+  tmp_in=$(mktemp)
+  tmp_raw=$(mktemp)
+  trap 'rm -f "${tmp_in:-}" "${tmp_raw:-}"' RETURN
+
+  cap_to_50kb "$design_path" "$tmp_raw"
+  bash "$REDACTOR" < "$tmp_raw" > "$tmp_in"
+
+  printf '# Codex architecture review\n\n' > "$out_file"
+  printf 'Date: %s UTC\nDesign doc: %s\nWrapper: scripts/codex.sh architect\n\n---\n\n' "$(date -u)" "$design_path" >> "$out_file"
+
+  local instruction
+  instruction=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+    "You are a principal-level architecture reviewer in read-only mode. The input below is a design doc, plan, or proposal." \
+    "Critique it without being precious: surface load-bearing assumptions, single points of failure, scale ceilings, security gaps, ops debt, and team-scaling concerns." \
+    "Return: (1) Strengths of the design (3-5 bullets), (2) Concerns ranked by severity with reasoning, (3) 2 alternative designs with tradeoffs vs the proposed one, (4) What you would build first if budget = 1 week." \
+    "If the design is materially flawed, say so plainly — \"this won't work in production because…\" — don't soften." \
+    "If the doc is too thin to evaluate, list the missing sections." \
+    "Never propose running commands or starting builds — just critique.")
+
+  run_codex_advisor "architect" "$instruction" "$tmp_in" "$out_file"
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log_call "architect" "$base" "ok" "$out_file" ""
+    echo "[codex.sh] Architecture review saved: $out_file"
+  else
+    log_call "architect" "$base" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: research <query>   (alias: web)
+#
+# LIVE web research. This is the ONE advisor subcommand that browses the
+# internet: it runs `codex exec` WITHOUT a --sandbox override, so the read-only
+# config floor is inherited and the bundled browser plugin does the browsing.
+# Bounded by RESEARCH_TIMEOUT so a slow crawl can never hang a caller.
+# ---------------------------------------------------------------------------
+
+cmd_research() {
+  local query="${1:-}"
+  if [ -z "$query" ]; then
+    echo "[codex.sh] ERROR: research needs a query string" >&2
+    echo "  usage: bash scripts/codex.sh research \"<your query>\"" >&2
+    exit 21
+  fi
+
+  local out_dir slug out_file prompt_file transcript
+  out_dir=$(ensure_subcommand_dir "research")
+  slug=$(slugify "$query")
+  out_file="$out_dir/$(date -u +%Y-%m-%d-%H%M%S)-${slug:-research}.md"
+  prompt_file=$(mktemp)
+  transcript=$(mktemp)
+  trap 'rm -f "${prompt_file:-}" "${transcript:-}"' RETURN
+
+  printf '# Codex web research\n\n' > "$out_file"
+  printf 'Date: %s UTC\nQuery: %s\nWrapper: scripts/codex.sh research\n\n---\n\n' "$(date -u)" "$query" >> "$out_file"
+
+  {
+    printf 'You are a research analyst with LIVE web access. Research the query below.\n'
+    printf 'Rules: cite every non-obvious claim with the source URL. Prefer primary sources.\n'
+    printf 'Where sources disagree, say so and show both. State clearly what you could NOT\n'
+    printf 'confirm rather than filling the gap with a plausible guess. Read-only: never\n'
+    printf 'propose running commands or editing files.\n\n'
+    printf -- '----- query -----\n'
+    printf '%s\n' "$query" | bash "$REDACTOR"
+    printf -- '\n----- end query -----\n'
+  } > "$prompt_file"
+
+  echo "[codex.sh] Running codex research (timeout ${RESEARCH_TIMEOUT}s)"
+  echo "[codex.sh] Output: $out_file"
+
+  run_bounded "$RESEARCH_TIMEOUT" codex exec --skip-git-repo-check - \
+    < "$prompt_file" 2> "$transcript" | tee -a "$out_file"
+  local rc=${PIPESTATUS[0]:-$?}
+
+  if [ "$rc" -eq 0 ]; then
+    log_call "research" "$slug" "ok" "$out_file" ""
+    echo "[codex.sh] Research saved: $out_file"
+  elif [ "$rc" -eq 142 ]; then
+    log_call "research" "$slug" "timeout" "$out_file" ""
+    echo "[codex.sh] WARN: research timed out after ${RESEARCH_TIMEOUT}s — fall back to your other search tools." >&2
+    printf '\n[wrapper] TIMED OUT after %ss — partial results only.\n' "$RESEARCH_TIMEOUT" >> "$out_file"
+  else
+    log_call "research" "$slug" "exit-$rc" "$out_file" ""
+    echo "[codex.sh] WARN: codex exited $rc" >&2
+    tail -20 "$transcript" >&2
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Help
+# ---------------------------------------------------------------------------
+
+cmd_help() {
+  cat <<'HELP'
+codex.sh — safety-wrapped Codex CLI entry point.
+
+Codex is a READ-ONLY ADVISOR here. It never writes files, never runs in agent
+mode, and never overrides the sandbox. Output goes to stdout and a markdown
+sidecar under data/research/codex-<subcommand>/.
+
+DIFF REVIEW
+  review-uncommitted [project_dir]
+      Review staged + unstaged changes. Refuses if the diff is empty.
+  review-vs-main [project_dir] [base_branch]
+      Review HEAD vs base (default: main). Refuses if the range is empty.
+  review-commit <sha> [project_dir]
+      Review a single commit.
+
+  All three print a scope line: how many files and bytes were actually
+  reviewed. A verdict without its scope is not trustworthy.
+
+ADVISOR
+  generate "<prompt>"          Generate code from a description
+  debug "<error>" | <file>     Diagnose a failure, root cause not band-aid
+  refactor <file>              Propose a refactor of one file
+  test <file>                  Generate a test suite for one file
+  audit <dir-or-file>          Security audit (OWASP floor)
+  architect <design-doc>       Critique a design doc or plan
+
+  audit on a DIRECTORY bundles files under a 50KB budget, source first. It
+  always prints a BUNDLE INVENTORY and shouts PARTIAL AUDIT if anything was
+  left out — a partial review that reads as complete is the failure mode
+  this exists to prevent.
+
+RESEARCH
+  research "<query>"           Live web research (alias: web)
+                               Bounded by CODEX_RESEARCH_TIMEOUT (default 480s)
+
+META
+  status                       Show version, auth, config floor, daily cap
+  preflight                    Run the safety checks only
+  --help                       This text
+
+ENVIRONMENT
+  CODEX_DAILY_CALL_CAP         Max calls per UTC day (default 50)
+  CODEX_RESEARCH_TIMEOUT       Seconds before a research run is killed (480)
+  REPO_ROOT                    Override the repo root (default: parent of scripts/)
+
+SAFETY
+  * Every input is piped through scripts/redact-secrets.sh before it leaves
+    the machine.
+  * ~/.codex/config.toml MUST contain sandbox_mode = "read-only" and
+    approval_policy = "on-request". The wrapper refuses to run otherwise.
+  * Bypass-style flags (--no-redact, --unsafe, --bypass, ...) are refused
+    here AND blocked by the safety-gate hook.
+  * Note the boundary: `codex review` reads the working tree itself, so
+    redaction covers what the wrapper SENDS, not what Codex reads locally.
+    The read-only sandbox floor is what constrains that.
+
+EXAMPLES
+  bash scripts/codex.sh status
+  bash scripts/codex.sh review-vs-main ~/code/my-app main
+  bash scripts/codex.sh audit ~/code/my-app/src/auth
+  bash scripts/codex.sh refactor ~/code/my-app/src/lib/session.ts
+  bash scripts/codex.sh research "current OWASP guidance on JWT revocation"
+HELP
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+SUBCMD="${1:-status}"
+shift || true
+case "$SUBCMD" in
+  status)                cmd_status ;;
+  preflight)             preflight && echo "[codex.sh] preflight OK" ;;
+  review-uncommitted)    preflight; cmd_review_uncommitted "$@" ;;
+  review-vs-main)        preflight; cmd_review_vs_main "$@" ;;
+  review-commit)         preflight; cmd_review_commit "$@" ;;
+  generate)              preflight; cmd_generate "${1:-}" ;;
+  debug)                 preflight; cmd_debug "${1:-}" ;;
+  refactor)              preflight; cmd_refactor "${1:-}" ;;
+  test)                  preflight; cmd_test "${1:-}" ;;
+  audit)                 preflight; cmd_audit "${1:-}" ;;
+  architect)             preflight; cmd_architect "${1:-}" ;;
+  research|web)          preflight; cmd_research "${1:-}" ;;
+  --help|-h|help)        cmd_help ;;
   *)
-    echo "unknown subcommand: $cmd"
-    echo "see header for usage"
+    echo "[codex.sh] usage: bash scripts/codex.sh {status|preflight|--help|review-uncommitted|review-vs-main|review-commit|generate|debug|refactor|test|audit|architect|research} ..." >&2
+    echo "  Run 'bash scripts/codex.sh --help' for the full subcommand list." >&2
     exit 1
     ;;
 esac
@@ -11036,18 +13616,18 @@ Fans the same redacted prompt past your orchestrator (via `claude -p`) AND Codex
 #   - Original prompt (redacted)
 #   - Claude verdict
 #   - Codex verdict
-#   - Synthesis (agreements / disagreements / Cortana's recommendation)
+#   - Synthesis (agreements / disagreements / {{orchestrator_name}}'s recommendation)
 #
 # Caps:
 #   - 20 runs/day hard cap
 #   - $5/day soft Claude spend cap (warns but does not block)
 #
-# Opt-out: set CORTANA_ENSEMBLE_DISABLED=1 in env to short-circuit to no-op.
+# Opt-out: set ORCHESTRATOR_ENSEMBLE_DISABLED=1 in env to short-circuit to no-op.
 
 set -uo pipefail
 
-if [ "${CORTANA_ENSEMBLE_DISABLED:-0}" = "1" ]; then
-  echo "ensemble disabled via CORTANA_ENSEMBLE_DISABLED=1, no-op"
+if [ "${ORCHESTRATOR_ENSEMBLE_DISABLED:-0}" = "1" ]; then
+  echo "ensemble disabled via ORCHESTRATOR_ENSEMBLE_DISABLED=1, no-op"
   exit 0
 fi
 
@@ -11103,7 +13683,7 @@ codex_out="$(env -i PATH="$PATH" HOME="$HOME" OPENAI_API_KEY="${OPENAI_API_KEY:-
   echo
   echo "## Synthesis"
   echo
-  echo "Pending Cortana review. Compare the two verdicts for agreements / disagreements / clearly-wrong calls."
+  echo "Pending {{orchestrator_name}} review. Compare the two verdicts for agreements / disagreements / clearly-wrong calls."
 } > "$OUT"
 
 echo "$OUT"
@@ -11214,7 +13794,7 @@ Skill description that auto-fires the ensemble before high-stakes operations.
 ```markdown
 ---
 name: {{orchestrator_lower}}-codex-ensemble
-description: Run a Claude + Codex two-model double-check on a high-stakes decision via `scripts/ensemble.sh`. Does NOT auto-fire on every ship/deploy/migration. Invoke ONLY when the orchestrator judges it useful (irreversible decision, security/payments/auth surface, large schema migration, big architectural call, low confidence in own answer) OR when the user explicitly asks via `ensemble <task>` / `get a second opinion` / `run the ensemble on this`. Pairs with {{orchestrator_lower}}-codex-reviewer (per-commit sibling). Opt-out via CORTANA_ENSEMBLE_DISABLED=1.
+description: Run a Claude + Codex two-model double-check on a high-stakes decision via `scripts/ensemble.sh`. Does NOT auto-fire on every ship/deploy/migration. Invoke ONLY when the orchestrator judges it useful (irreversible decision, security/payments/auth surface, large schema migration, big architectural call, low confidence in own answer) OR when the user explicitly asks via `ensemble <task>` / `get a second opinion` / `run the ensemble on this`. Pairs with {{orchestrator_lower}}-codex-reviewer (per-commit sibling). Opt-out via ORCHESTRATOR_ENSEMBLE_DISABLED=1.
 ---
 
 # {{orchestrator_lower}}-codex-ensemble
@@ -11238,7 +13818,7 @@ Two-model double-check before any high-stakes ship/deploy/migration. Loaded auto
 
 - 20 runs/day (hard cap in `scripts/ensemble.sh`)
 - $5/day soft Claude spend cap (warns)
-- Opt-out: set `CORTANA_ENSEMBLE_DISABLED=1` in env to short-circuit to no-op
+- Opt-out: set `ORCHESTRATOR_ENSEMBLE_DISABLED=1` in env to short-circuit to no-op
 
 ## Output
 
@@ -11255,7 +13835,7 @@ Sibling to the ensemble skill. Auto-fires AFTER specialist-agent completion + BE
 ```markdown
 ---
 name: {{orchestrator_lower}}-codex-reviewer
-description: Run a Codex second-pass review on a staged + unstaged diff using `scripts/codex.sh review-uncommitted <project_dir>`. Does NOT auto-fire on every specialist-agent build. Invoke ONLY when the orchestrator judges it useful (high-stakes diff, regulated/security-sensitive area, unfamiliar codebase, suspected blind spot) OR when the user explicitly asks via `codex review` / `review <project>` / `get codex on this`. Pairs with {{orchestrator_lower}}-codex-ensemble (release-scoped sibling). Opt-out via CORTANA_CODEX_REVIEW_DISABLED=1 (rename env-var prefix for your fork as needed).
+description: Run a Codex second-pass review on a staged + unstaged diff using `scripts/codex.sh review-uncommitted <project_dir>`. Does NOT auto-fire on every specialist-agent build. Invoke ONLY when the orchestrator judges it useful (high-stakes diff, regulated/security-sensitive area, unfamiliar codebase, suspected blind spot) OR when the user explicitly asks via `codex review` / `review <project>` / `get codex on this`. Pairs with {{orchestrator_lower}}-codex-ensemble (release-scoped sibling). Opt-out via ORCHESTRATOR_CODEX_REVIEW_DISABLED=1.
 architectural_role: trunk
 compatibility: "Claude Code only"
 allowed-tools: "Read Grep Bash(bash scripts/codex.sh:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(cat:*) Bash(ls:*)"
@@ -11280,7 +13860,7 @@ Auto-fire AFTER specialist-agent completion + BEFORE the commit:
 
 ## When to skip
 
-- `CORTANA_CODEX_REVIEW_DISABLED=1` is set (quiet build session).
+- `ORCHESTRATOR_CODEX_REVIEW_DISABLED=1` is set (quiet build session).
 - The diff is <30 lines AND touches only doc files (README, agent-instructions, HANDOFF, blueprint markdown). Review adds little.
 - The diff is purely memory / episodic / log files. Not code.
 - The daily codex cap is already at zero remaining (shared with ensemble).
@@ -11359,6 +13939,181 @@ The reviewer writes:
 
 ---
 
+## Template: scripts/codex-leg-gate.sh + scripts/codex-leg-check.py (the hybrid-trigger hook)
+
+A `PreToolUse(Agent|Task)` hook pair that keeps "backend-shaped builds get the second engine's
+independent pass" a DEFAULT instead of a rule the model has to remember. See "Keep the hybrid's
+trigger a hook, not a memory line" earlier in this guide for the why. Warn-only, fail-open, never
+blocks a dispatch: a false positive stopping a legitimate build is worse than the rule it enforces.
+
+`codex-leg-gate.sh` drains stdin first (so an early exit never SIGPIPEs the caller), respects an
+engine-toggle library if one exists, and skips itself entirely in build-mode / budget-mode (read
+from `data/runtime/orchestration-mode`) where the nudge is either redundant or unwanted:
+
+```bash
+#!/usr/bin/env bash
+# PreToolUse(Agent|Task) - the second-engine trigger gate.
+#
+# DEFAULT orchestration mode pairs the assistant model with a second engine
+# (Codex or equivalent) on backend-shaped work. If that rule lives only in a
+# memory file or a skill description, it fires only when something reminds the
+# model of it - not by default. This hook puts the pairing command in front of
+# the operator at the moment of dispatch instead.
+#
+# Lives in scripts/ (not .claude/hooks/, if your safety gate blocks edits
+# there) and is wired into settings.json alongside any existing model-routing
+# hook on the same PreToolUse(Agent|Task) event.
+#
+# DEFAULT: warn-only. NEVER blocks a dispatch - a false positive must never
+# stop a specialist from being sent. Every flagged dispatch is logged to
+# data/runtime/codex-leg-warnings.jsonl for review before anyone considers
+# flipping to enforce. Set CODEX_LEG_ENFORCE=1 to hard-block; CODEX_LEG_OFF=1
+# is the emergency kill switch.
+set -uo pipefail
+INPUT=$(cat 2>/dev/null || true)
+
+[ "${CODEX_LEG_OFF:-0}" = "1" ] && exit 0
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${ORCHESTRATOR_PY:-python3}"
+command -v "$PY" >/dev/null 2>&1 || exit 0   # fail-open
+
+# Skip in build-mode (second engine already builds) or budget-mode (the
+# operator is deliberately saving spend - do not add a call).
+MODE_FILE="$REPO_DIR/data/runtime/orchestration-mode"
+if [ -f "$MODE_FILE" ]; then
+  MODE=$(tr '[:upper:]' '[:lower:]' < "$MODE_FILE" 2>/dev/null | tr -d '[:space:]')
+  case "$MODE" in
+    codex|codex-mode|budget|sonnet|sonnet-mode) exit 0 ;;
+  esac
+fi
+
+CHECKER="$REPO_DIR/scripts/codex-leg-check.py"
+[ -f "$CHECKER" ] || exit 0          # fail-open if the checker is missing
+
+# NOTE: the payload arrives on stdin, so the checker MUST be a real file.
+# `... | python - <<'EOF'` hands the heredoc to stdin and the payload is
+# never read - the gate then fails open on every dispatch, silently. This
+# is the bug the first version shipped with; do not reintroduce it.
+RESULT=$(printf '%s' "$INPUT" | REPO_DIR="$REPO_DIR" "$PY" "$CHECKER" 2>/dev/null)
+rc=$?
+
+if [ "$rc" -eq 3 ]; then
+  SIGNALS="${RESULT:-backend}"
+  {
+    echo "(second-engine gate: this dispatch touches ${SIGNALS//|/, } and has NO second-engine leg.)"
+    echo "  DEFAULT mode pairs the primary model with an independent second engine on backend"
+    echo "  work. Pair it - after the agent lands, before you call it done:"
+    echo "    bash scripts/codex.sh review-vs-main <project_dir>   # the diff"
+    echo "    bash scripts/codex.sh audit <dir-or-file>            # a built surface"
+    echo "  Say so in the dispatch brief too. Logged to data/runtime/codex-leg-warnings.jsonl."
+  } >&2
+  if [ "${CODEX_LEG_ENFORCE:-0}" = "1" ]; then
+    echo "(second-engine gate: BLOCKED by CODEX_LEG_ENFORCE. Override once with CODEX_LEG_OFF=1.)" >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+exit 0   # rc 0 = clean/off/already-paired; any other rc = fail-open, never block
+```
+
+`codex-leg-check.py` is the deterministic half — a real file, not a heredoc, precisely because a
+piped payload cannot survive a heredoc's stdin capture:
+
+```python
+#!/usr/bin/env python3
+"""Deterministic check behind scripts/codex-leg-gate.sh.
+
+Reads a PreToolUse(Agent|Task) payload on stdin. Exits 3 and prints the
+matched signals (pipe-separated) when a BACKEND-shaped agent is dispatched
+with no second-engine leg named. Exits 0 otherwise, and on anything it cannot
+parse - this must never be the reason a dispatch does not happen.
+"""
+import datetime, json, os, re, sys
+
+# Already paired, or explicitly opted out -> stay silent.
+ALREADY = re.compile(
+    r"\b(codex|second engine|dual-model|no codex|without codex|skip codex)\b"
+)
+
+# BACKEND-shaped work: where an independent second engine has repeatedly paid
+# for itself. Deliberately narrow - a frontend, copy, or research dispatch
+# must not trip this, or the warning becomes wallpaper and stops being read.
+BACKEND = [
+    (r"\b(rls|row[- ]level security)\b", "row-level security"),
+    (r"\b(migration|migrations|schema)\b", "schema / migrations"),
+    (r"\b(auth|authentication|authorisation|authorization|oauth|session token)\b", "auth"),
+    (r"\b(api|endpoint|route handler|webhook)\b", "API surface"),
+    (r"\b(licence|license) (gate|key|check)\b", "licensing"),
+    (r"\b(payment|billing|checkout)\b", "payments"),
+    (r"\b(sql|postgres|database)\b", "database"),
+    (r"\b(secret|credential|api key|token minting)\b", "secrets"),
+    (r"\b(server|serverless|edge function|backend)\b", "backend"),
+    (r"\b(entitlement|permission|access control)\b", "access control"),
+]
+
+def main() -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return 0
+    ti = payload.get("tool_input") or {}
+    prompt = " ".join(str(ti.get(k, "")) for k in ("prompt", "description"))
+    agent = str(ti.get("subagent_type") or "")
+    if not prompt.strip():
+        return 0
+    low = (prompt + " " + agent).lower()
+    if ALREADY.search(low):
+        return 0
+    hits = sorted({label for pat, label in BACKEND if re.search(pat, low)})
+    if not hits:
+        return 0
+    log_dir = os.environ.get("CODEX_LEG_LOG_DIR") or os.path.join(
+        os.environ.get("REPO_DIR") or os.getcwd(), "data", "runtime"
+    )
+    rec = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "agent": agent, "signals": hits, "prompt_head": prompt.strip()[:240],
+    }
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, "codex-leg-warnings.jsonl"), "a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass  # logging must never break a dispatch
+    print("|".join(hits))
+    return 3
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Register it in `.claude/settings.json` beside any existing `PreToolUse` hook on the same
+`Agent|Task` matcher (do not replace the existing one — append to its `hooks` array):
+
+```jsonc
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          { "type": "command", "command": "bash scripts/codex-leg-gate.sh" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Test coverage: `scripts/test-codex-leg-gate.sh` — feed the checker realistic dispatch payloads
+(backend-shaped with no leg named → exit 3; frontend/copy/research → exit 0; leg already named →
+exit 0; codex/budget mode → exit 0; malformed JSON → exit 0) and assert on the exit code plus the
+matched-signals string. 23 cases covers the signal groups plus the mode/already-paired skip paths.
+
+---
+
 
 ## Template: settings.json — v31.3 skillOverrides + hook continueOnBlock
 
@@ -11403,30 +14158,1709 @@ Claude Code v2.1.139+ adds `skillOverrides` for surgical skill control + hook `c
 
 Note: `$CLAUDE_PROJECT_DIR` is exported by Claude Code v2.1.139+ and points at the repo root regardless of cwd. Use it in hook commands instead of computing the repo root in the script.
 
+
+---
+
+# Xantham Auto-Sync subsystem (self-updating downstream hosts)
+
+Added 2026-06-10. Lets a downstream Claude Code agent (one bootstrapped FROM
+this public Xantham repo) pull the latest Xantham and clean-apply it to itself
+on every session start, with zero hand-carrying. After a one-time bootstrap,
+the host self-updates on open.
+
+How it fits together:
+
+- `scripts/xantham-sync.sh` (+ `.ps1`) — pulls this public repo into a local
+  cache via `git pull --ff-only`, copies the refreshed blueprint docs into the
+  host project, then runs `install-blueprint.sh --auto`. Logs one line per run
+  to `data/runtime/xantham-sync.log`. Idempotent. Non-destructive: a diverged
+  cache or an ambiguous version state STOPS (exit 3) instead of mutating.
+- `install-blueprint.sh --auto` — the non-interactive clean-apply path. Bumps
+  the blueprint version marker on a clean forward upgrade; STOPS on no-marker /
+  downgrade / malformed state. NEVER runs an extension installer (those need
+  consent + brew/docker); newly-shipped extensions are surfaced for a manual
+  `--add`.
+- `scripts/install-xantham-autosync.sh` (+ `.ps1`) — the one-time self-installer.
+  Registers a `SessionStart` hook in `.claude/settings.json` that runs the sync
+  on every open. Idempotent (never duplicates the hook), merges into existing
+  hooks, backs up settings before writing.
+
+Cross-platform: on Mac / Linux / Windows-with-git-bash use the `.sh` files; on
+Windows use the `.ps1` files. The self-installer auto-detects OS and wires the
+right command into the SessionStart hook; override with `FORCE_VARIANT=sh|ps1`
+(bash) or `-Variant sh|ps1` (PowerShell).
+
+> **Be precise about what the `.ps1` variant removes, and what it does not.**
+> The PowerShell variants replace the bash *sync driver* — they do their own
+> clone / fast-forward / copy in native PowerShell. They do **not** remove the
+> bash dependency, because the final step of a sync is `install-blueprint.sh
+> --auto`, which has no PowerShell port: `xantham-sync.ps1` shells out to
+> `bash $installer --auto`. So the honest prerequisite is **`git` AND `bash` on
+> PATH** — on Windows both ship together with Git for Windows, so in practice
+> "install Git for Windows" satisfies it. A summary that says the `.ps1` path
+> "only needs git" will send a Windows user without Git Bash straight into a
+> `bash: command not found` the first time an update actually applies — the
+> failure lands on the *second* run (the first, with nothing to apply, looks
+> fine), which is the worst possible time to discover a missing prerequisite.
+> This is stated here, in the `.ps1` docstrings, and in the prerequisites
+> section, deliberately: one honest prerequisite beats a PowerShell port of the
+> installer that nobody has executed.
+
+One-time bootstrap on a downstream host — see `XANTHAM-AUTOSYNC.md` at the repo
+root for the exact steps.
+
+Note on the version marker: `install-blueprint.sh` reads/writes
+`.{{orchestrator_lower}}-blueprint-version` (the wizard substitutes the
+orchestrator name at install time). The auto-apply path only ever bumps the
+`blueprint_version:` line on a clean forward move.
+
+
+## Template: scripts/xantham-sync.sh
+
+`Pull the latest public Xantham into a local cache (git pull --ff-only), copy refreshed blueprint docs into the host project, then run install-blueprint.sh --auto. Idempotent, non-destructive, logs one line to data/runtime/xantham-sync.log. STOPS (exit 3) on a diverged cache or an ambiguous apply. Bash variant; run on Mac/Linux/Windows-with-git-bash. Env: XANTHAM_REPO_URL, XANTHAM_CACHE_DIR, XANTHAM_BRANCH.`
+
+```bash
+#!/usr/bin/env bash
+# xantham-sync.sh — pull the latest public Xantham blueprint and clean-apply it
+# to this host project. Designed to run unattended from a SessionStart hook so
+# a downstream agent (a second orchestrator on another machine, say a Windows
+# box) self-updates on every
+# open with zero hand-carrying.
+#
+# This is the bash variant. On Windows it runs under git-bash (Git for Windows).
+# A PowerShell variant lives at scripts/xantham-sync.ps1 for hosts without
+# git-bash; the SessionStart self-installer picks the right one per-OS.
+#
+# What it does (in order):
+#   1. Ensure a local cache clone of the public Xantham repo exists.
+#   2. `git pull --ff-only` the cache. Fast-forward ONLY — never merges, never
+#      rebases, never force-resets. A diverged cache STOPS the sync.
+#   3. Copy the refreshed blueprint docs from the cache into this host project.
+#   4. Invoke `install-blueprint.sh --auto` to clean-apply the version bump.
+#   5. Print + log a single "synced to <commit>, applied: <summary>" line.
+#
+# Idempotent: a second run with no upstream change prints "no change".
+# Non-destructive: only fast-forwards the cache and only copies blueprint docs
+# + bumps the version marker. It never touches host source, hooks, or settings.
+#
+# Exit codes:
+#   0  synced (applied or no-op)
+#   3  STOP — needs human attention (diverged cache, or auto-apply conflict)
+#   2  usage / environment error
+#
+# Config (env overrides, all optional):
+#   XANTHAM_REPO_URL   default https://github.com/ZQadus/Xantham-system-blueprint.git
+#   XANTHAM_CACHE_DIR  default <host-project>/.xantham-cache
+#   XANTHAM_BRANCH     default main
+set -euo pipefail
+
+# Resolve the host project root. When run from a SessionStart hook, Claude Code
+# sets CLAUDE_PROJECT_DIR to the project root; fall back to the script's parent.
+HOST_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+REPO_URL="${XANTHAM_REPO_URL:-https://github.com/ZQadus/Xantham-system-blueprint.git}"
+CACHE_DIR="${XANTHAM_CACHE_DIR:-$HOST_DIR/.xantham-cache}"
+BRANCH="${XANTHAM_BRANCH:-main}"
+LOG_DIR="$HOST_DIR/data/runtime"
+LOG_FILE="$LOG_DIR/xantham-sync.log"
+
+# Blueprint docs to refresh from the cache into the host project — DERIVED from
+# what the cache actually contains, never a hardcoded filename list.
+#
+# WHY DERIVED. A pinned list goes stale the first time upstream bumps a version,
+# and it goes stale SILENTLY: the copy loop below is `if [ -f "$CACHE_DIR/$f" ]`,
+# so a name that is not in the cache is skipped with no error. The run then
+# reports "no change" and exits 0. A sync that delivers nothing while reporting
+# success is worse than one that breaks, because nothing ever surfaces it.
+# (This is not hypothetical — it is exactly what happened to the earlier pinned
+# version of this list.)
+#
+# Globbing the cache's top level is version-proof AND name-proof, so the next
+# rename cannot re-open the hole. The one remaining failure mode — the glob
+# matching nothing at all — is made LOUD below rather than silent.
+derive_blueprint_files() {
+  local f n=0
+  for f in "$CACHE_DIR"/xantham-*.md "$CACHE_DIR"/XANTHAM-*.md; do
+    [ -f "$f" ] || continue          # unmatched glob stays literal; skip it
+    printf '%s\n' "${f##*/}"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || return 1
+}
+
+log_line() {
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+stop() {
+  echo "xantham-sync STOP: $1" >&2
+  log_line "STOP $2"
+  exit 3
+}
+
+command -v git >/dev/null 2>&1 || { echo "xantham-sync: git not on PATH" >&2; log_line "ERR no-git"; exit 2; }
+
+# 1. Ensure cache clone exists. First-ever run clones; thereafter we pull.
+if [ ! -d "$CACHE_DIR/.git" ]; then
+  echo "xantham-sync: first run — cloning $REPO_URL into $CACHE_DIR"
+  if ! git clone --depth 50 --branch "$BRANCH" "$REPO_URL" "$CACHE_DIR" >/dev/null 2>&1; then
+    stop "could not clone $REPO_URL (no network, or bad URL)" "clone-failed url=$REPO_URL"
+  fi
+fi
+
+# 2. Record pre-pull HEAD, then fast-forward only.
+cd "$CACHE_DIR"
+before="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git fetch --quiet origin "$BRANCH" 2>/dev/null || stop "fetch failed (network?)" "fetch-failed"
+# --ff-only refuses to do anything that isn't a clean fast-forward. If local
+# cache has diverged (someone edited it, or history was force-pushed), this
+# fails and we STOP rather than clobber.
+if ! git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
+  stop "cache at $CACHE_DIR cannot fast-forward to origin/$BRANCH (diverged). Delete the cache dir to re-clone, or resolve by hand." "cache-diverged before=$before"
+fi
+after="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+# 3. Copy refreshed blueprint docs into the host project. The file set is
+#    derived from the cache (see derive_blueprint_files), so a renamed or
+#    version-bumped doc upstream is picked up automatically instead of being
+#    silently skipped. Copy is one-directional cache -> host; never write back.
+if ! blueprint_list="$(derive_blueprint_files)"; then
+  stop "cache at $CACHE_DIR contains no xantham-*.md / XANTHAM-*.md docs — wrong repo, or an upstream rename this script cannot see. Refusing to report a successful sync that copied nothing." "no-blueprint-docs after=$after"
+fi
+
+copied=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if [ -f "$CACHE_DIR/$f" ]; then
+    # Only copy if changed, to keep the host git status quiet on no-op runs.
+    if [ ! -f "$HOST_DIR/blueprints/$f" ] || ! cmp -s "$CACHE_DIR/$f" "$HOST_DIR/blueprints/$f"; then
+      mkdir -p "$HOST_DIR/blueprints" 2>/dev/null || true
+      cp "$CACHE_DIR/$f" "$HOST_DIR/blueprints/$f"
+      copied=$((copied + 1))
+    fi
+  fi
+  # Here-string, not a pipe: a piped `while` runs in a subshell and `copied`
+  # would be lost on exit, silently reporting 0 docs copied on a real sync.
+done <<< "$blueprint_list"
+
+# 4. Clean-apply via the non-interactive path. Capture output + exit code.
+apply_out=""
+apply_rc=0
+if [ -x "$HOST_DIR/scripts/install-blueprint.sh" ] || [ -f "$HOST_DIR/scripts/install-blueprint.sh" ]; then
+  set +e
+  apply_out="$(bash "$HOST_DIR/scripts/install-blueprint.sh" --auto 2>&1)"
+  apply_rc=$?
+  set -e
+else
+  stop "host install-blueprint.sh missing at $HOST_DIR/scripts/ — bootstrap incomplete" "no-installer"
+fi
+
+if [ "$apply_rc" -eq 3 ]; then
+  # auto-apply hit a conflict/ambiguity. Surface it, do not pretend success.
+  echo "$apply_out" >&2
+  stop "auto-apply needs attention (see message above)" "apply-conflict after=$after"
+elif [ "$apply_rc" -ne 0 ]; then
+  echo "$apply_out" >&2
+  stop "auto-apply failed (rc=$apply_rc)" "apply-rc=$apply_rc after=$after"
+fi
+
+# 5. One-line summary.
+apply_summary="$(printf '%s' "$apply_out" | grep -E '^auto-apply:' | head -1 | sed 's/^auto-apply: *//')"
+[ -n "$apply_summary" ] || apply_summary="$apply_out"
+
+if [ "$before" = "$after" ] && [ "$copied" -eq 0 ]; then
+  msg="no change (cache at $after)"
+else
+  msg="synced $before -> $after, copied $copied doc(s), applied: $apply_summary"
+fi
+echo "xantham-sync: $msg"
+log_line "$msg"
+exit 0
 ```
 
 ---
 
-# Xantham Auto-Sync subsystem — REMOVED for safety
+## Template: scripts/xantham-sync.ps1
 
-The auto-sync subsystem (a `SessionStart` hook that pulled the public repo
-and re-applied the blueprint on **every session open**, plus the
-`scripts/xantham-sync.{sh,ps1}` and `scripts/install-xantham-autosync.{sh,ps1}`
-templates that wired it) has been removed. Auto-pulling upstream into a
-potentially live host on every session, with no operator gate, is unsafe.
+`PowerShell variant of xantham-sync.sh for Windows hosts without git-bash. Same contract, same log file, same exit codes. Still needs git + bash on PATH (both ship with Git for Windows) for git ops and the --auto apply step.`
 
-**Updates are now MANUAL and EXPLICIT only.** Do NOT generate an auto-update
-SessionStart hook, and do NOT wire any self-updating behaviour by default. The
-operator upgrades when THEY choose:
+```powershell
+<#
+.SYNOPSIS
+  xantham-sync.ps1 — PowerShell variant of scripts/xantham-sync.sh.
 
-- `sync habits` (the `xantham-sync-habits` skill) or `bash install-xantham-habits.sh --update`
-  to refresh habits + enforcement hooks (backed up + reversible).
-- `bash scripts/install-blueprint.sh --add E<N>` to add an extension (needs consent).
-- the wizard's customization-preserving three-way-diff upgrade path for the
-  blueprint itself (backs up first, preserves `USER-CUSTOM-SECTION` blocks, and
-  refuses to fresh-install over an existing install).
+.DESCRIPTION
+  Pull the latest public Xantham blueprint and clean-apply it to this host
+  project. Built to run unattended from a SessionStart hook so a downstream
+  agent (a second orchestrator on another machine) self-updates on every open.
 
-The `install-blueprint.sh --auto` non-interactive apply still exists as a manual,
-explicitly-invoked convenience — it is never run automatically on session start.
+  Use this variant on Windows hosts that DO NOT have Git for Windows / git-bash
+  available to run the .sh version. It still requires `git` and `bash` on PATH
+  for the actual git operations and the --auto apply step (Claude Code on
+  Windows ships with a usable bash via Git for Windows; if you have git you
+  have bash). If you have git-bash, prefer scripts/xantham-sync.sh — it is the
+  reference implementation and this file mirrors it.
+
+  Order of operations, idempotency, non-destructiveness, exit codes and config
+  env vars all match scripts/xantham-sync.sh exactly. See that file's header.
+
+.NOTES
+  Exit codes: 0 synced/no-op, 3 STOP (human needed), 2 usage/env error.
+#>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+# Resolve host project root. SessionStart hook sets CLAUDE_PROJECT_DIR.
+$HostDir = if ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR } else { Split-Path -Parent $PSScriptRoot }
+$RepoUrl  = if ($env:XANTHAM_REPO_URL)  { $env:XANTHAM_REPO_URL }  else { 'https://github.com/ZQadus/Xantham-system-blueprint.git' }
+$CacheDir = if ($env:XANTHAM_CACHE_DIR) { $env:XANTHAM_CACHE_DIR } else { Join-Path $HostDir '.xantham-cache' }
+$Branch   = if ($env:XANTHAM_BRANCH)    { $env:XANTHAM_BRANCH }    else { 'main' }
+$LogDir   = Join-Path $HostDir 'data/runtime'
+$LogFile  = Join-Path $LogDir 'xantham-sync.log'
+
+# Derived from the cache, never pinned — and deliberately a FUNCTION, not a list
+# evaluated here: at this point in the script the cache has not been cloned yet,
+# so a list built now would always be empty. It is called at the copy step below.
+#
+# A hardcoded list is the same bug the bash twin shipped with: it pinned v32 while
+# upstream had moved to v36, so the copy loop below — which skips any name that is
+# not present — copied the stale doc, never saw the new one, and still exited 0.
+# "File not present" and "nothing to do" are indistinguishable to a Test-Path guard,
+# which is why this must be derived and why the empty case must be loud.
+function Get-BlueprintFiles {
+  if (-not (Test-Path $CacheDir)) { return @() }
+  # One Get-ChildItem with two filters would OR them, but Windows filesystems are
+  # case-insensitive so both patterns match the same files — hence -Unique.
+  @(
+    Get-ChildItem -Path $CacheDir -File -Filter 'xantham-*.md' -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $CacheDir -File -Filter 'XANTHAM-*.md' -ErrorAction SilentlyContinue
+  ) | Select-Object -ExpandProperty Name -Unique
+}
+
+function Write-SyncLog([string]$Msg) {
+  try {
+    if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+    $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    Add-Content -Path $LogFile -Value "$ts  $Msg"
+  } catch { }
+}
+
+function Stop-Sync([string]$Human, [string]$Logged) {
+  Write-Error "xantham-sync STOP: $Human"
+  Write-SyncLog "STOP $Logged"
+  exit 3
+}
+
+function Have([string]$Cmd) { [bool](Get-Command $Cmd -ErrorAction SilentlyContinue) }
+
+if (-not (Have 'git'))  { Write-Error 'xantham-sync: git not on PATH';  Write-SyncLog 'ERR no-git';  exit 2 }
+if (-not (Have 'bash')) { Write-Error 'xantham-sync: bash not on PATH (install Git for Windows)'; Write-SyncLog 'ERR no-bash'; exit 2 }
+
+# 1. Ensure cache clone exists.
+if (-not (Test-Path (Join-Path $CacheDir '.git'))) {
+  Write-Host "xantham-sync: first run — cloning $RepoUrl into $CacheDir"
+  git clone --depth 50 --branch $Branch $RepoUrl $CacheDir 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-Sync "could not clone $RepoUrl (no network, or bad URL)" "clone-failed url=$RepoUrl" }
+}
+
+# 2. Fast-forward only.
+Push-Location $CacheDir
+try {
+  $before = (git rev-parse --short HEAD 2>$null); if (-not $before) { $before = 'unknown' }
+  git fetch --quiet origin $Branch 2>$null
+  if ($LASTEXITCODE -ne 0) { Stop-Sync 'fetch failed (network?)' 'fetch-failed' }
+  git merge --ff-only "origin/$Branch" 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Stop-Sync "cache at $CacheDir cannot fast-forward to origin/$Branch (diverged). Delete the cache dir to re-clone, or resolve by hand." "cache-diverged before=$before"
+  }
+  $after = (git rev-parse --short HEAD 2>$null); if (-not $after) { $after = 'unknown' }
+} finally {
+  Pop-Location
+}
+
+# 3. Copy refreshed blueprint docs into the host project (only changed files).
+$copied = 0
+$destDir = Join-Path $HostDir 'blueprints'
+if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+# @() is load-bearing: a one-element pipeline result collapses to a bare string,
+# and a string's .Count is 1 in PS7 but absent in PS5.1 — so the empty-guard below
+# would read as $null and the foreach would iterate the string's characters.
+$BlueprintFiles = @(Get-BlueprintFiles)
+if ($BlueprintFiles.Count -eq 0) {
+  Stop-Sync "cache at $CacheDir contains no xantham-*.md / XANTHAM-*.md docs — the clone or fast-forward did not produce the blueprint set. Refusing to report a successful sync that copied nothing." 'no-blueprint-docs'
+}
+foreach ($f in $BlueprintFiles) {
+  $src = Join-Path $CacheDir $f
+  $dst = Join-Path $destDir $f
+  if (Test-Path $src) {
+    $changed = $true
+    if (Test-Path $dst) {
+      $h1 = (Get-FileHash $src -Algorithm SHA256).Hash
+      $h2 = (Get-FileHash $dst -Algorithm SHA256).Hash
+      $changed = ($h1 -ne $h2)
+    }
+    if ($changed) { Copy-Item -Path $src -Destination $dst -Force; $copied++ }
+  }
+}
+
+# 4. Clean-apply via the non-interactive path (bash --auto).
+$installer = Join-Path $HostDir 'scripts/install-blueprint.sh'
+if (-not (Test-Path $installer)) {
+  Stop-Sync "host install-blueprint.sh missing at $installer — bootstrap incomplete" 'no-installer'
+}
+$applyOut = & bash $installer --auto 2>&1 | Out-String
+$applyRc = $LASTEXITCODE
+if ($applyRc -eq 3) {
+  Write-Error $applyOut
+  Stop-Sync 'auto-apply needs attention (see message above)' "apply-conflict after=$after"
+} elseif ($applyRc -ne 0) {
+  Write-Error $applyOut
+  Stop-Sync "auto-apply failed (rc=$applyRc)" "apply-rc=$applyRc after=$after"
+}
+
+# 5. One-line summary.
+$applySummary = ($applyOut -split "`n" | Where-Object { $_ -match '^auto-apply:' } | Select-Object -First 1) -replace '^auto-apply: *', ''
+if (-not $applySummary) { $applySummary = $applyOut.Trim() }
+
+if (($before -eq $after) -and ($copied -eq 0)) {
+  $msg = "no change (cache at $after)"
+} else {
+  $msg = "synced $before -> $after, copied $copied doc(s), applied: $applySummary"
+}
+Write-Host "xantham-sync: $msg"
+Write-SyncLog $msg
+exit 0
+```
+
+---
+
+## Template: scripts/install-xantham-autosync.sh
+
+`One-time self-installer (bash). Registers a SessionStart hook in .claude/settings.json that runs xantham-sync on every open. Idempotent (detects our entry by the 'xantham-sync' marker, never duplicates), merges into existing hooks, backs up settings before writing. Auto-detects OS to wire the .sh or .ps1 sync command; override with FORCE_VARIANT=sh|ps1. Subcommands: --status, --uninstall.`
+
+```bash
+#!/usr/bin/env bash
+# install-xantham-autosync.sh — one-time self-installer for Xantham auto-sync.
+#
+# Run this ONCE on a downstream host. It registers a
+# SessionStart hook in the host project's .claude/settings.json that runs
+# xantham-sync on every Claude Code session open. After this, the host pulls +
+# applies the latest public Xantham on every open with no hand-carrying.
+#
+# This is the bash variant (Mac / Linux / Windows-with-git-bash). A PowerShell
+# variant lives at scripts/install-xantham-autosync.ps1 for Windows hosts
+# without git-bash. Run whichever your shell supports — both produce an
+# equivalent, idempotent hook entry.
+#
+# Idempotent: re-running does NOT duplicate the hook. It detects an existing
+# xantham-sync SessionStart entry (by a stable marker substring) and leaves the
+# settings file untouched if already present.
+#
+# Non-destructive: merges into existing hooks. It never removes or rewrites
+# other hooks. It backs up settings.json before writing.
+#
+# Usage:
+#   bash scripts/install-xantham-autosync.sh            # auto-detect OS + shell
+#   bash scripts/install-xantham-autosync.sh --status   # show whether installed
+#   bash scripts/install-xantham-autosync.sh --uninstall # remove the hook entry
+#   FORCE_VARIANT=ps1 bash scripts/install-xantham-autosync.sh  # force ps1 hook
+set -euo pipefail
+
+HOST_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SETTINGS="$HOST_DIR/.claude/settings.json"
+
+# Stable marker so we can find OUR entry idempotently regardless of OS/shell.
+MARKER="xantham-sync"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Decide which sync command the SessionStart hook should run.
+#   - Windows + no git-bash bash on PATH  -> powershell xantham-sync.ps1
+#   - everything else                     -> bash xantham-sync.sh
+# Override with FORCE_VARIANT=sh|ps1.
+choose_command() {
+  local variant="${FORCE_VARIANT:-}"
+  if [ -z "$variant" ]; then
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+      MINGW*|MSYS*|CYGWIN*) variant="sh" ;;   # git-bash present -> use .sh
+      *)
+        # Native uname on Windows w/o git-bash usually fails -> 'unknown'.
+        if [ "$(uname -s 2>/dev/null || echo unknown)" = "unknown" ] && ! have bash; then
+          variant="ps1"
+        else
+          variant="sh"
+        fi
+        ;;
+    esac
+  fi
+  if [ "$variant" = "ps1" ]; then
+    # powershell -NoProfile -ExecutionPolicy Bypass -File <abs path>
+    printf 'powershell -NoProfile -ExecutionPolicy Bypass -File "%s/scripts/xantham-sync.ps1"' "$HOST_DIR"
+  else
+    printf 'bash "%s/scripts/xantham-sync.sh"' "$HOST_DIR"
+  fi
+}
+
+status() {
+  if [ ! -f "$SETTINGS" ]; then
+    echo "xantham-autosync: not installed (no $SETTINGS)"
+    return 1
+  fi
+  if grep -q "$MARKER" "$SETTINGS" 2>/dev/null; then
+    echo "xantham-autosync: INSTALLED — SessionStart hook present in $SETTINGS"
+    return 0
+  fi
+  echo "xantham-autosync: not installed"
+  return 1
+}
+
+case "${1:-}" in
+  --status) status; exit $? ;;
+esac
+
+have python3 || { echo "install-xantham-autosync: python3 required for safe JSON merge" >&2; exit 2; }
+
+CMD="$(choose_command)"
+MODE="${1:-install}"
+[ "$MODE" = "--uninstall" ] && MODE="uninstall" || MODE="install"
+
+# Back up settings before any write.
+if [ -f "$SETTINGS" ]; then
+  cp "$SETTINGS" "${SETTINGS}.autosync-bak.$(date +%s)"
+fi
+
+CMD="$CMD" MARKER="$MARKER" SETTINGS="$SETTINGS" HOST_DIR="$HOST_DIR" MODE="$MODE" python3 - <<'PY'
+import json, os, pathlib, sys
+
+settings_path = pathlib.Path(os.environ["SETTINGS"])
+cmd     = os.environ["CMD"]
+marker  = os.environ["MARKER"]
+mode    = os.environ["MODE"]
+
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+if settings_path.exists():
+    data = json.loads(settings_path.read_text() or "{}")
+else:
+    data = {}
+
+hooks = data.setdefault("hooks", {})
+ss = hooks.setdefault("SessionStart", [])
+
+def entry_has_marker(entry):
+    # entry shape: {"matcher"?: str, "hooks": [{"type":"command","command":...}]}
+    for h in entry.get("hooks", []):
+        if marker in (h.get("command") or ""):
+            return True
+    return False
+
+# Find existing xantham-sync entries.
+existing_idx = [i for i, e in enumerate(ss) if isinstance(e, dict) and entry_has_marker(e)]
+
+if mode == "uninstall":
+    if not existing_idx:
+        print("uninstall: no xantham-sync SessionStart hook found — nothing to do")
+        sys.exit(0)
+    # Remove our command from each matching entry; drop entries that become empty.
+    new_ss = []
+    for i, e in enumerate(ss):
+        if i in existing_idx:
+            e = dict(e)
+            e["hooks"] = [h for h in e.get("hooks", []) if marker not in (h.get("command") or "")]
+            if not e["hooks"]:
+                continue  # drop empty entry
+        new_ss.append(e)
+    hooks["SessionStart"] = new_ss
+    settings_path.write_text(json.dumps(data, indent=2) + "\n")
+    print("uninstall: removed xantham-sync SessionStart hook")
+    sys.exit(0)
+
+# install (idempotent)
+if existing_idx:
+    # Already present. Refresh the command in place so an OS/path change still
+    # converges, but do NOT add a duplicate entry.
+    changed = False
+    for i in existing_idx:
+        for h in ss[i].get("hooks", []):
+            if marker in (h.get("command") or "") and h.get("command") != cmd:
+                h["command"] = cmd
+                changed = True
+    if changed:
+        settings_path.write_text(json.dumps(data, indent=2) + "\n")
+        print("install: xantham-sync hook already present — refreshed command path")
+    else:
+        print("install: xantham-sync hook already present — no change (idempotent)")
+    sys.exit(0)
+
+# Append a fresh matcher-less SessionStart entry that runs our command.
+ss.append({
+    "hooks": [
+        {"type": "command", "command": cmd}
+    ]
+})
+settings_path.write_text(json.dumps(data, indent=2) + "\n")
+print("install: registered xantham-sync SessionStart hook ->", cmd)
+PY
+
+if [ "$MODE" = "install" ]; then
+  echo ""
+  echo "Done. Command wired: $CMD"
+  echo "It runs on every Claude Code session start in $HOST_DIR."
+  echo "Verify with: bash scripts/install-xantham-autosync.sh --status"
+fi
+```
+
+---
+
+## Template: scripts/install-xantham-autosync.ps1
+
+`PowerShell variant of the one-time self-installer for Windows hosts without git-bash. Wires the .ps1 sync command by default (so the host never needs bash to RUN the hook); pass -Variant sh to wire the bash command instead. Idempotent + non-destructive. Switches: -Status, -Uninstall, -Variant ps1|sh.`
+
+```powershell
+<#
+.SYNOPSIS
+  install-xantham-autosync.ps1 — PowerShell variant of the one-time self-installer.
+
+.DESCRIPTION
+  Run ONCE on a Windows host that does NOT have git-bash, to register a
+  SessionStart hook in .claude/settings.json that runs xantham-sync on every
+  Claude Code session open. Equivalent to scripts/install-xantham-autosync.sh;
+  produces the same idempotent hook entry.
+
+  By default it wires the .ps1 sync variant (powershell) so the host never
+  needs bash to RUN the hook. If you DO have git-bash and prefer the .sh sync
+  path, pass -Variant sh.
+
+  Idempotent: re-running does not duplicate the hook (detects our entry by a
+  stable marker). Non-destructive: merges into existing hooks, backs up
+  settings.json before writing, never removes other hooks.
+
+.PARAMETER Status
+  Show whether the hook is installed, then exit.
+
+.PARAMETER Uninstall
+  Remove the xantham-sync SessionStart hook entry.
+
+.PARAMETER Variant
+  'ps1' (default on Windows) or 'sh'. Which sync command the hook runs.
+
+.NOTES
+  Exit codes: 0 ok, 2 usage/env error.
+#>
+[CmdletBinding()]
+param(
+  [switch]$Status,
+  [switch]$Uninstall,
+  [ValidateSet('ps1','sh')]
+  [string]$Variant = 'ps1'
+)
+
+$ErrorActionPreference = 'Stop'
+
+$HostDir  = if ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR } else { Split-Path -Parent $PSScriptRoot }
+$Settings = Join-Path $HostDir '.claude/settings.json'
+$Marker   = 'xantham-sync'
+
+function Get-SyncCommand {
+  if ($Variant -eq 'sh') {
+    return ('bash "{0}/scripts/xantham-sync.sh"' -f $HostDir)
+  } else {
+    return ('powershell -NoProfile -ExecutionPolicy Bypass -File "{0}/scripts/xantham-sync.ps1"' -f $HostDir)
+  }
+}
+
+if ($Status) {
+  if (-not (Test-Path $Settings)) { Write-Host "xantham-autosync: not installed (no $Settings)"; exit 1 }
+  if ((Get-Content -Raw $Settings) -match [regex]::Escape($Marker)) {
+    Write-Host "xantham-autosync: INSTALLED — SessionStart hook present in $Settings"; exit 0
+  }
+  Write-Host 'xantham-autosync: not installed'; exit 1
+}
+
+$Cmd = Get-SyncCommand
+
+# Load (or init) settings.
+$settingsDir = Split-Path -Parent $Settings
+if (-not (Test-Path $settingsDir)) { New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null }
+
+if (Test-Path $Settings) {
+  $stamp = (Get-Date).ToString('yyyyMMddHHmmss')
+  Copy-Item $Settings "$Settings.autosync-bak.$stamp" -Force
+  $raw = Get-Content -Raw $Settings
+  if ([string]::IsNullOrWhiteSpace($raw)) { $data = [pscustomobject]@{} } else { $data = $raw | ConvertFrom-Json }
+} else {
+  $data = [pscustomobject]@{}
+}
+# ConvertFrom-Json yields PSCustomObjects; ensure $data is one (not a hashtable)
+# so Add-Member + dotted property access work uniformly below.
+if ($data -isnot [pscustomobject]) { $data = [pscustomobject]$data }
+
+# Normalise into a PSCustomObject tree we can mutate. ConvertFrom-Json gives
+# PSCustomObjects; we re-serialize at the end with depth.
+function Ensure-Prop($obj, $name, $default) {
+  if (-not ($obj.PSObject.Properties.Name -contains $name)) {
+    $obj | Add-Member -NotePropertyName $name -NotePropertyValue $default
+  }
+  return $obj.$name
+}
+
+Ensure-Prop $data 'hooks' ([pscustomobject]@{}) | Out-Null
+$hooks = $data.hooks
+Ensure-Prop $hooks 'SessionStart' (@()) | Out-Null
+# Force SessionStart to a mutable array list.
+$ss = @($hooks.SessionStart)
+
+function Entry-HasMarker($entry) {
+  if (-not ($entry.PSObject.Properties.Name -contains 'hooks')) { return $false }
+  foreach ($h in @($entry.hooks)) {
+    if (($h.command) -and ($h.command -match [regex]::Escape($Marker))) { return $true }
+  }
+  return $false
+}
+
+$existing = @($ss | Where-Object { Entry-HasMarker $_ })
+
+if ($Uninstall) {
+  if ($existing.Count -eq 0) { Write-Host 'uninstall: no xantham-sync SessionStart hook found — nothing to do'; exit 0 }
+  $kept = @()
+  foreach ($e in $ss) {
+    if (Entry-HasMarker $e) {
+      $e.hooks = @($e.hooks | Where-Object { -not (($_.command) -and ($_.command -match [regex]::Escape($Marker))) })
+      if (@($e.hooks).Count -eq 0) { continue }
+    }
+    $kept += $e
+  }
+  $hooks.SessionStart = $kept
+  ($data | ConvertTo-Json -Depth 20) | Set-Content -Path $Settings
+  Write-Host 'uninstall: removed xantham-sync SessionStart hook'
+  exit 0
+}
+
+if ($existing.Count -gt 0) {
+  # Already present — refresh command path, never duplicate.
+  $changed = $false
+  foreach ($e in $existing) {
+    foreach ($h in @($e.hooks)) {
+      if (($h.command) -and ($h.command -match [regex]::Escape($Marker)) -and ($h.command -ne $Cmd)) {
+        $h.command = $Cmd; $changed = $true
+      }
+    }
+  }
+  if ($changed) {
+    ($data | ConvertTo-Json -Depth 20) | Set-Content -Path $Settings
+    Write-Host 'install: xantham-sync hook already present — refreshed command path'
+  } else {
+    Write-Host 'install: xantham-sync hook already present — no change (idempotent)'
+  }
+  exit 0
+}
+
+# Append a fresh entry.
+$newEntry = [pscustomobject]@{
+  hooks = @([pscustomobject]@{ type = 'command'; command = $Cmd })
+}
+$ss += $newEntry
+$hooks.SessionStart = $ss
+($data | ConvertTo-Json -Depth 20) | Set-Content -Path $Settings
+Write-Host "install: registered xantham-sync SessionStart hook -> $Cmd"
+Write-Host ''
+Write-Host "Done. It runs on every Claude Code session start in $HostDir."
+Write-Host 'Verify with: powershell -File scripts/install-xantham-autosync.ps1 -Status'
+```
+
+---
+## Template: scripts/new-session-launch.sh (fresh-session auto-launch, cross-platform)
+
+`Turn a typed "new session" into an actual fresh session on any OS, instead of telling the human to go open a terminal. Tier 1 (supervised): sentinel + SIGTERM, the supervisor re-execs FRESH in place — no new window. Tier 2 (unsupervised): terminate the old session, WAIT for it to exit, then open a terminal per-OS. Tier 3 (headless): print the command and say plainly that nothing launched. Env: AGENT_LAUNCH_CMD, NEW_SESSION_EXIT_WAIT.`
+
+**Verification status, stated honestly.** The macOS path, both supervised and unsupervised branches, the abort-on-stubborn-process guard, and the headless degradation were all EXECUTED and proven on a real machine (a Terminal window genuinely opened via `open -a` with no TCC prompt, and the launched shell wrote its proof file). **The Windows and Linux launch branches are authored, not executed** — no Windows box or Linux desktop was available. Treat them as reviewed code, not verified code, and expect to adjust the emulator flags on first real use. Saying so is the point: the rest of this guide flags every bash dependency carefully, and an unlabelled "cross-platform" claim is exactly the kind of thing that gets discovered at the worst moment.
+
+```bash
+#!/usr/bin/env bash
+# new-session-launch.sh — turn a typed "new session" into an ACTUAL fresh
+# session, on any OS, instead of telling the human to go open a terminal.
+#
+# THE GAP THIS CLOSES
+# -------------------
+# Every other part of the sync flow is automatic: the orchestrator persists
+# memory, writes the pickup note, commits. Then it stops and says "start a new
+# session to get a fresh context window" — and a human has to do the one
+# mechanical step in the chain. That instruction is also the step most often
+# skipped, which is exactly how a session runs on past its useful context.
+#
+# TWO PATHS, AND THE FIRST ONE IS BETTER
+# --------------------------------------
+# Tier 1 (SUPERVISED — preferred). If the agent runs under the supervisor
+# wrapper, no terminal needs opening at all. Write a force-fresh sentinel, then
+# SIGTERM the supervised process. The supervisor's `wait` returns, it consumes
+# the sentinel, and it re-execs FRESH (stripping --continue/--resume) in the
+# terminal that is already open. Nothing new is spawned.
+#
+# Tier 2 (UNSUPERVISED — fallback). No supervisor, so a terminal must actually
+# be opened. This is the per-OS path, and it is strictly worse: see the ordering
+# constraint below.
+#
+# Tier 3 (HEADLESS). No terminal exists (ssh, CI, a container). Print the exact
+# command and say plainly that nothing was launched. Never hang, never claim a
+# launch that did not happen.
+#
+# THE ORDERING CONSTRAINT (do not reorder these two steps)
+# --------------------------------------------------------
+# On the Tier 2 path the OLD session must be fully dead BEFORE the new one
+# starts. Launching first produces two live agents that both hold the same
+# single-owner resources — most damagingly the messaging poll lease, where two
+# pollers fight over one connection and the platform starts 409-ing the loser.
+# That is a failure this system has already been through once and fixed properly
+# (see the poll-lease section of the reliability stack); re-introducing it via a
+# convenience feature would be a poor trade. So: signal, WAIT for actual exit
+# (bounded), and only then launch. If the old process will not die inside the
+# timeout, ABORT rather than double up — a failed "new session" is recoverable,
+# two pollers silently fighting is not.
+#
+# Tier 1 has this property for free: the supervisor cannot re-exec until the
+# process it is waiting on has already exited.
+#
+# Usage:
+#   bash scripts/new-session-launch.sh              # persist + verify + go fresh
+#   bash scripts/new-session-launch.sh --force      # go fresh despite a gate miss
+#   bash scripts/new-session-launch.sh --dry-run    # print the plan, change nothing
+#
+# Exit codes:
+#   0  fresh session launched (or handed to the supervisor to launch)
+#   3  no terminal could be opened — command printed for the human instead
+#   4  old session would not exit in time; ABORTED to avoid two live agents
+#   6  continuity gate found uncaptured context — BLOCKED (nothing killed)
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUNTIME_DIR="$REPO_ROOT/data/runtime"
+
+FORCE_FRESH_FLAG="$RUNTIME_DIR/force-fresh-next-launch"
+AGENT_PID_FILE="$RUNTIME_DIR/{{orchestrator_lower}}-claude.pid"
+# The SUPERVISOR pid file — written by the supervisor wrapper, not by the agent.
+# Tier 1 is gated on THIS, not on the agent pid file. Getting that wrong makes
+# Tier 2 unreachable: an agent pid file exists in BOTH topologies, so keying on
+# it sends an unsupervised host down the "the supervisor will relaunch it" path,
+# where nothing relaunches anything and the user is left with no session at all.
+# (That bug was in the first draft of this script and was caught by testing the
+# unsupervised branch, not by reading it.)
+SUPERVISOR_PID_FILE="$RUNTIME_DIR/{{orchestrator_lower}}-supervisor.pid"
+LAUNCH_CMD="${AGENT_LAUNCH_CMD:-claude}"
+EXIT_WAIT_SECONDS="${NEW_SESSION_EXIT_WAIT:-20}"
+
+FORCE=0
+DRY_RUN=0
+for a in "$@"; do
+  case "$a" in
+    --force)   FORCE=1 ;;
+    --dry-run) DRY_RUN=1 ;;
+  esac
+done
+
+mkdir -p "$RUNTIME_DIR" 2>/dev/null || true
+
+say() { printf '[new-session] %s\n' "$1"; }
+err() { printf '[new-session] %s\n' "$1" >&2; }
+
+# --- is $1 a live agent process we own? --------------------------------------
+# Defensive against PID reuse: the recorded PID must still be alive AND still
+# look like the agent CLI, or we refuse to signal it. Never SIGTERM a stranger.
+is_live_agent() {
+  local pid="$1" cmd
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  case "$cmd" in *"$LAUNCH_CMD"*) return 0 ;; *) return 1 ;; esac
+}
+
+# --- is a supervisor actually running? ---------------------------------------
+# Only a live supervisor can re-exec the agent in place. Checked independently
+# of the agent pid file precisely because both topologies have one of those.
+supervisor_is_live() {
+  local pid
+  [ -f "$SUPERVISOR_PID_FILE" ] || return 1
+  pid="$(tr -dc '0-9' < "$SUPERVISOR_PID_FILE" 2>/dev/null || true)"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+# --- 0. persist + verify continuity BEFORE going fresh ------------------------
+# Going fresh is the most common DELIBERATE context boundary, which makes it the
+# worst one to drop state at. Persist first (that auto-fixes the usual miss —
+# uncommitted memory), then verify; a remaining miss blocks unless --force.
+if [ "$DRY_RUN" -eq 0 ]; then
+  if [ -x "$REPO_ROOT/scripts/continuity-persist.sh" ]; then
+    say "persisting session memory before going fresh..."
+    bash "$REPO_ROOT/scripts/continuity-persist.sh" || true
+  fi
+  if [ -x "$REPO_ROOT/scripts/continuity-verify.sh" ]; then
+    if verify_out="$(bash "$REPO_ROOT/scripts/continuity-verify.sh" 2>&1)"; then
+      say "continuity gate PASS — safe to go fresh."
+    elif [ "$FORCE" -eq 1 ]; then
+      err "continuity gate FAILED but --force given — going fresh anyway (context MAY be lost)."
+    else
+      err "$verify_out"
+      err "BLOCKED: uncaptured context (above). Nothing killed, nothing launched."
+      err "Fix the misses, or re-run with --force."
+      exit 6
+    fi
+  fi
+fi
+
+# --- 1. TIER 1: supervised -> let the supervisor do the relaunch ---------------
+if supervisor_is_live && [ -f "$AGENT_PID_FILE" ]; then
+  AGENT_PID="$(tr -dc '0-9' < "$AGENT_PID_FILE" 2>/dev/null || true)"
+  if is_live_agent "$AGENT_PID"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      say "DRY RUN: supervised (pid=$AGENT_PID) -> sentinel + SIGTERM; supervisor re-execs fresh in place."
+      exit 0
+    fi
+    : > "$FORCE_FRESH_FLAG"
+    say "supervised session found (pid=$AGENT_PID); sentinel written."
+    kill -TERM "$AGENT_PID" 2>/dev/null
+    say "signalled. Supervisor will re-exec a FRESH session in place — no new window."
+    exit 0
+  fi
+fi
+
+# --- 2. TIER 2: unsupervised -> we must open a terminal ourselves --------------
+say "no supervised session found — will open a fresh terminal."
+
+# 2a. Kill the old session FIRST and WAIT for it to actually be gone.
+#     See the ordering constraint in the header: overlapping sessions fight over
+#     the single-owner poll lease. Bounded wait, then abort rather than double up.
+if [ -f "$AGENT_PID_FILE" ]; then
+  OLD_PID="$(tr -dc '0-9' < "$AGENT_PID_FILE" 2>/dev/null || true)"
+  if is_live_agent "$OLD_PID"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      say "DRY RUN: would SIGTERM pid=$OLD_PID, wait up to ${EXIT_WAIT_SECONDS}s for exit, then launch."
+    else
+      say "terminating old session (pid=$OLD_PID) before launching..."
+      kill -TERM "$OLD_PID" 2>/dev/null
+      waited=0
+      while [ "$waited" -lt "$EXIT_WAIT_SECONDS" ]; do
+        kill -0 "$OLD_PID" 2>/dev/null || break
+        sleep 1
+        waited=$((waited + 1))
+      done
+      if kill -0 "$OLD_PID" 2>/dev/null; then
+        err "ABORT: old session (pid=$OLD_PID) still alive after ${EXIT_WAIT_SECONDS}s."
+        err "Refusing to launch a second one — two live agents fight over the"
+        err "single-owner message poll lease, and the platform 409s the loser."
+        err "Close it by hand, then re-run."
+        exit 4
+      fi
+      say "old session exited cleanly."
+    fi
+  fi
+fi
+
+# 2b. Per-OS terminal launch.
+#     The launcher is written to a FILE and executed, rather than passed as a
+#     quoted string through an AppleScript/shell hop — a path is a fixed token,
+#     a string gets re-parsed by whatever shell it lands in.
+LAUNCHER="$RUNTIME_DIR/new-session-launcher.sh"
+
+write_launcher() {
+  cat > "$LAUNCHER" <<LAUNCHER_EOF
+#!/usr/bin/env bash
+cd "$REPO_ROOT" || exit 1
+exec $LAUNCH_CMD
+LAUNCHER_EOF
+  chmod +x "$LAUNCHER"
+}
+
+# Headless check comes FIRST: with no display/TTY there is no terminal to open,
+# and every launcher below would either fail obscurely or block.
+#
+# The Windows arm is NOT a copy of the Linux one, and the difference is the whole
+# point. Git Bash / MSYS report a `MINGW64_NT-*` uname and set NEITHER $DISPLAY nor
+# $WAYLAND_DISPLAY on a perfectly normal desktop — those are X11/Wayland variables
+# that Windows has no reason to define. Folding Windows into the generic `*)` arm
+# therefore declares every Windows desktop "headless" and exits before the dispatch
+# below, making launch_windows() dead code that can never run. Detect the display
+# server ONLY where a display server is the mechanism.
+is_headless() {
+  case "$(uname -s)" in
+    Darwin)                          [ -z "${SSH_CONNECTION:-}" ] && return 1 || return 0 ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT) [ -z "${SSH_CONNECTION:-}" ] && return 1 || return 0 ;;
+    *)                               [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && return 1 || return 0 ;;
+  esac
+}
+
+launch_macos() {
+  # NOT `osascript -e 'tell app "Terminal" to do script ...'`: that needs
+  # Automation (TCC) consent, which on a fresh machine throws a dialog the
+  # script cannot answer, and unattended just fails. `open -a` against an
+  # executable FILE needs no such consent. This branch is execution-verified.
+  local app="Terminal"
+  [ -d "/Applications/iTerm.app" ] && app="iTerm"
+  open -a "$app" "$LAUNCHER" 2>/dev/null
+}
+
+launch_windows() {
+  # AUTHORED, NOT EXECUTED — no Windows host was available. Windows Terminal is
+  # the nice path but is NOT guaranteed present (ships with Win11, optional on
+  # Win10), so detect and degrade rather than assume.
+  if command -v wt.exe >/dev/null 2>&1; then
+    wt.exe -d "$(cygpath -w "$REPO_ROOT" 2>/dev/null || printf '%s' "$REPO_ROOT")" \
+           bash -lc "exec $LAUNCH_CMD" 2>/dev/null && return 0
+  fi
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command "Start-Process bash -ArgumentList '-lc','exec $LAUNCH_CMD' -WorkingDirectory '$REPO_ROOT'" 2>/dev/null && return 0
+  fi
+  command -v cmd.exe >/dev/null 2>&1 || return 1
+  cmd.exe /c start bash -lc "exec $LAUNCH_CMD" 2>/dev/null
+}
+
+launch_linux() {
+  # AUTHORED, NOT EXECUTED — no Linux desktop was available. There is no
+  # standard terminal on Linux, so try the user's own preference first, then the
+  # common emulators, then give up honestly rather than guessing further.
+  local t
+  for t in "${TERMINAL:-}" x-terminal-emulator gnome-terminal konsole \
+           xfce4-terminal kitty alacritty tilix urxvt xterm; do
+    [ -n "$t" ] || continue
+    command -v "$t" >/dev/null 2>&1 || continue
+    case "$t" in
+      gnome-terminal) "$t" -- "$LAUNCHER" 2>/dev/null && return 0 ;;
+      *)              "$t" -e "$LAUNCHER" 2>/dev/null && return 0 ;;
+    esac
+  done
+  return 1
+}
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  say "DRY RUN: would write $LAUNCHER and open it via the $(uname -s) path."
+  exit 0
+fi
+
+write_launcher
+
+if is_headless; then
+  err "headless environment (no display / remote shell) — nothing to open."
+  err "Start a fresh session yourself with:"
+  err "    cd $REPO_ROOT && $LAUNCH_CMD"
+  exit 3
+fi
+
+launched=1
+case "$(uname -s)" in
+  Darwin)                          launch_macos   && launched=0 ;;
+  Linux)                           launch_linux   && launched=0 ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT) launch_windows && launched=0 ;;
+  *)                               launched=1 ;;
+esac
+
+if [ "$launched" -ne 0 ]; then
+  err "could not open a terminal on $(uname -s) — no supported emulator found."
+  err "Start a fresh session yourself with:"
+  err "    cd $REPO_ROOT && $LAUNCH_CMD"
+  exit 3
+fi
+
+say "fresh session launched in a new terminal window."
+exit 0
+```
+
+**Wiring it.** This is the COLD-START path only — use it when no session is running and a window has to be opened. When a session IS running (the normal case: the operator types `new session` in chat), use the restart-in-place path below instead. That path is strictly better for a chat-triggered restart because it keeps the SAME window and therefore the same message channel; opening a second window would leave two agents contending for one channel.
+
+---
+
+## Template: scripts/{{orchestrator_lower}}-session.cmd (Windows loop wrapper — restart in place)
+
+`Every Windows session window runs INSIDE this wrapper, not `claude` directly — the launchers and desktop shortcuts all start it. It runs claude in a loop; when claude exits it looks for the restart flag and relaunches a FRESH session in the same window if the flag is there. This is the proven implementation from a working downstream install on Windows 10; Windows 11 runs it unchanged (Windows Terminal hosts the same cmd wrapper).`
+
+````cmd
+@echo off
+REM {{orchestrator_lower}}-session.cmd — loop wrapper for restart-in-place.
+REM
+REM Launch every session through THIS, never `claude` directly. A bare `claude`
+REM has no loop behind it, so "new session" kills it and nothing comes back —
+REM the window simply closes. That is the single most common wiring mistake.
+REM
+REM Usage:  {{orchestrator_lower}}-session.cmd            (fresh session)
+REM         {{orchestrator_lower}}-session.cmd --resume   (resume, first launch only)
+
+setlocal
+cd /d "%~dp0.."
+
+REM Capture the caller's resume intent ONCE. It is deliberately cleared after the
+REM first launch (see below) so that every RESTART is fresh.
+set "MODE=%~1"
+set "FLAG=data\runtime\restart-session.flag"
+
+:loop
+claude %MODE%
+
+REM Past this point claude has exited. Clear the resume arg so a relaunch is a
+REM genuinely fresh session — "new session" means fresh context, and carrying
+REM --resume through the loop would silently return the user to the old one.
+set "MODE="
+
+if exist "%FLAG%" (
+  del /q "%FLAG%"
+  echo [{{orchestrator_lower}}] restart flag found - relaunching fresh...
+  goto loop
+)
+
+echo [{{orchestrator_lower}}] session ended.
+endlocal
+````
+
+---
+
+## Template: scripts/new-session.sh (restart-in-place trigger, all three OSes)
+
+`The TRIGGER. Writes the restart sentinel, then ends the running claude so its wrapper relaunches it fresh in the same window. Call it AFTER the agent has replied and the sync cycle has run.`
+
+````bash
+#!/usr/bin/env bash
+# new-session.sh — restart the CURRENT session window as a fresh session.
+#
+# Model (identical on all three OSes, only the "end the process" step differs):
+#   1. write a restart sentinel
+#   2. end the running claude
+#   3. the loop wrapper the window was started with sees the sentinel, consumes
+#      it, and relaunches claude with no resume arg -> fresh context, same window
+#
+# ORDER MATTERS: the agent must have already replied on the message channel
+# before this runs. The fresh session takes over the channel, and the old one
+# cannot send once it has. Reply -> sync -> then call this.
+#
+# Exit codes:
+#   0  sentinel written + claude signalled (fresh relaunch incoming)
+#   3  no wrapper detected / nothing to signal (sentinel rolled back)
+#   2  usage or environment error
+set -uo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
+[ -n "$REPO_ROOT" ] || { echo "new-session: cannot resolve repo root" >&2; exit 2; }
+cd "$REPO_ROOT" 2>/dev/null || { echo "new-session: cannot cd to $REPO_ROOT" >&2; exit 2; }
+
+RUNTIME_DIR="$REPO_ROOT/data/runtime"
+mkdir -p "$RUNTIME_DIR" 2>/dev/null || { echo "new-session: cannot create $RUNTIME_DIR" >&2; exit 2; }
+
+# Two sentinel names because the two wrappers are different programs with
+# different histories. Writing BOTH costs nothing and removes an entire class of
+# silent failure: a sentinel the wrapper does not read is indistinguishable from
+# a successful restart, because the trigger exits 0 either way.
+POSIX_FLAG="$RUNTIME_DIR/force-fresh-next-launch"   # read by bin/{{orchestrator_lower}}-launch.sh
+WIN_FLAG="$RUNTIME_DIR/restart-session.flag"        # read by {{orchestrator_lower}}-session.cmd
+PID_FILE="$RUNTIME_DIR/{{orchestrator_lower}}-claude.pid"
+
+rollback() { rm -f "$POSIX_FLAG" "$WIN_FLAG" 2>/dev/null; }
+
+# --- 1. write the sentinels ---------------------------------------------------
+: > "$POSIX_FLAG" || { echo "new-session: cannot write $POSIX_FLAG" >&2; exit 2; }
+: > "$WIN_FLAG"   || { echo "new-session: cannot write $WIN_FLAG"   >&2; exit 2; }
+
+# --- 2. end the running claude, per OS ---------------------------------------
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    # DIRECT taskkill. Do NOT wrap this in `cmd //c start "title" ...`: MSYS and
+    # Git Bash mangle the quoting and Windows tries to execute the window TITLE
+    # as a program ("Windows cannot find ..."). That was a real bug in an earlier
+    # version of this script; the direct call sidesteps the quoting entirely.
+    #
+    # //F //IM uses MSYS's doubled-slash escaping so the shell does not rewrite
+    # /F into a path. This ends every claude.exe, which on a single-session
+    # desktop is the intended target — see the note in the guide if you run more
+    # than one session on one Windows box.
+    if ! taskkill //F //IM claude.exe >/dev/null 2>&1; then
+      echo "new-session: no running claude.exe found — nothing to restart." >&2
+      rollback
+      exit 3
+    fi
+    ;;
+  *)
+    # macOS / Linux: signal ONLY the PID the supervisor recorded, and only after
+    # confirming that PID is still a claude process. An image-name kill would
+    # also take out unrelated processes; a bare PID from a stale file could hit
+    # whatever inherited that number. Both checks are cheap.
+    if [ ! -f "$PID_FILE" ]; then
+      echo "new-session: no supervisor pid file at $PID_FILE." >&2
+      echo "new-session: this window was probably started with a bare 'claude'." >&2
+      echo "new-session: relaunch it through the supervisor wrapper to enable restart-in-place." >&2
+      rollback
+      exit 3
+    fi
+    pid="$(tr -cd '0-9' < "$PID_FILE")"
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+      echo "new-session: pid '$pid' is not running (stale pid file)." >&2
+      rollback
+      exit 3
+    fi
+    # Match `claude` as a COMMAND TOKEN, not as a substring. A bare
+    # `grep -q claude` accepts any process whose command line merely mentions the
+    # word — `tail -f logs/claude-launch.log`, an editor holding a file with
+    # "claude" in its name, even another copy of this guard — and the pid file it
+    # is checking may be stale, so the two failures compound into signalling
+    # something unrelated. Anchoring on a path/space boundary accepts
+    # `/path/to/claude`, `node /opt/claude/cli.js` and `...\claude.exe` while
+    # rejecting `claude-launch.log`, `claudette` and `claude_helper.py`.
+    if ! ps -p "$pid" -o command= 2>/dev/null | grep -Eq '(^|/|\\| )claude(\.exe|\.js)?($|/|\\| )'; then
+      echo "new-session: pid $pid is not a claude process — refusing to signal it." >&2
+      rollback
+      exit 3
+    fi
+    # SIGTERM, not SIGKILL: claude exits cleanly and the supervisor treats any
+    # non-clean exit as a relaunch trigger.
+    kill -TERM "$pid" 2>/dev/null || { echo "new-session: signal failed" >&2; rollback; exit 3; }
+    ;;
+esac
+
+echo "new-session: sentinel written + claude signalled — fresh session incoming."
+exit 0
+````
+
+**Wiring it.** The orchestrator runs this when the operator types `new session`, and the sync skill calls it as its final step so `sync` → `new session` is one unbroken chain. Keep the old "start a new session yourself" line as the documented fallback text — it is what the cold-start script prints when there is no terminal to open. Do not delete it; it stops being an instruction and becomes an error message.
+
+---
+
+## Template: scripts/client-log-gate.sh (the write-time client-log gate)
+
+`PostToolUse(Write|Edit) gate: when a file lands in a client/project folder without that project's CLIENT-LOG.md being touched in the same window, say so and name the exact file to append to. Never blocks. Dedupes per file per window. Env: CLIENT_LOG_GATE_OFF=1, CLIENT_LOG_STALE_MINUTES (default 20), CLIENT_LOG_DEDUP_MINUTES (default 30).`
+
+```bash
+#!/usr/bin/env bash
+# client-log-gate.sh — nudge when something lands in a client folder without
+# reaching that client's CLIENT-LOG.md.
+#
+# WHY THIS EXISTS
+# ---------------
+# A forwarded client document was saved into the right project folder and
+# committed — and never appended to that project's CLIENT-LOG.md. Nobody
+# noticed, because the folder LOOKED right.
+#
+# That is the failure mode this catches. A standalone file in the folder looks
+# like the rule was followed. It wasn't: CLIENT-LOG.md is the file a future
+# session actually reads as source of truth before quoting, scoping or building.
+# A file nobody opens is not a log. Saving is not logging.
+#
+# Off switch: CLIENT_LOG_GATE_OFF=1
+# Tune:       CLIENT_LOG_STALE_MINUTES (default 20)
+
+set -uo pipefail
+
+[ "${CLIENT_LOG_GATE_OFF:-0}" = "1" ] && exit 0
+
+# NOTE: the default is assigned on its own line, NOT inline as
+# ${ORCHESTRATOR_DIR:-{{project_path}}} — bash stops the parameter expansion at
+# the FIRST closing brace, so that form yields "<path>}}" whenever the env var
+# is set. Verified, not theoretical.
+DEFAULT_ROOT="{{project_path}}"
+ROOT="${ORCHESTRATOR_DIR:-$DEFAULT_ROOT}"
+CLIENTS_SUBDIR="${CLIENT_LOG_ROOT:-data/clients}"
+STALE="${CLIENT_LOG_STALE_MINUTES:-20}"
+LOGFILE="$ROOT/data/runtime/client-log-nudges.jsonl"
+
+PAYLOAD="$(cat 2>/dev/null || true)"
+[ -z "$PAYLOAD" ] && exit 0
+
+FILE="$(printf '%s' "$PAYLOAD" | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: print(""); raise SystemExit
+print((d.get("tool_input") or {}).get("file_path") or "")
+' 2>/dev/null)" || exit 0
+
+[ -z "$FILE" ] && exit 0
+
+# Only care about writes inside a client folder.
+case "$FILE" in
+  "$ROOT/$CLIENTS_SUBDIR"/*) ;;
+  *) exit 0 ;;
+esac
+
+# Work out the project slug: <clients-subdir>/<project>/...
+REL="${FILE#"$ROOT/$CLIENTS_SUBDIR"/}"
+PROJECT="${REL%%/*}"
+[ -z "$PROJECT" ] && exit 0
+[ "$PROJECT" = "$REL" ] && exit 0          # a loose file directly in the root
+
+CLIENT_LOG="$ROOT/$CLIENTS_SUBDIR/$PROJECT/CLIENT-LOG.md"
+
+# The CLIENT-LOG itself, or a media/asset drop, is fine.
+case "$FILE" in
+  "$CLIENT_LOG") exit 0 ;;
+  *"/media/"*|*.png|*.jpg|*.jpeg|*.gif|*.mp4|*.pdf|*.zip) exit 0 ;;
+esac
+
+NEEDS_NUDGE=0
+if [ ! -f "$CLIENT_LOG" ]; then
+  NEEDS_NUDGE=1
+  REASON="there is no CLIENT-LOG.md for '$PROJECT' yet"
+elif [ -z "$(find "$CLIENT_LOG" -mmin "-$STALE" 2>/dev/null)" ]; then
+  NEEDS_NUDGE=1
+  REASON="CLIENT-LOG.md has not been touched in ${STALE}+ minutes"
+fi
+
+[ "$NEEDS_NUDGE" -eq 0 ] && exit 0
+
+# --- de-duplication ----------------------------------------------------------
+# On its first evening, an un-deduped version of this gate said the SAME thing
+# 14 times about the SAME file, because an agent saved it repeatedly while
+# iterating. 14 identical nudges is not 14 units of enforcement — it is how a
+# gate teaches everyone to stop reading it, which then costs you the honest
+# firings too. Say it once per file per window; a repeat write is the same
+# unaddressed fact, not a new one.
+#
+# The SUPPRESSED firing is still logged (suppressed:true) so the efficacy
+# question stays measurable — the point is to cut noise, not to hide the count.
+DEDUP="${CLIENT_LOG_DEDUP_MINUTES:-30}"
+if [ "$DEDUP" -gt 0 ] 2>/dev/null && [ -f "$LOGFILE" ]; then
+  if RECENT="$(FILE_BASE="${FILE##*/}" PROJECT="$PROJECT" LOGFILE="$LOGFILE" DEDUP="$DEDUP" python3 -c '
+import json, os
+from datetime import datetime, timedelta, timezone
+cut = datetime.now(timezone.utc) - timedelta(minutes=int(os.environ["DEDUP"]))
+base, proj = os.environ["FILE_BASE"], os.environ["PROJECT"]
+try:
+    with open(os.environ["LOGFILE"], errors="replace") as fh:
+        for line in fh:
+            try: r = json.loads(line)
+            except Exception: continue
+            if r.get("suppressed"): continue
+            if r.get("project") != proj or r.get("file") != base: continue
+            try: t = datetime.fromisoformat(str(r.get("ts","")).replace("Z","+00:00"))
+            except Exception: continue
+            if t >= cut:
+                print("dup"); break
+except Exception:
+    pass
+' 2>/dev/null)" && [ "$RECENT" = "dup" ]; then
+    printf '{"ts":"%s","project":"%s","file":"%s","suppressed":true}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROJECT" "${FILE##*/}" >> "$LOGFILE" 2>/dev/null || true
+    exit 0
+  fi
+fi
+
+{
+  # Lead by saying nothing failed. This hook exits 2, which renders like an
+  # error, and a model that reads it as one will retry a Write that already
+  # succeeded — turning a reminder into a duplicate-file bug.
+  echo "ADVISORY (the write SUCCEEDED — nothing failed, do not retry it)."
+  echo "(client-log-gate: wrote into $CLIENTS_SUBDIR/$PROJECT/ but $REASON.)"
+  echo "  HARD RULE: the file is not the log. CLIENT-LOG.md is what a future"
+  echo "  session reads as source of truth before quoting, scoping or building."
+  echo "  Append to: $CLIENTS_SUBDIR/$PROJECT/CLIENT-LOG.md"
+  echo "    - what came in, and from whom"
+  echo "    - PROVENANCE: binding spec / reference / idea-only (they are not the same)"
+  echo "    - what it CHANGES about the product, not just that it arrived"
+  echo "    - a WHERE WE ARE line: current state + the exact next step"
+  echo "  Then commit. Silence for this run: CLIENT_LOG_GATE_OFF=1"
+} >&2
+
+mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+printf '{"ts":"%s","project":"%s","file":"%s","delivered":true}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROJECT" "${FILE##*/}" >> "$LOGFILE" 2>/dev/null || true
+
+# --- exit 2, NOT 0 -----------------------------------------------------------
+# THIS LINE IS THE WHOLE GATE. An earlier version of this hook wrote 77 warnings
+# and DELIVERED NONE OF THEM: stderr from a hook that exits 0 goes to the debug
+# log and is never shown to the model. Every one of those nudges went into a
+# void, and the silence was misread as the model ignoring them. Nothing was
+# ignored, because nothing arrived.
+#
+# exit 2 from PostToolUse is the fix, and it is safe here in a way it would not
+# be on PreToolUse: the Write has ALREADY happened, so exit 2 cannot block it,
+# undo it, or fail it — it is purely after-the-fact feedback. Copy this exit
+# code deliberately when you write your own PostToolUse advisories.
+exit 2
+```
+
+---
+
+## Template: scripts/init-client-log.sh (CLIENT-LOG.md generator)
+
+`Create a project's CLIENT-LOG.md with the four-part entry format pre-seeded, so the first entry has a shape to follow instead of being invented. Idempotent — refuses to overwrite an existing log.`
+
+```bash
+#!/usr/bin/env bash
+# init-client-log.sh — scaffold a project's CLIENT-LOG.md.
+#
+# The format is not decoration. Each of the four parts exists because its
+# absence caused a specific, repeated failure:
+#   - what came in + from whom  -> otherwise "the client said" becomes unattributable
+#   - PROVENANCE                -> a suggestion got built as if it were a spec
+#   - what it CHANGES           -> a logged arrival that nobody could act on
+#   - WHERE WE ARE              -> a fresh session re-derived state from raw history
+#
+# Usage: bash scripts/init-client-log.sh <project-slug> ["Display Name"]
+set -euo pipefail
+
+# NOTE: the default is assigned on its own line, NOT inline as
+# ${ORCHESTRATOR_DIR:-{{project_path}}} — bash stops the parameter expansion at
+# the FIRST closing brace, so that form yields "<path>}}" whenever the env var
+# is set. Verified, not theoretical.
+DEFAULT_ROOT="{{project_path}}"
+ROOT="${ORCHESTRATOR_DIR:-$DEFAULT_ROOT}"
+CLIENTS_SUBDIR="${CLIENT_LOG_ROOT:-data/clients}"
+
+SLUG="${1:-}"
+[ -n "$SLUG" ] || { echo "usage: init-client-log.sh <project-slug> [\"Display Name\"]" >&2; exit 2; }
+
+# The slug is interpolated straight into a path that is then mkdir -p'd, so it is
+# untrusted input to a filesystem write. Whitelist the characters instead of
+# blacklisting "..": a blacklist has to anticipate every encoding, a whitelist
+# only has to be correct once. Without this, a slug of `../../.claude` silently
+# scaffolds a CLIENT-LOG.md outside the clients tree — and the caller is often an
+# agent passing through a project name it read from somewhere else.
+case "$SLUG" in
+  *[!A-Za-z0-9._-]*|.|..|-*|"")
+    echo "init-client-log: refusing slug '$SLUG' — use [A-Za-z0-9._-] only, no path separators." >&2
+    exit 2 ;;
+esac
+case "$SLUG" in *..*)
+    echo "init-client-log: refusing slug '$SLUG' — '..' is not allowed." >&2
+    exit 2 ;;
+esac
+
+NAME="${2:-$SLUG}"
+
+DIR="$ROOT/$CLIENTS_SUBDIR/$SLUG"
+LOG="$DIR/CLIENT-LOG.md"
+
+if [ -f "$LOG" ]; then
+  echo "init-client-log: $LOG already exists — leaving it alone."
+  exit 0
+fi
+
+mkdir -p "$DIR"
+cat > "$LOG" <<EOF
+# CLIENT-LOG — $NAME
+
+Source of truth for this project. Reconcile against this file BEFORE quoting,
+scoping, answering or building. Anything about this project — in EITHER
+direction, including our own instructions, decisions and forwarded documents —
+gets an entry here, not just a file in the folder.
+
+## WHERE WE ARE (pickup)
+
+- **State:** <not started>
+- **Next step:** <the exact next action, specific enough to execute>
+- **Blocked on:** <nothing | who/what>
+
+---
+
+## Entries (newest first)
+
+### $(date -u +%Y-%m-%d) — log created
+
+- **What came in / from whom:** project folder scaffolded.
+- **PROVENANCE:** n/a
+- **What it CHANGES:** nothing yet — this is the container.
+- **WHERE WE ARE:** see the pickup block above.
+
+<!--
+ENTRY TEMPLATE — copy this for each new entry, newest at the top of the list.
+
+### YYYY-MM-DD — <one-line subject>
+
+- **What came in / from whom:** <the message/document and its author>
+- **PROVENANCE:** binding spec | reference | idea-only   <- these are NOT the same
+- **What it CHANGES:** <the concrete effect on the product, not "they sent a doc">
+- **WHERE WE ARE:** <current state + the exact next step>
+-->
+EOF
+
+echo "init-client-log: created $LOG"
+```
+
+---
+
+## Template: scripts/verify-artifact.sh (persisted proof-per-claim)
+
+`On a done/shipped/fixed claim, emit a PERSISTED, reviewable markdown artifact: the verify command(s), their captured output, exit codes, a verdict (PASS / FAIL / UNVERIFIED), and any screenshot/recording paths. Secrets are scrubbed from every recorded field. stdout is ONLY the artifact path, so a caller can capture it and attach it to the reply. Env: VERIFY_ARTIFACT_DIR, VERIFY_ARTIFACT_TIMEOUT, VERIFY_ARTIFACT_MAXLINES.`
+
+**Why an artifact and not just the rule.** "Run a verification command before claiming done" is obeyed exactly as well as it is checked, and the proof is otherwise ephemeral — it scrolls past in the transcript and is gone. When a false-completion happens there is then no durable record of what was actually run or what it returned. Three properties of this artifact are what prose cannot give you: **UNVERIFIED is a first-class verdict** (a manual/visual check with no command recorded is never silently a PASS — absence of evidence is not evidence); the **output is stored, not summarised** ("tests pass" is an assertion, the runner's tail is evidence); and every recorded field is **secret-scrubbed on the way in**, so a token pasted into a claim never lands in a committed-adjacent file.
+
+Verified by execution: PASS, FAIL (exit 1 so callers can branch), UNVERIFIED, the same-timestamp collision guard, and secret scrubbing were each exercised.
+
+```bash
+#!/usr/bin/env bash
+# verify-artifact - artifact-as-proof verification.
+#
+# On a done/shipped/fixed claim, emit a PERSISTED, reviewable artifact: the
+# verify command(s), their captured output, exit codes, a verdict, and any
+# screenshot/recording paths.
+#
+# THE PROBLEM this closes: the completion-verification skill is a GATE - it forces a
+# verification command to run before a completion claim leaves on Telegram, but
+# the proof is EPHEMERAL (it scrolls past in the transcript and is gone). When a
+# false-completion happens, there is no durable record of what was
+# actually run and what it returned. This turns "trust me, it's done" into
+# "here's the persisted proof": a reviewable markdown artifact with the exact
+# verify command(s), their captured output, exit codes, an overall verdict, and
+# any screenshot/recording paths - attach-able to the Telegram reply and
+# linkable from memory.
+#
+# DESIGN (deterministic, zero-LLM, additive, fail-safe):
+#   - `record` runs one or more --cmd verification commands FRESH, captures
+#     stdout+stderr (secret-scrubbed, truncated), records exit code per command,
+#     and computes a VERDICT: PASS iff every command exited 0, else FAIL. An
+#     explicit --verdict overrides (e.g. for a manual/visual check with no cmd).
+#   - Writes data/verify-artifacts/verify-artifact-<UTC-ts>.md and prints the
+#     artifact path on stdout (the ONLY thing on stdout, so callers can capture
+#     it to attach to the reply / link from memory).
+#   - `latest` prints the path of the most recent artifact (for re-attaching).
+#   - `--from-stdin` records ALREADY-captured output for a command WITHOUT
+#     re-running it (the common case: the verify gate already ran the command
+#     this turn and you just want to persist the evidence you already have).
+#
+# SAFETY: this script does NOT relax any gate. The OUTER invocation string
+# (`bash scripts/verify-artifact.sh ... --cmd "<c>"`) still passes through the
+# PreToolUse safety-gate.sh, which inspects the whole command string - so a
+# destructive --cmd is caught by the existing gate exactly as if run directly.
+# Commands run under a timeout; secrets are scrubbed from captured output with
+# the same pattern the audit hooks use.
+#
+# Usage:
+#   verify-artifact.sh record --claim "<claim>" [--project <name>]
+#       [--cmd "<verify command>"]...           # run fresh, capture, score
+#       [--from-stdin "<label>"]                 # record stdin as evidence, no run
+#       [--evidence <path>]...                   # screenshot/recording/log path
+#       [--verdict pass|fail|auto]               # default: auto (from exit codes)
+#       [--note "<free text>"]
+#   verify-artifact.sh latest                    # print newest artifact path
+#   verify-artifact.sh --help
+#
+# Env overrides (tests + tuning):
+#   VERIFY_ARTIFACT_DIR   output dir (default data/verify-artifacts)
+#   VERIFY_ARTIFACT_NOW   ISO8601 'now' + filename ts override (tests)
+#   VERIFY_ARTIFACT_TIMEOUT  per-command timeout seconds (default 120)
+#   VERIFY_ARTIFACT_MAXLINES truncate each capture to last N lines (default 200)
+#
+# Exit codes:
+#   0  artifact written, verdict PASS (or `latest`/`--help` ok)
+#   1  artifact written, verdict FAIL (so callers can branch on the verdict)
+#   2  bad arguments
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || exit 2
+cd "$REPO_ROOT" 2>/dev/null || exit 2
+
+ART_DIR="${VERIFY_ARTIFACT_DIR:-$REPO_ROOT/data/verify-artifacts}"
+TIMEOUT_S="${VERIFY_ARTIFACT_TIMEOUT:-120}"
+MAXLINES="${VERIFY_ARTIFACT_MAXLINES:-200}"
+
+now_iso() {
+  if [ -n "${VERIFY_ARTIFACT_NOW:-}" ]; then printf '%s' "$VERIFY_ARTIFACT_NOW"; else date -u +%Y-%m-%dT%H:%M:%SZ; fi
+}
+now_fname_ts() {
+  # filename-safe stamp; derive from the iso 'now' so tests are deterministic
+  now_iso | tr -d ':' | tr 'T' '-' | sed -E 's/Z$//'
+}
+
+# Same secret-scrub pattern the audit hooks use (audit-log-hook.sh).
+scrub() {
+  sed -E 's/(api[_-]?key|token|password|secret|bearer|authorization)[[:space:]]*[:=][[:space:]]*['\''"]*[^'\''"[:space:]]{8,}/\1=***REDACTED***/Ig'
+}
+
+# Pick a timeout binary if available (macOS may have gtimeout via coreutils);
+# otherwise run without one (the command still runs, just untimed).
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_BIN="gtimeout"
+fi
+
+run_capture() {
+  # $1 = command string. Echoes "<exit_code>\n<captured output>" via two files.
+  local cmd="$1" out rc
+  out="$(
+    if [ -n "$TIMEOUT_BIN" ]; then
+      "$TIMEOUT_BIN" "$TIMEOUT_S" bash -c "$cmd" 2>&1
+    else
+      bash -c "$cmd" 2>&1
+    fi
+  )"
+  rc=$?
+  CAP_RC=$rc
+  CAP_OUT="$out"
+}
+
+cmd_help() {
+  sed -n '1,60p' "${BASH_SOURCE[0]}" | sed -E 's/^# ?//'
+}
+
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+  -h|--help|help) cmd_help; exit 0 ;;
+  latest)
+    # newest artifact by name (ts-sorted); empty string if none.
+    latest="$(ls -1 "$ART_DIR"/verify-artifact-*.md 2>/dev/null | sort | tail -1)"
+    [ -n "$latest" ] && printf '%s\n' "$latest"
+    exit 0
+    ;;
+  record) shift ;;
+  "") echo "error: need a subcommand (record|latest|--help)" >&2; exit 2 ;;
+  *) echo "error: unknown subcommand '$1'" >&2; exit 2 ;;
+esac
+
+# --- parse record args -----------------------------------------------------
+CLAIM=""
+PROJECT=""
+VERDICT="auto"
+NOTE=""
+# parallel arrays of command labels + the captured blocks
+declare -a CMD_LABELS=()
+declare -a CMD_OUTPUTS=()
+declare -a CMD_RCS=()
+declare -a CMD_RAN=()      # "ran" | "stdin"
+declare -a EVIDENCE=()
+ANY_FAIL=0
+HAS_CMD=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --claim)   CLAIM="${2:-}"; shift 2 ;;
+    --project) PROJECT="${2:-}"; shift 2 ;;
+    --verdict) VERDICT="${2:-auto}"; shift 2 ;;
+    --note)    NOTE="${2:-}"; shift 2 ;;
+    --evidence) EVIDENCE+=("${2:-}"); shift 2 ;;
+    --cmd)
+      cmd="${2:-}"; shift 2
+      [ -n "$cmd" ] || continue
+      HAS_CMD=1
+      run_capture "$cmd"
+      capped="$(printf '%s\n' "$CAP_OUT" | tail -n "$MAXLINES" | scrub)"
+      CMD_LABELS+=("$cmd")
+      CMD_OUTPUTS+=("$capped")
+      CMD_RCS+=("$CAP_RC")
+      CMD_RAN+=("ran")
+      [ "$CAP_RC" -ne 0 ] && ANY_FAIL=1
+      ;;
+    --from-stdin)
+      label="${2:-stdin evidence}"; shift 2
+      HAS_CMD=1
+      capped="$(tail -n "$MAXLINES" | scrub)"
+      CMD_LABELS+=("$label")
+      CMD_OUTPUTS+=("$capped")
+      CMD_RCS+=("n/a")
+      CMD_RAN+=("stdin")
+      ;;
+    --help|-h) cmd_help; exit 0 ;;
+    *) echo "error: unknown arg '$1'" >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$CLAIM" ]; then
+  echo "error: record needs --claim \"<claim>\"" >&2
+  exit 2
+fi
+
+# Defence-in-depth: scrub secrets from the human-authored claim/note too, so a
+# token accidentally pasted into the claim never lands in a committed-adjacent
+# artifact (mirrors the audit-hook posture of scrubbing every recorded field).
+CLAIM="$(printf '%s' "$CLAIM" | scrub)"
+[ -n "$NOTE" ] && NOTE="$(printf '%s' "$NOTE" | scrub)"
+
+# --- resolve the verdict ---------------------------------------------------
+# auto: PASS iff at least one command ran AND none failed; if no command ran
+# and no explicit verdict, the verdict is UNVERIFIED (a manual-only artifact
+# must pass --verdict pass|fail explicitly - absence of evidence is never PASS).
+case "$VERDICT" in
+  pass|PASS) FINAL_VERDICT="PASS" ;;
+  fail|FAIL) FINAL_VERDICT="FAIL" ;;
+  auto|AUTO|"")
+    if [ "$HAS_CMD" -eq 1 ] && [ "$ANY_FAIL" -eq 0 ]; then FINAL_VERDICT="PASS"
+    elif [ "$HAS_CMD" -eq 1 ]; then FINAL_VERDICT="FAIL"
+    else FINAL_VERDICT="UNVERIFIED"; fi
+    ;;
+  *) echo "error: --verdict must be pass|fail|auto" >&2; exit 2 ;;
+esac
+
+# --- write the artifact ----------------------------------------------------
+mkdir -p "$ART_DIR" 2>/dev/null || { echo "error: cannot create $ART_DIR" >&2; exit 2; }
+TS_ISO="$(now_iso)"
+TS_F="$(now_fname_ts)"
+OUT_FILE="$ART_DIR/verify-artifact-${TS_F}.md"
+# collision guard (same pinned ts in a test loop): suffix a counter
+if [ -e "$OUT_FILE" ]; then
+  i=1
+  while [ -e "$ART_DIR/verify-artifact-${TS_F}-${i}.md" ]; do i=$((i+1)); done
+  OUT_FILE="$ART_DIR/verify-artifact-${TS_F}-${i}.md"
+fi
+
+PROJECT_DISP="${PROJECT:-$(basename "$REPO_ROOT")}"
+
+case "$FINAL_VERDICT" in
+  PASS) VERDICT_EXPLAIN="every verification command exited 0." ;;
+  FAIL) VERDICT_EXPLAIN="at least one verification command failed (non-zero exit)." ;;
+  *)    VERDICT_EXPLAIN="no command captured; manual/visual evidence only - NOT a pass." ;;
+esac
+
+{
+  echo "---"
+  echo "type: verify-artifact"
+  echo "verdict: ${FINAL_VERDICT}"
+  echo "claim: \"$(printf '%s' "$CLAIM" | sed 's/"/\\"/g')\""
+  echo "project: ${PROJECT_DISP}"
+  echo "generated: ${TS_ISO}"
+  echo "commands: ${#CMD_LABELS[@]}"
+  echo "---"
+  echo
+  echo "# Verify artifact - ${FINAL_VERDICT}"
+  echo
+  echo "**Claim:** ${CLAIM}"
+  echo
+  echo "**Project:** ${PROJECT_DISP} · **When:** ${TS_ISO} (UTC)"
+  echo
+  if [ -n "$NOTE" ]; then
+    echo "**Note:** ${NOTE}"
+    echo
+  fi
+  echo "**Verdict:** \`${FINAL_VERDICT}\` - ${VERDICT_EXPLAIN}"
+  echo
+
+  if [ "${#CMD_LABELS[@]}" -gt 0 ]; then
+    echo "## Evidence (command → output)"
+    echo
+    n=0
+    while [ "$n" -lt "${#CMD_LABELS[@]}" ]; do
+      lbl="$(printf '%s' "${CMD_LABELS[$n]}" | scrub)"
+      rc="${CMD_RCS[$n]}"
+      ran="${CMD_RAN[$n]}"
+      body="${CMD_OUTPUTS[$n]}"
+      if [ "$ran" = "ran" ]; then
+        if [ "$rc" = "0" ]; then status="exit 0 (ok)"; else status="exit ${rc} (FAIL)"; fi
+        echo "### \`${lbl}\`"
+        echo "_${status}_"
+      else
+        echo "### ${lbl}"
+        echo "_captured evidence (not re-run)_"
+      fi
+      echo
+      echo '```'
+      if [ -n "$body" ]; then printf '%s\n' "$body"; else echo "(no output)"; fi
+      echo '```'
+      echo
+      n=$((n+1))
+    done
+  fi
+
+  if [ "${#EVIDENCE[@]}" -gt 0 ]; then
+    echo "## Attached evidence (screenshots / recordings / logs)"
+    echo
+    for e in "${EVIDENCE[@]}"; do
+      [ -n "$e" ] || continue
+      if [ -e "$e" ]; then echo "- \`${e}\` (present)"; else echo "- \`${e}\` (path recorded; not found on disk)"; fi
+    done
+    echo
+  fi
+
+  echo "---"
+  echo "_Generated by \`scripts/verify-artifact.sh\`. Persisted proof for the completion-verification gate; attach this path to the reply and link it from the relevant memory._"
+} > "$OUT_FILE"
+
+# stdout = ONLY the artifact path (so callers can capture it cleanly).
+printf '%s\n' "$OUT_FILE"
+
+[ "$FINAL_VERDICT" = "FAIL" ] && exit 1
+exit 0
+```
 
 ---

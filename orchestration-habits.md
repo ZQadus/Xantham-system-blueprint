@@ -243,7 +243,7 @@ habits_version: 1.0.0
 # install-xantham-habits.sh's SKILL_FILES array pulls those five directly.
 # The other three (orchestration, reflection, safety) have no fixed public
 # body -- they are generated fresh per-install by the full setup wizard
-# (Q14+ in xantham-system-v35.md, template bodies in xantham-templates-v32.md)
+# (Q14+ in xantham-system-v36.md, template bodies in xantham-templates-v32.md)
 # because their content depends on your chosen orchestrator name and mode.
 skills:
   - name: "{{orchestrator_lower}}-orchestration"
