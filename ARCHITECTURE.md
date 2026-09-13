@@ -123,7 +123,7 @@ The hook layer is the security boundary, see `SECURITY.md` for the full threat m
 - **Three buckets.** Hard-blocked (no approval possible, hook refuses regardless of state), approval-gated (blocked until exact command is written to `data/approved.txt` with a 30-day TTL), allowed-with-audit (passes through but logged).
 - **Sync rule.** Project-level gate (`.claude/hooks/safety-gate.sh`) and global gate (`~/.claude/hooks/safety-gate.sh`) must stay in sync. `scripts/sync-safety-gates.sh` is the canonical sync tool. Drift means a destructive command might slip through in another project.
 - **Banned-language gate.** Independent of the safety gate. Fires on Write/Edit and on Telegram replies. Blocks medical-claim words, marketing superlatives, and AI-tells from leaking into committed content. Allowlist exceptions at `Library/app-store-compliance/banned-language-allowlist.md`.
-- **Reactive model-defense layer (v31.1).** Beside the three-bucket gate sit a fabricated-completion gate (warn-only reply-verify hook), a non-killing loop detector, transcript grounding for quotes/attributions, and a pre-merge deletion guard. Every defense is a hook or a deterministic script rather than a prompt rule. Full detail in `SECURITY.md` and the E5.1 section of `xantham-system-v35.md`.
+- **Reactive model-defense layer (v31.1).** Beside the three-bucket gate sit a fabricated-completion gate (warn-only reply-verify hook), a non-killing loop detector, transcript grounding for quotes/attributions, and a pre-merge deletion guard. Every defense is a hook or a deterministic script rather than a prompt rule. Full detail in `SECURITY.md` and the E5.1 section of `xantham-system-v36.md`.
 
 ## Where the code lives
 
