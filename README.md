@@ -177,7 +177,7 @@ This system runs shell commands, edits files, and pushes commits on your behalf.
    cd Xantham-system-blueprint
    ```
 
-2. **Pick Simple mode for the first install.** Roughly a third of the surface area of Advanced and still a fully usable system. Upgrade later with `bash scripts/upgrade-<your-orchestrator-name>.sh` once you have audited what's actually running on your machine.
+2. **Pick Simple mode for the first install.** Roughly a third of the surface area of Advanced and still a fully usable system. Upgrade later by handing your orchestrator the updated repo and asking it to upgrade, once you have audited what's actually running on your machine.
 
 3. **Do not hand the orchestrator credentials you can't rotate fast.** Telegram bot tokens are revocable from `@BotFather` in seconds. Treat anything else with care. Project-level deploy keys, database passwords, OAuth credentials should be ones you can rotate in minutes if something goes wrong.
 
@@ -420,7 +420,7 @@ Every install command in the blueprint has both Mac and Windows versions side by
 
 ## Versioning
 
-The repo name doesn't include a version. The files inside do. Commit history shows version progression. If you forked at v30 and v31 ships, run `bash scripts/upgrade-<your-orchestrator-name>.sh` from your installed orchestrator (the wizard names the upgrade script after the orchestrator you picked at Q1, e.g. `upgrade-myagent.sh` if you named yours MyAgent, `upgrade-jarvis.sh` if you named yours Jarvis). The customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
+The repo name doesn't include a version. The files inside do. Commit history shows version progression. If you forked at v30 and v31 ships, pull a fresh copy of this repo (`git clone`, or `git pull --ff-only` on a clone you already have) and ask your orchestrator to upgrade you against it. There is deliberately no self-fetching upgrade script — nothing pulls a `-latest` file over the network. The customisation-preserving merge walkthrough applies upstream changes without overwriting your additions.
 
 ## What's new in v36
 

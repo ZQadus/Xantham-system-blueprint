@@ -3111,96 +3111,37 @@ Restart Claude Code for it to pick up. From then on every session shows the cont
 
 **Windows note:** The script is bash, so on Windows it runs via Git Bash or WSL. The `~/.claude/` path resolves to `%USERPROFILE%\.claude\` under Git Bash. If `bash` is not in PATH from Claude Code's perspective on Windows, swap `bash ~/.claude/statusline-command.sh` for the WSL absolute path (`wsl bash /mnt/c/Users/<you>/.claude/statusline-command.sh`) or convert the script to PowerShell.
 
-### `scripts/upgrade-{{orchestrator_lower}}.sh` - the update path with customisation preservation
+### Upgrading: hand the repo to Claude
 
-When a user has been on an older blueprint (say v29) and the upstream version (v31) ships, they may have ALSO added their own hooks, skills, scripts, and CLAUDE.md sections in the meantime. A naive overwrite would blow those away. This script does the opposite: it diffs three ways and asks the user before touching anything customised.
+There is deliberately **no self-fetching upgrade command**. No script fetches a `-latest` file,
+and there is no `scripts/upgrade-{{orchestrator_lower}}.sh` to run. The upgrade is something you
+hand to Claude, so you see the diff before anything is applied rather than discovering upstream
+changes after they have landed.
+
+To upgrade, give Claude the updated repo and ask it to upgrade. A fresh clone, or a `git pull`
+of a clone you already have, is the whole mechanism:
 
 ```bash
-#!/usr/bin/env bash
-# upgrade-{{orchestrator_lower}}.sh - bump from current blueprint version to latest, preserving
-# user customisations. Three-way merge: user's files vs old-version baseline vs
-# new blueprint. Files are bucketed pristine / customised / user-added.
-#
-# - Pristine (matches old baseline) -> safely overwritten with new version
-# - Customised (modified from baseline) -> user picks: keep / take new / merge
-# - User-added (not in any baseline) -> never touched
-#
-# Hands off the actual interactive walk to Claude Code since the merge needs
-# judgement. This script just gathers the inputs.
-
-set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-
-if [ ! -f .{{orchestrator_lower}}-blueprint-version ]; then
-  echo "No .{{orchestrator_lower}}-blueprint-version found. Are you in a Xantham System repo?" >&2
-  exit 1
-fi
-
-CURRENT=$(grep '^blueprint_version:' .{{orchestrator_lower}}-blueprint-version | awk '{print $2}')
-echo "Current blueprint version: $CURRENT"
-
-# Fetch latest from canonical source
-LATEST_URL="https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/xantham-system-latest.md"
-echo "Fetching latest blueprint from: $LATEST_URL"
-curl -fsSL "$LATEST_URL" -o "${TMPDIR:-/tmp}/latest-blueprint.md"
-LATEST=$(grep '^# Xantham System - Blueprint' "${TMPDIR:-/tmp}/latest-blueprint.md" | sed 's/.*Blueprint //')
-echo "Latest available: $LATEST"
-
-if [ "$CURRENT" = "$LATEST" ]; then
-  echo "You are on the latest version. Nothing to do."
-  exit 0
-fi
-
-# Locate or fetch the OLD-version blueprint as the baseline for diffing
-OLD_BASELINE=""
-if [ -f "blueprints/archive/xantham-system-${CURRENT}.md" ]; then
-  OLD_BASELINE="blueprints/archive/xantham-system-${CURRENT}.md"
-elif [ -f "blueprints/xantham-system-${CURRENT}.md" ]; then
-  OLD_BASELINE="blueprints/xantham-system-${CURRENT}.md"
-else
-  ARCHIVE_URL="https://raw.githubusercontent.com/ZQadus/Xantham-system-blueprint/main/blueprints/archive/xantham-system-${CURRENT}.md"
-  echo "Old baseline not found locally. Fetching from: $ARCHIVE_URL"
-  curl -fsSL "$ARCHIVE_URL" -o "${TMPDIR:-/tmp}/old-baseline.md" || {
-    echo "Could not fetch old baseline. Will proceed without it (every modified file will be flagged for review)." >&2
-  }
-  [ -f "${TMPDIR:-/tmp}/old-baseline.md" ] && OLD_BASELINE="${TMPDIR:-/tmp}/old-baseline.md"
-fi
-
-echo ""
-echo "Now running the three-way upgrade walkthrough via Claude Code."
-echo ""
-echo "Open a fresh Claude Code session at $REPO_ROOT and paste:"
-echo ""
-echo "---"
-echo "Read ${TMPDIR:-/tmp}/latest-blueprint.md (target version $LATEST)."
-echo "Read $OLD_BASELINE (my current baseline, $CURRENT)."
-echo "Walk the customisation-preserving upgrade per the public blueprint section"
-echo "'Upgrade walkthrough (customisation-preserving)'."
-echo ""
-echo "Steps:"
-echo "1. For every file the new blueprint defines, three-way diff:"
-echo "   - my current copy"
-echo "   - the old-baseline copy ($OLD_BASELINE)"
-echo "   - the new copy (${TMPDIR:-/tmp}/latest-blueprint.md)"
-echo "2. Bucket each: pristine, customised, user-added."
-echo "3. Show me the per-bucket summary before touching anything."
-echo "4. For pristine files, ask once: OK to bulk-upgrade all? yes/no."
-echo "5. For customised files, walk one at a time: keep mine, take new, or show diff first."
-echo "6. For user-added files, list them and confirm I know they will be preserved."
-echo "7. Apply only the changes I approved."
-echo "8. Update .{{orchestrator_lower}}-blueprint-version to $LATEST."
-echo "9. Regenerate SETUP-CHECKLIST.md so I can verify the upgrade landed."
-echo "10. Print a summary of what changed + what was preserved."
-echo "---"
+git clone https://github.com/ZQadus/Xantham-system-blueprint.git
+# already have it?  git -C Xantham-system-blueprint pull --ff-only
 ```
 
-The blueprint section that Claude Code reads when it executes the walkthrough is below.
+Then, from a Claude Code session at your own project root:
+
+> I'm on v34. The updated blueprint is at `<path-to-clone>/xantham-system-v36.md`.
+> Upgrade me, walking the customisation-preserving protocol in the blueprint.
+
+Claude reads your `.{{orchestrator_lower}}-blueprint-version` marker, diffs your tree against the
+new blueprint, and walks the protocol below — bucketing every file as pristine, customised, or
+user-added, and asking before it touches anything you have changed. Recent blueprint versions ship
+in the same repo (the root `xantham-system-v3N.md` files, plus older ones under `archive/` and in
+git history), so the three-way diff has a baseline to work from. If your version predates the
+oldest copy in the repo, say so — the walk falls back to flagging every modified file for review
+rather than guessing which of your changes were upstream.
 
 ### Upgrade walkthrough (customisation-preserving)
 
-When a user runs `bash scripts/upgrade-{{orchestrator_lower}}.sh` and pastes the resulting prompt into a fresh Claude Code session, the agent walks this protocol:
+When the user hands Claude the updated repo and asks it to upgrade, the agent walks this protocol:
 
 **Phase 1 - Inventory.** Catalog every file the new blueprint defines. For each, record three checksums:
 - the user's current file (if it exists)
@@ -3403,22 +3344,21 @@ After install, the wizard writes all of these files. **Gate the SETUP-CHECKLIST 
 4. `FIRST-WEEK.md` (daily-ops guide)
 5. `PITFALLS.md` (anti-patterns)
 6. `MEMORY-HYGIENE.md` (memory rules)
-7. `scripts/upgrade-{{orchestrator_lower}}.sh` (future bump path)
-8. `regenerate-setup-checklist.sh` under `scripts/` (regen helper)
+7. `regenerate-setup-checklist.sh` under `scripts/` (regen helper)
 
 **Project root - on partial failure (any Generation Order step 1-18 errored):**
 - `DIAGNOSTIC-CHECKLIST.md` REPLACES `SETUP-CHECKLIST.md`. Lists every failed step with retry hints.
-- Items 2-8 above are still written (the diagnostic doesn't block the rest of the docs).
+- Items 2-7 above are still written (the diagnostic doesn't block the rest of the docs).
 
 **User scope (one-time, applies to every Claude Code session on this machine):**
-9. `~/.claude/statusline-command.sh` (the bash script that renders the statusline)
-10. `~/.claude/settings.json` updated to add the `statusLine` block pointing at that script
+8. `~/.claude/statusline-command.sh` (the bash script that renders the statusline)
+9. `~/.claude/settings.json` updated to add the `statusLine` block pointing at that script
 
 Plus update the CLAUDE.md template with the unified First-contact behaviour block (covers both terminal-first and Telegram-first arrivals via a single `data/runtime/first-contact.flag`) + the SETUP-CHECKLIST first-session-check block (both already shown).
 
 Then the wizard tells the user:
 
-> 🔹 Setup complete. Six files written to your project root + two scripts under scripts/ + the statusline at ~/.claude/. SETUP-CHECKLIST.md is the one to read first. USER-GUIDE.md is your day-1 cheat sheet (includes when to start a fresh session vs resume, what the context % means). BACKUP-AND-RECOVERY.md tells you what to back up. FIRST-WEEK.md is your week-1 ops guide. PITFALLS.md is what NOT to do. MEMORY-HYGIENE.md is the memory rules. Close this session, run `<agent-name>` from your terminal, and the first session will walk SETUP-CHECKLIST.md before any real work. You'll see the new statusline at the bottom showing your context window - watch it as you work, especially past 50%.
+> 🔹 Setup complete. Six files written to your project root + one script under scripts/ + the statusline at ~/.claude/. SETUP-CHECKLIST.md is the one to read first. USER-GUIDE.md is your day-1 cheat sheet (includes when to start a fresh session vs resume, what the context % means). BACKUP-AND-RECOVERY.md tells you what to back up. FIRST-WEEK.md is your week-1 ops guide. PITFALLS.md is what NOT to do. MEMORY-HYGIENE.md is the memory rules. Close this session, run `<agent-name>` from your terminal, and the first session will walk SETUP-CHECKLIST.md before any real work. You'll see the new statusline at the bottom showing your context window - watch it as you work, especially past 50%.
 
 Or, if any step failed:
 
